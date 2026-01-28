@@ -1,0 +1,58 @@
+name: Update ChEBI Mappings
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 1,15 * *"  # 1st and 15th of each month
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pysec2pri
+        run: |
+          pip install -e .
+
+      - name: Check for new release
+        id: check
+        run: |
+          pysec2pri check-release chebi > release_info.txt
+          cat release_info.txt
+          if grep -q "New release available" release_info.txt; then
+            echo "NEW_RELEASE=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download and process
+        if: steps.check.outputs.NEW_RELEASE == 'true'
+        run: |
+          mkdir -p data/chebi
+          pysec2pri download chebi -o data/chebi/
+          pysec2pri chebi data/chebi/chebi_3_stars.sdf -o output/chebi_sec2pri.sssom.tsv
+
+      - name: Compare with previous
+        if: steps.check.outputs.NEW_RELEASE == 'true'
+        continue-on-error: true
+        run: |
+          if [ -f "data/chebi_sec2pri.sssom.tsv" ]; then
+            pysec2pri diff data/chebi_sec2pri.sssom.tsv output/chebi_sec2pri.sssom.tsv -d chebi -o diff_report.txt
+            cat diff_report.txt
+          fi
+
+      - name: Upload artifacts
+        if: steps.check.outputs.NEW_RELEASE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chebi-mappings
+          path: output/

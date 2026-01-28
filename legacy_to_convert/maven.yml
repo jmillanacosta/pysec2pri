@@ -1,0 +1,36 @@
+name: Java CI with Maven
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'java/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'java/**'
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'adopt'
+        java-version: '11'
+
+    - name: Build with Maven
+      run: |
+        cd java
+        mvn clean install assembly:single
+
+
+

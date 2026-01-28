@@ -1,0 +1,180 @@
+# Workflow for downloading and saving Wikidata secondary2primary mappings
+name: Check and test Wikidata updates
+
+on:
+  workflow_dispatch:
+  pull_request: # tests whether it is working on PR
+   paths:
+   - '.github/workflows/wikidata.yml'
+  schedule:
+    - cron: "0 0 1,15 * *"  # Run the workflow on the 1st and 15th day of each month
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  issues: write
+  
+jobs:
+  check_new_data:
+    runs-on: ubuntu-latest
+    name: Check the date of the latest data
+    outputs:
+      DATE_NEW: ${{ steps.check_download.outputs.DATE_NEW }}
+      DATE_OLD: ${{ steps.check_download.outputs.DATE_OLD }}
+      NEW_RELEASE: ${{ steps.check_download.outputs.NEW_RELEASE }}
+    steps:
+      # step 1: check the release date for the latest Wikidata files
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Check for new Wikidata files
+        id: check_download
+        run: |
+          ##Register the date from the previous Wikidata download config file  ##Fake date for now, since the data has not been uploaded yet.
+          date_old=$date #-d "yesterday" +"%Y-%m-%d"
+          ##Execute query for metabdata (TBA)
+          
+          ##Fake date for now, since the data has not been uploaded yet.
+          date_new=$date #-d "today" +"%Y-%m-%d"
+
+          #Store dates to output
+          echo "DATE_OLD=$date_old" >> $GITHUB_OUTPUT
+          echo "DATE_NEW=$date_new" >> $GITHUB_OUTPUT
+          ##Compare the dates and set variable if date_new is more recent
+          timestamp1=$(date -d "$date_new" +%s)
+          timestamp2=$(date -d "$date_old" +%s)
+          if [ "$timestamp1" -gt "$timestamp2" ]; then
+            echo 'New release available', "$release"
+            echo "NEW_RELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo 'No new release available'
+          fi
+          echo "Date of latest release: $date_new"
+          echo "Date of release of the current version: $date_old"
+
+          
+  test_new_data_processing:
+    name: Processing new data and check updates
+    needs: check_new_data
+    env:
+      DATE_OLD: ${{ needs.check_new_data.outputs.DATE_OLD }}
+      DATE_NEW: ${{ needs.check_new_data.outputs.DATE_NEW }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      # step 2: download the recent data 
+      - name: Download the recent data
+        run: |
+          ##Store outputs from previous job in environment variables
+          #echo "$DATE_NEW=$DATE_NEW" >> $GITHUB_ENV
+          ##Add folder to store data in
+          mkdir datasources/wikidata/recentData/   
+          
+          echo 'Accessing the Wikidata data'          
+          ## Download outdated IDs for chemicals qLever Style
+          curl -H "Accept: text/tab-separated-values" --data-urlencode query@datasources/wikidata/queries/chemicalAllRedirects.rq -G https://qlever.dev/api/wikidata -o datasources/wikidata/recentData/metabolites.tsv
+          ## Download outdated IDs for genes qLever Style
+          curl -H "Accept: text/tab-separated-values" --data-urlencode query@datasources/wikidata/queries/geneHumanAllRedirects.rq -G https://qlever.dev/api/wikidata -o datasources/wikidata/recentData/gene.tsv
+          ## Download outdated IDs for proteins qLever Style
+          curl -H "Accept: text/tab-separated-values" --data-urlencode query@datasources/wikidata/queries/proteinHumanAllRedirects.rq -G https://qlever.dev/api/wikidata -o datasources/wikidata/recentData/protein.tsv
+         
+          
+          ##Check new data, fail job if query timeout has occured
+          fail_file=''
+          for File in *.tsv ##Only for tsv files
+          do
+            if grep -q TimeoutException "$File"; then
+              echo "Query Timeout occurred for file: " "$File" 
+              echo "Wikidata data will not be updated"
+              head -n 20 "$File" 
+              #echo "DOWNLOAD_FILE=true" >>$GITHUB_ENV
+              fail_file="${fail_file} $File"
+            else
+              echo "No Query Timeout detected for file: " "$File" 
+            fi
+          done
+         
+          ## Set prefix to Wikidata for renaming new data files
+          prefix=$(basename "Wikidata") 
+
+          ## Data processing
+          cd datasources/wikidata/recentData
+          for f in *.tsv ##Only for tsv files
+          do
+            ##Find all new data files | Remove the IRIs (prefix) | remove the IRIs (suffix) | remove the '?' in the column headers | remove language annotation | save the file with new name
+            cat "$f" | sed 's/<http:\/\/www.wikidata.org\/entity\///g' | sed 's/[>]//g' | sed '1s/\?//g' | sed 's/@en//g' > "${prefix}_secID2priID_$f"
+            ##Split first column with primary IDs in new file (same processing as previous step)
+            awk '{print $1}' "$f" |  sed 's/<http:\/\/www.wikidata.org\/entity\///g' | sed 's/[>]//g' | sed '1s/\?//g'  | uniq > "${prefix}_priIDs_$f"
+            rm "$f"
+          done
+          ls
+          pwd
+          cd ..
+          ls
+          outputDir="datasources/wikidata/recentData/"
+          #mv * "$outputDir"
+
+      # step 3: not needed, no R or Java script to preprocess the data.
+      
+      # step 4: compare the new and old data and upload as artifact
+      - name: 'Upload processed data as artifacts all'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wikidata_processed
+          path: datasources/wikidata/recentData/
+          
+      - name: 'Upload processed data as artifacts metabolites all mappings'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_secID2priID_metabolites.tsv
+          path: datasources/wikidata/recentData/Wikidata_secID2priID_metabolites.tsv
+
+      - name: 'Upload processed data as artifacts metabolites primary IDs'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_priIDs_metabolites.tsv
+          path: datasources/wikidata/recentData/Wikidata_priIDs_metabolites.tsv
+
+      - name: 'Upload processed data as artifacts protein'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_secID2priID_protein.tsv
+          path: datasources/wikidata/recentData/Wikidata_secID2priID_protein.tsv
+
+      - name: 'Upload processed data as artifacts protein primary IDs'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_priIDs_protein.tsv
+          path: datasources/wikidata/recentData/Wikidata_priIDs_protein.tsv
+          
+      - name: 'Upload processed data as artifacts gene'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_secID2priID_gene.tsv
+          path: datasources/wikidata/recentData/Wikidata_secID2priID_gene.tsv
+
+      - name: 'Upload processed data as artifacts gene primary IDs'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wikidata_priIDs_gene.tsv
+          path: datasources/wikidata/recentData/Wikidata_priIDs_gene.tsv
+
+      - name: Create or update issue
+        if: env.COUNT != 0
+        id: create_issue
+        uses: JasonEtco/create-an-issue@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE: "Wikidata"
+        with:
+          filename: .github/ISSUE_TEMPLATE/ISSUE_UPDATE.md
+          update_existing: true
+        
+      - name: Bump issue with comment
+        if: env.COUNT != 0
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ steps.create_issue.outputs.number }}
+          body: |
+            Bump issue to notify about the changes in data.

@@ -1,0 +1,23 @@
+SELECT DISTINCT ?primaryID ?secondaryID ?name ?synonym
+WHERE
+{
+  { ?primaryID p:P31/ps:P31 wd:Q8054 }
+  UNION
+  { ?primaryID p:P279/ps:P279 wd:Q8054 }
+
+  ?primaryID wdt:P703 wd:Q15978631.
+
+  OPTIONAL { ?secondaryID owl:sameAs ?primaryID. }
+
+  OPTIONAL {
+    ?primaryID rdfs:label ?name_lit .
+    FILTER(LANG(?name_lit) = "en")
+    BIND(STR(?name_lit) AS ?name)
+  }
+
+  OPTIONAL {
+    ?primaryID skos:altLabel ?syn_lit .
+    FILTER(LANG(?syn_lit) = "en")
+    BIND(STR(?syn_lit) AS ?synonym)
+  }
+}

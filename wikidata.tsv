@@ -1,0 +1,12 @@
+# curie_map:
+#   IAO: http://purl.obolibrary.org/obo/IAO_
+#   oboInOwl: http://www.geneontology.org/formats/oboInOwl#
+#   semapv: https://w3id.org/semapv/vocab/
+#   skos: http://www.w3.org/2004/02/skos/core#
+#   sssom: https://w3id.org/sssom/
+#   wikidata: http://www.wikidata.org/entity/
+# license: https://creativecommons.org/publicdomain/zero/1.0/
+# mapping_date: '2026-01-28'
+# mapping_set_id: https://w3id.org/sssom/mappings
+# mapping_set_version: '2026-01-28'
+

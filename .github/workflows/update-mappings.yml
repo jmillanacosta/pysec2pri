@@ -1,0 +1,140 @@
+name: Update All Datasources
+
+on:
+  workflow_dispatch:
+    inputs:
+      datasource:
+        description: 'Datasource to update (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - chebi
+          - hmdb
+          - hgnc
+          - ncbi
+          - uniprot
+          - wikidata
+  schedule:
+    - cron: "0 0 1,15 * *"  # 1st and 15th of each month
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  chebi:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'chebi'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process ChEBI
+        run: |
+          mkdir -p output
+          pysec2pri download chebi -o data/chebi/
+          pysec2pri chebi data/chebi/chebi_3_stars.sdf -o output/chebi_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chebi-mappings
+          path: output/
+
+  hmdb:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'hmdb'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process HMDB
+        run: |
+          mkdir -p output
+          pysec2pri download hmdb -o data/hmdb/
+          pysec2pri hmdb data/hmdb/hmdb_metabolites.zip -o output/hmdb_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hmdb-mappings
+          path: output/
+
+  hgnc:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'hgnc'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process HGNC
+        run: |
+          mkdir -p output
+          pysec2pri download hgnc -o data/hgnc/
+          pysec2pri hgnc data/hgnc/withdrawn.tsv -c data/hgnc/hgnc_complete_set.txt -o output/hgnc_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hgnc-mappings
+          path: output/
+
+  ncbi:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'ncbi'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process NCBI
+        run: |
+          mkdir -p output
+          pysec2pri download ncbi -o data/ncbi/
+          pysec2pri ncbi data/ncbi/gene_history data/ncbi/gene_info -o output/ncbi_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-mappings
+          path: output/
+
+  uniprot:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'uniprot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process UniProt
+        run: |
+          mkdir -p output
+          pysec2pri download uniprot -o data/uniprot/
+          pysec2pri uniprot data/uniprot/sec_ac.txt --delac data/uniprot/delac_sp.txt -o output/uniprot_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uniprot-mappings
+          path: output/
+
+  wikidata:
+    if: github.event.inputs.datasource == 'all' || github.event.inputs.datasource == 'wikidata'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Process Wikidata
+        run: |
+          mkdir -p output
+          pysec2pri wikidata -t metabolites -o output/wikidata_metabolites_sec2pri.sssom.tsv
+          pysec2pri wikidata -t genes -o output/wikidata_genes_sec2pri.sssom.tsv
+          pysec2pri wikidata -t proteins -o output/wikidata_proteins_sec2pri.sssom.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wikidata-mappings
+          path: output/
