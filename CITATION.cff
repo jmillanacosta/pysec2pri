@@ -3,6 +3,11 @@ message: "If you use this software, please cite it as below."
 title: "pySec2Pri"
 authors:
   - name: "Javier Millán Acosta"
-version: 0.0.1-dev
+    orcid: "https://orcid.org/0000-0002-4166-7093"
+  - name: "Tooba Abbassi-Daloii"
+    orcid: "https://orcid.org/0000-0002-4904-3269"
+  - name: "Denise Slenter"
+    orcid: "https://orcid.org/0000-0001-8449-1318"
+version: 0.0.1
 doi:
 url: "https://github.com/sec2pri/pysec2pri"
