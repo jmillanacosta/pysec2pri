@@ -5,22 +5,20 @@ from __future__ import annotations
 import io
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
-import regex as re
 
 import httpx
 import polars as pl
+import regex as re
 
 from pysec2pri.constants import WIKIDATA
-from pysec2pri.models import IdMapping, MappingCardinality, MappingSet
+from pysec2pri.models import (
+    IdMapping,
+    MappingCardinality,
+    MappingSet,
+    SymbolMapping,
+)
 from pysec2pri.parsers.base import BaseParser
-from pysec2pri.queries import get_column_mapping, get_query
-
-if TYPE_CHECKING:
-    pass
-
-__all__ = ["WikidataParser", "parse_wikidata", "query_wikidata"]
-
+from pysec2pri.queries import WIKIDATA_QUERIES, WIKIDATA_TEST_QUERIES, get_column_mapping
 
 # QLever endpoint for Wikidata (much faster than official endpoint)
 QLEVER_ENDPOINT = "https://qlever.dev/api/wikidata"
@@ -33,8 +31,7 @@ def query_wikidata(
 ) -> pl.DataFrame:
     """Execute a SPARQL query against Wikidata/QLever endpoint.
 
-    The QLever endpoint is used by default as it's much faster than the
-    official Wikidata SPARQL endpoint for large queries.
+    The QLever endpoint is used by default.
 
     Args:
         query: The SPARQL query to execute.
@@ -112,6 +109,7 @@ class WikidataParser(BaseParser):
         show_progress: bool = True,
         entity_type: str = "metabolites",
         endpoint: str | None = None,
+        test_subset: bool = False,
     ):
         """Initialize the Wikidata parser.
 
@@ -120,85 +118,57 @@ class WikidataParser(BaseParser):
             show_progress: Whether to show progress.
             entity_type: Type of entities to query (metabolites/genes/proteins).
             endpoint: Optional custom SPARQL endpoint.
+            test_subset: Whether to use test queries (LIMIT 10)
         """
         super().__init__(version=version, show_progress=show_progress)
         self.entity_type = entity_type
         self.endpoint = endpoint
+        self.test_subset = test_subset
 
-    def parse(self, input_path: Path | str | None = None) -> MappingSet:
+    def parse(
+        self,
+        input_path: Path | str | None = None,
+        entity_type: str = "metabolites",
+        version: str | None = None,
+        endpoint: str | None = None,
+        show_progress: bool = True,
+    ) -> MappingSet:
         """Query Wikidata and return a MappingSet.
 
-        Note: input_path is ignored for Wikidata (uses SPARQL queries).
+        If test_subset is True, use the test query for the entity type.
 
         Args:
-            input_path: Ignored for Wikidata.
+            entity_type: Type of entities (metabolites, genes, proteins).
+            input_path: None, from endpoint.
+            entity_type: Query to be selected.
+            version: Version string for the mappings.
+            endpoint: Optional custom SPARQL endpoint.
+            show_progress: Whether to show progress bars.
+            test_subset: Whether to use the test queries (LIMIT 10).
 
         Returns:
-            A MappingSet containing Wikidata redirect mappings.
+            MappingSet containing Wikidata redirect mappings.
         """
-        # Get the appropriate query for the entity type
-        query = get_query(self.entity_type)
-        col_map = get_column_mapping(self.entity_type)
-
-        df = query_wikidata(query, endpoint=self.endpoint)
-
-        mappings: list[IdMapping] = []
+        if self.test_subset:
+            query_str = WIKIDATA_TEST_QUERIES.get(self.entity_type)
+            if query_str is None:
+                available = list(WIKIDATA_TEST_QUERIES.keys())
+                raise ValueError(
+                    f"Unknown entity type for test subset: {self.entity_type}. "
+                    f"Available: {available}"
+                )
+        else:
+            query_str = WIKIDATA_QUERIES.get(self.entity_type)
+            if query_str is None:
+                available = list(WIKIDATA_QUERIES.keys())
+                raise ValueError(f"Unknown entity type: {self.entity_type}. Available: {available}")
+        df = query_wikidata(query_str, endpoint=self.endpoint)
 
         if df.is_empty():
-            version = self.version or date.today().isoformat()
-            return MappingSet(
-                datasource_name=self.datasource_name,
-                version=version,
-                mappings=mappings,
-                curie_map={WIKIDATA.prefix: WIKIDATA.curie_base_url},
-            )
+            return self._empty_mappingset()
 
-        # Get actual column names from the mapping
-        primary_id_col = col_map["primary_id"]
-        secondary_id_col = col_map["secondary_id"]
-        primary_label_col = col_map.get("primary_label")
-        secondary_label_col = col_map.get("secondary_label")
-
-        # Process results using Polars DataFrame
-        rows = df.iter_rows(named=True)
-        if self.show_progress:
-            from tqdm import tqdm
-
-            rows = tqdm(
-                rows, total=len(df), desc="Processing Wikidata results"
-            )
-
-        for row in rows:
-            primary_id = row.get(primary_id_col, "")
-            secondary_id = row.get(secondary_id_col, "")
-            primary_label = row.get(primary_label_col) if primary_label_col else None
-            secondary_label = (
-                row.get(secondary_label_col) if secondary_label_col else None
-            )
-
-            # Create mapping for redirect (secondary -> primary ID mapping)
-            if secondary_id and primary_id and secondary_id != primary_id:
-                mapping = IdMapping(
-                    primary_id=primary_id,
-                    secondary_id=secondary_id,
-                    primary_label=primary_label,
-                    secondary_label=secondary_label,
-                    mapping_cardinality=MappingCardinality.ONE_TO_ONE,
-                    source_url=self.default_source_url,
-                )
-                mappings.append(mapping)
-
-            # Create mapping for synonyms (altLabel -> label mapping)
-            elif secondary_label and primary_label and secondary_label != primary_label:
-                mapping = IdMapping(
-                    primary_id=primary_id,
-                    secondary_id=None,
-                    primary_label=primary_label,
-                    secondary_label=secondary_label,
-                    source_url=self.default_source_url,
-                )
-                mappings.append(mapping)
-
+        df = self._normalize_ids(df)
+        mappings = self._build_mappings(df)
         version = self.version or date.today().isoformat()
 
         return MappingSet(
@@ -206,7 +176,97 @@ class WikidataParser(BaseParser):
             version=version,
             mappings=mappings,
             curie_map={WIKIDATA.prefix: WIKIDATA.curie_base_url},
+            comment=self._build_comment(f"Wikidata mappings for entity type: {self.entity_type}"),
         )
+
+    def _empty_mappingset(self) -> MappingSet:
+        version = self.version or date.today().isoformat()
+        return MappingSet(
+            datasource_name=self.datasource_name,
+            version=version,
+            mappings=[],
+            curie_map={WIKIDATA.prefix: WIKIDATA.curie_base_url},
+            comment=self._build_comment("No mappings found for this entity type."),
+        )
+
+    def _normalize_ids(self, df: pl.DataFrame) -> pl.DataFrame:
+        col_map = get_column_mapping(self.entity_type)
+        return df.with_columns(
+            [
+                pl.col(col_map["subject_id"])
+                .map_elements(self.normalize_subject_id)
+                .alias("subject_id_norm"),
+                pl.col(col_map["object_id"])
+                .map_elements(self.normalize_subject_id)
+                .alias("object_id_norm"),
+            ]
+        )
+
+    def _build_mappings(self, df: pl.DataFrame) -> list[IdMapping | SymbolMapping]:
+        col_map = get_column_mapping(self.entity_type)
+        primary_label_col = col_map.get("primary_label")
+        secondary_label_col = col_map.get("secondary_label")
+
+        # Redirect mappings - filter for valid id pairs
+        redirect_mask = (
+            (pl.col("object_id_norm").is_not_null())
+            & (pl.col("subject_id_norm").is_not_null())
+            & (pl.col("object_id_norm") != pl.col("subject_id_norm"))
+        )
+        redirects_df = df.filter(redirect_mask)
+        id_pairs = list(
+            zip(
+                redirects_df["object_id_norm"].to_list(),
+                redirects_df["subject_id_norm"].to_list(),
+                strict=False,
+            )
+        )
+        cardinality_map = self.compute_cardinality(id_pairs)
+
+        mappings: list[IdMapping | SymbolMapping] = []
+        for row in redirects_df.iter_rows(named=True):
+            # Get labels if columns exist
+            subj_label = row.get(primary_label_col) if primary_label_col else None
+            obj_label = row.get(secondary_label_col) if secondary_label_col else None
+            mappings.append(
+                IdMapping(
+                    subject_id=row["subject_id_norm"],
+                    object_id=row["object_id_norm"],
+                    subject_label=subj_label,
+                    object_label=obj_label,
+                    mapping_cardinality=cardinality_map.get(
+                        (row["object_id_norm"], row["subject_id_norm"]),
+                        MappingCardinality.ONE_TO_ONE,
+                    ),
+                    predicate_id="oboInOwl:consider",
+                    source_url=self.default_source_url,
+                    comment=self._build_comment("Wikidata redirect mapping."),
+                )
+            )
+
+        # Synonym mappings (symbols without ID redirects)
+        if primary_label_col and secondary_label_col:
+            synonym_mask = (
+                (pl.col("subject_id_norm").is_not_null())
+                & (pl.col(primary_label_col).is_not_null())
+                & (pl.col(secondary_label_col).is_not_null())
+                & (pl.col(primary_label_col) != pl.col(secondary_label_col))
+            )
+            synonyms_df = df.filter(synonym_mask)
+            for row in synonyms_df.iter_rows(named=True):
+                mappings.append(
+                    SymbolMapping(
+                        subject_id=row["subject_id_norm"],
+                        object_id=row.get("object_id_norm"),
+                        subject_label=row[primary_label_col],
+                        object_label=row[secondary_label_col],
+                        predicate_id="oboInOwl:consider",
+                        source_url=self.default_source_url,
+                        comment=self._build_comment("Wikidata symbol/synonym mapping."),
+                    )
+                )
+
+        return mappings
 
 
 def parse_wikidata(
@@ -214,6 +274,7 @@ def parse_wikidata(
     version: str | None = None,
     endpoint: str | None = None,
     show_progress: bool = True,
+    test_subset: bool = False,
 ) -> MappingSet:
     """Parse Wikidata redirects for a specific entity type.
 
@@ -222,6 +283,7 @@ def parse_wikidata(
         version: Version string for the mappings.
         endpoint: Optional custom SPARQL endpoint.
         show_progress: Whether to show progress bars.
+        test_subset: whether to use test queries (LIMIT 10)
 
     Returns:
         MappingSet containing Wikidata redirect mappings.
@@ -231,10 +293,10 @@ def parse_wikidata(
         >>> mappings = parse_wikidata("metabolites")
         >>> print(f"Found {len(mappings)} redirects")
     """
-    parser = WikidataParser(
+    return WikidataParser(
         version=version,
         show_progress=show_progress,
         entity_type=entity_type,
         endpoint=endpoint,
-    )
-    return parser.parse(None)
+        test_subset=test_subset,
+    ).parse()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 import re
-from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 import polars as pl
@@ -43,7 +43,7 @@ class UniProtParser(BaseParser):
 
     def parse(
         self,
-        input_path: Path | str,
+        input_path: Path | str | None = None,
         delac_path: Path | str | None = None,
         fasta_path: Path | str | None = None,
     ) -> MappingSet:
@@ -57,18 +57,16 @@ class UniProtParser(BaseParser):
         Returns:
             MappingSet with UniProt identifier mappings.
         """
-        input_path = Path(input_path)
-
         mappings: list[UniProtMapping] = []
 
         # Parse secondary accessions file
-        sec_mappings = self._parse_sec_ac(input_path)
-        mappings.extend(sec_mappings)
+        if input_path is not None:
+            sec_mappings = self._parse_sec_ac(Path(input_path))
+            mappings.extend(sec_mappings)
 
         # Parse deleted accessions if provided
-        if delac_path:
-            delac_path = Path(delac_path)
-            del_mappings = self._parse_delac(delac_path)
+        if delac_path is not None:
+            del_mappings = self._parse_delac(Path(delac_path))
             mappings.extend(del_mappings)
 
         mapping_set = MappingSet(
@@ -89,117 +87,153 @@ class UniProtParser(BaseParser):
 
         return mapping_set
 
-    def _parse_sec_ac(self, file_path: Path) -> list[UniProtMapping]:
-        """Parse the sec_ac.txt file using Polars.
-
-        The sec_ac.txt format has header lines followed by whitespace-separated
-        SECONDARY PRIMARY pairs.
-        """
-        # Read lines and find where data starts
-        with file_path.open("r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-        # Find data start (skip header lines)
-        data_lines = []
-        in_data = False
+    def _iter_sec_ac_data_lines(self, file_path: Path) -> Iterable[str]:
+        """Yield data lines from sec_ac.txt, skipping headers and invalid lines."""
         pattern = re.compile(r"^[A-Z0-9]+\s+[A-Z0-9]+$")
 
-        for line in lines:
-            line = line.strip()
-            if not in_data:
-                if pattern.match(line):
-                    in_data = True
-                else:
-                    continue
-            if not line or line.startswith("_"):
-                continue
-            data_lines.append(line)
+        with file_path.open("r", encoding="utf-8") as f:
+            in_data = False
+            for raw_line in f:
+                line = raw_line.strip()
+                if not in_data:
+                    if pattern.match(line):
+                        in_data = True
+                    else:
+                        continue
 
-        # Parse with Polars - create DataFrame from parsed data
+                if not line or line.startswith("_"):
+                    continue
+
+                yield line
+
+    def _sec_ac_lines_to_df(self, lines: Iterable[str]) -> pl.DataFrame:
+        """Convert parsed sec_ac lines into a Polars DataFrame."""
         rows = []
-        for line in data_lines:
+        for line in lines:
             parts = line.split()
             if len(parts) >= 2:
-                rows.append({"secondary_id": parts[0], "primary_id": parts[1]})
+                rows.append(
+                    {
+                        "object_id": parts[0],
+                        "subject_id": parts[1],
+                    }
+                )
 
         if not rows:
-            return []
+            return pl.DataFrame(schema={"object_id": pl.Utf8, "subject_id": pl.Utf8})
 
-        df = pl.DataFrame(rows)
+        return pl.DataFrame(rows)
 
-        # Compute cardinality using Polars aggregations
+    def _compute_cardinality_maps(self, df: pl.DataFrame) -> tuple[dict[str, int], dict[str, int]]:
+        """Compute primary and secondary occurrence counts."""
         primary_counts = (
-            df.group_by("primary_id")
-            .agg(pl.len().alias("count"))
-            .to_dict(as_series=False)
+            df.group_by("subject_id").agg(pl.len().alias("count")).to_dict(as_series=False)
         )
-        primary_count_map = dict(
-            zip(primary_counts["primary_id"], primary_counts["count"])
-        )
+        primary_map = dict(zip(primary_counts["subject_id"], primary_counts["count"], strict=False))
 
         secondary_counts = (
-            df.group_by("secondary_id")
-            .agg(pl.len().alias("count"))
-            .to_dict(as_series=False)
+            df.group_by("object_id").agg(pl.len().alias("count")).to_dict(as_series=False)
         )
-        secondary_count_map = dict(
-            zip(secondary_counts["secondary_id"], secondary_counts["count"])
+        secondary_map = dict(
+            zip(
+                secondary_counts["object_id"],
+                secondary_counts["count"],
+                strict=False,
+            )
         )
 
-        # Create mappings
-        mappings: list[UniProtMapping] = []
+        return primary_map, secondary_map
 
+    def _infer_cardinality(
+        self,
+        subject_id: str,
+        object_id: str,
+        primary_count_map: dict[str, int],
+        secondary_count_map: dict[str, int],
+    ) -> MappingCardinality:
+        pri_count = primary_count_map.get(subject_id, 1)
+        sec_count = secondary_count_map.get(object_id, 1)
+
+        if pri_count > 1 and sec_count > 1:
+            return MappingCardinality.MANY_TO_MANY
+        if pri_count > 1:
+            return MappingCardinality.MANY_TO_ONE
+        if sec_count > 1:
+            return MappingCardinality.ONE_TO_MANY
+        return MappingCardinality.ONE_TO_ONE
+
+    def _iter_uniprot_mappings(
+        self,
+        df: pl.DataFrame,
+        primary_count_map: dict[str, int],
+        secondary_count_map: dict[str, int],
+    ) -> Iterable[UniProtMapping]:
         rows_iter = df.iter_rows(named=True)
+
         if self.show_progress:
             rows_iter = tqdm(
-                rows_iter, total=len(df), desc="Creating UniProt mappings"
+                rows_iter,
+                total=len(df),
+                desc="Creating UniProt mappings",
             )
 
         for row in rows_iter:
-            primary_id = row["primary_id"]
-            secondary_id = row["secondary_id"]
+            subject_id = row["subject_id"]
+            object_id = row["object_id"]
 
-            # Compute cardinality
-            pri_count = primary_count_map.get(primary_id, 1)
-            sec_count = secondary_count_map.get(secondary_id, 1)
+            cardinality = self._infer_cardinality(
+                subject_id,
+                object_id,
+                primary_count_map,
+                secondary_count_map,
+            )
 
-            if pri_count > 1 and sec_count > 1:
-                cardinality = MappingCardinality.MANY_TO_MANY
-            elif pri_count > 1:
-                cardinality = MappingCardinality.MANY_TO_ONE
-            elif sec_count > 1:
-                cardinality = MappingCardinality.ONE_TO_MANY
-            else:
-                cardinality = MappingCardinality.ONE_TO_ONE
+            # Use IAO:0100001 (term replaced by) for clear replacements
+            predicate = "IAO:0100001"
+            if cardinality in (
+                MappingCardinality.ONE_TO_MANY,
+                MappingCardinality.MANY_TO_MANY,
+                MappingCardinality.ONE_TO_ZERO,
+            ):
+                predicate = "oboInOwl:consider"
 
             comment = get_comment_for_cardinality(cardinality)
             if self.version:
                 comment += f" Release: {self.version}."
 
-            mapping = UniProtMapping(
-                primary_id=primary_id,
-                secondary_id=secondary_id,
+            yield UniProtMapping(
+                subject_id=subject_id,
+                predicate_id=predicate,
+                object_id=object_id,
                 mapping_cardinality=cardinality,
                 comment=comment,
                 source_url=self.sec_ac_url,
             )
-            mappings.append(mapping)
 
-        return mappings
+    def _parse_sec_ac(self, file_path: Path) -> list[UniProtMapping]:
+        """Parse the sec_ac.txt file and return UniProt mappings."""
+        lines = self._iter_sec_ac_data_lines(file_path)
+        df = self._sec_ac_lines_to_df(lines)
 
-    def _parse_delac(self, file_path: Path) -> list[UniProtMapping]:
-        """Parse the delac_sp.txt file for deleted/withdrawn accessions."""
-        # Read lines and find where data starts
+        if df.is_empty():
+            return []
+
+        primary_map, secondary_map = self._compute_cardinality_maps(df)
+
+        return list(self._iter_uniprot_mappings(df, primary_map, secondary_map))
+
+    def _iter_delac_accessions(self, file_path: Path) -> Iterable[str]:
+        """Yield valid deleted/withdrawn accession IDs from delac_sp.txt."""
+        accession_pattern = re.compile(r"^[A-Z0-9]{6,10}$")
+
         with file_path.open("r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        # Extract valid accession IDs (skip header/footer)
-        accession_pattern = re.compile(r"^[A-Z0-9]{6,10}$")
-        accessions = []
-
         in_data = False
-        for i, line in enumerate(lines):
-            line = line.strip()
+        footer_start = max(len(lines) - 4, 0)
+
+        for i, raw_line in enumerate(lines):
+            line = raw_line.strip()
 
             if not in_data:
                 if accession_pattern.match(line):
@@ -210,61 +244,73 @@ class UniProtParser(BaseParser):
             if not line:
                 continue
 
-            # Skip footer lines
-            if i >= len(lines) - 4:
+            if i >= footer_start:
                 continue
 
             if accession_pattern.match(line):
-                accessions.append(line)
+                yield line
 
-        # Create mappings using Polars DataFrame
-        if not accessions:
-            return []
+    def _delac_accessions_to_df(self, accessions: Iterable[str]) -> pl.DataFrame:
+        """Convert deleted accession IDs into a Polars DataFrame."""
+        acc_list = list(accessions)
+        if not acc_list:
+            return pl.DataFrame(schema={"object_id": pl.Utf8})
 
-        df = pl.DataFrame({"secondary_id": accessions})
+        return pl.DataFrame({"object_id": acc_list})
 
-        mappings: list[UniProtMapping] = []
-
+    def _iter_deleted_mappings(
+        self,
+        df: pl.DataFrame,
+    ) -> Iterable[UniProtMapping]:
         rows_iter = df.iter_rows(named=True)
+
         if self.show_progress:
             rows_iter = tqdm(
-                rows_iter, total=len(df), desc="Creating deleted mappings"
+                rows_iter,
+                total=len(df),
+                desc="Creating deleted mappings",
             )
 
         for row in rows_iter:
-            secondary_id = row["secondary_id"]
+            object_id = row["object_id"]
 
             comment = "ID (subject) withdrawn/deprecated."
             if self.version:
                 comment += f" Release: {self.version}."
 
-            mapping = UniProtMapping(
-                primary_id=self.normalize_primary_id(None),
-                secondary_id=secondary_id,
+            yield UniProtMapping(
+                subject_id=self.normalize_subject_id(None),
+                predicate_id="oboInOwl:consider",
+                object_id=object_id,
                 mapping_cardinality=MappingCardinality.ONE_TO_ZERO,
                 comment=comment,
                 source_url=self.delac_url,
             )
-            mappings.append(mapping)
 
-        return mappings
+    def _parse_delac(self, file_path: Path) -> list[UniProtMapping]:
+        """Parse the delac_sp.txt file for deleted/withdrawn accessions."""
+        accessions = self._iter_delac_accessions(file_path)
+        df = self._delac_accessions_to_df(accessions)
 
-    def _parse_fasta_primary_ids(self, file_path: Path) -> list[str]:
+        if df.is_empty():
+            return []
+
+        return list(self._iter_deleted_mappings(df))
+
+    def _parse_fasta_subject_ids(self, file_path: Path) -> list[str]:
         """Extract primary IDs from a UniProt FASTA file."""
-        primary_ids: list[str] = []
+        subject_ids: list[str] = []
         pattern = re.compile(r"^>.*?\|(.+?)\|")
 
         opener = gzip.open if file_path.suffix == ".gz" else open
-        mode = "rt" if file_path.suffix == ".gz" else "r"
-
-        with opener(file_path, mode, encoding="utf-8") as f:
+        # Always open in text mode for str lines
+        with opener(file_path, "rt", encoding="utf-8") as f:
             for line in f:
                 if line.startswith(">"):
                     match = pattern.match(line)
                     if match:
-                        primary_ids.append(match.group(1))
-
-        return primary_ids
+                        subject_ids.append(match.group(1))
+        return subject_ids
 
 
 __all__ = ["UniProtParser"]
