@@ -1,6 +1,3 @@
-# Doc8 configuration to ignore specific warnings
-[tool.doc8]
-ignore = ["D000", "D001"]
 [build-system]
 requires = ["uv_build>=0.9.6,<1.0"]
 build-backend = "uv_build"
