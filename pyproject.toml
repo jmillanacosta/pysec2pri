@@ -1,3 +1,6 @@
+# Doc8 configuration to ignore specific warnings
+[tool.doc8]
+ignore = ["D000", "D001"]
 [build-system]
 requires = ["uv_build>=0.9.6,<1.0"]
 build-backend = "uv_build"
@@ -59,8 +62,14 @@ dependencies = [
     "sssom>=0.4.0", # SSSOM standard support
     "curies>=0.7.0", # CURIE handling
     "httpx>=0.24.0", # HTTP client for downloads
-    "polars>=0.20.0", # Fast dataframe operations for diffs,
+    "polars>=0.20.0", # Fast dataframe operations for diffs
     "regex==2026.1.15",
+    "lxml", # XML parsing for HMDB
+    "pandas", # DataFrame support for some workflows
+    "numpy", # Required by pandas and polars
+    "rdkit", # Chemistry toolkit for SDF parsing
+    "polars-runtime-32", # Polars runtime for 32-bit systems
+
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
@@ -68,6 +77,11 @@ dependencies = [
 tests = [
     "pytest",
     "coverage[toml]",
+    "lxml",
+    "pandas",
+    "numpy",
+    "rdkit",
+    "polars-runtime-32",
 ]
 docs = [
     "sphinx>=8,<9",
