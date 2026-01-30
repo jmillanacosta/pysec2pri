@@ -2,13 +2,15 @@ name: Create Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
 
 permissions:
   contents: write
+
+env:
+  PYTHON_VERSION: "3.10"
+  PACKAGE_NAME: pysec2pri
 
 jobs:
   release:
@@ -16,31 +18,53 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Get version from version.py
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+
+      - name: Sync dependencies (uv)
+        run: |
+          uv sync --frozen
+
+      - name: Get version from package
         id: get_version
         run: |
-          VERSION=$(python3 -c "import sys; sys.path.insert(0, 'src'); from pysec2pri.version import VERSION; print(VERSION)")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=$(uv run python -c "from ${PACKAGE_NAME}.version import VERSION; print(VERSION)")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release with auto notes
+      - name: Validate tag matches VERSION
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          EXPECTED="v${{ steps.get_version.outputs.version }}"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "Tag ($TAG) does not match VERSION ($EXPECTED)"
+            exit 1
+          fi
+
+      - name: Check if release already exists
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
-          if gh release view v${{ steps.get_version.outputs.version }} --repo ${{ github.repository }} > /dev/null 2>&1; then
-            echo "Release tag v${{ steps.get_version.outputs.version }} already exists. Skipping release creation."
+          if gh release view "$GITHUB_REF_NAME" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists. Exiting."
             exit 0
           fi
-          gh release create v${{ steps.get_version.outputs.version }} \
-            --title "v${{ steps.get_version.outputs.version }}" \
-            --repo ${{ github.repository }} \
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --repo "${{ github.repository }}" \
             --generate-notes
