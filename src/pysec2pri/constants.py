@@ -64,7 +64,7 @@ CHEBI = DatasourceConfig(
         OutputType.NAME2SYNONYM,
     ),
     download_urls={
-        "sdf": "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz",  # noqa: E501
+        "sdf": "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz",
     },
     archive_url="http://ftp.ebi.ac.uk/pub/databases/chebi/archive/",
     id_pattern=r"^\d+$",
@@ -82,7 +82,7 @@ HMDB = DatasourceConfig(
         OutputType.NAME2SYNONYM,
     ),
     download_urls={
-        "metabolites": "http://www.hmdb.ca/system/downloads/current/hmdb_metabolites.zip",  # noqa: E501
+        "metabolites": "http://www.hmdb.ca/system/downloads/current/hmdb_metabolites.zip",
     },
     id_pattern=r"^HMDB\d+$",
 )
@@ -99,7 +99,7 @@ HGNC = DatasourceConfig(
         OutputType.SYMBOL2PREV,
     ),
     download_urls={  # DELETE
-        "complete": "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/hgnc_complete_set.txt",  # noqa: E501
+        "complete": "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/hgnc_complete_set.txt",
         "withdrawn": "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/withdrawn.tsv",  # DELETE # noqa: E501
     },
     archive_url="https://www.genenames.org/download/archive/quarterly/tsv/",
@@ -135,10 +135,10 @@ UNIPROT = DatasourceConfig(
         OutputType.SEC2PRI,
     ),
     download_urls={
-        "secondary": "https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/docs/sec_ac.txt",  # noqa: E501
-        "deleted": "https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/docs/delac_sp.txt",  # noqa: E501
+        "secondary": "https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/docs/sec_ac.txt",
+        "deleted": "https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/docs/delac_sp.txt",
     },
-    archive_url="https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/",  # noqa: E501
+    archive_url="https://ftp.ebi.ac.uk/pub/databases/uniprot/current_release/knowledgebase/complete/",
     id_pattern=r"^[A-Z][A-Z0-9]{5}$|^[A-Z][A-Z0-9]{9}$",
 )
 

@@ -11,9 +11,9 @@ import logging
 import sys
 
 __all__ = [
+    "LOG_LEVELS",
     "logger",
     "set_log_level",
-    "LOG_LEVELS",
 ]
 
 # Package logger
@@ -54,15 +54,12 @@ def set_log_level(level: str | int) -> None:
     Example:
         >>> from pysec2pri.logging import set_log_level
         >>> set_log_level("warning")  # Show warnings and above
-        >>> set_log_level("debug")    # Show all messages
+        >>> set_log_level("debug")  # Show all messages
     """
     if isinstance(level, str):
         level_int = LOG_LEVELS.get(level.lower())
         if level_int is None:
-            raise ValueError(
-                f"Unknown log level: {level}. "
-                f"Available: {list(LOG_LEVELS.keys())}"
-            )
+            raise ValueError(f"Unknown log level: {level}. Available: {list(LOG_LEVELS.keys())}")
         logger.setLevel(level_int)
     else:
         logger.setLevel(level)

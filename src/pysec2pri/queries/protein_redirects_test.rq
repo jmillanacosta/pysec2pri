@@ -28,3 +28,4 @@ WHERE
     BIND(STR(?syn_lit) AS ?synonym)
   }
 }
+LIMIT 10

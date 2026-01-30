@@ -1,0 +1,3 @@
+#tax_id	GeneID	Symbol	LocusTag	Synonyms	dbXrefs	chromosome	map_location	description	type_of_gene	Symbol_from_nomenclature_authority	Full_name_from_nomenclature_authority	Nomenclature_status	Other_designations	Modification_date	Feature_type
+9606	1001	GENE1	-	ALT_SYM1|ALT_SYM2	MIM:100001	1	1p36.33	gene description 1	protein-coding	GENE1	gene full name 1	O	-	20230101	-
+9606	1002	GENE2	-	ALT_SYM3	MIM:100002	2	2q37.3	gene description 2	protein-coding	GENE2	gene full name 2	O	-	20230101	-

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hmdb xmlns="http://www.hmdb.ca">
+  <metabolite>
+    <accession>HMDB0000001</accession>
+    <name>1-Methylhistidine</name>
+    <secondary_accessions>
+      <accession>HMDB00001</accession>
+      <accession>HMDB0001001</accession>
+    </secondary_accessions>
+    <synonyms>
+      <synonym>1-MHis</synonym>
+      <synonym>L-1-Methylhistidine</synonym>
+    </synonyms>
+  </metabolite>
+  <metabolite>
+    <accession>HMDB0000002</accession>
+    <name>1,3-Diaminopropane</name>
+    <secondary_accessions>
+      <accession>HMDB00002</accession>
+    </secondary_accessions>
+    <synonyms>
+      <synonym>DAP</synonym>
+    </synonyms>
+  </metabolite>
+  <metabolite>
+    <accession>HMDB0000003</accession>
+    <name>2-Ketobutyric acid</name>
+    <secondary_accessions>
+    </secondary_accessions>
+    <synonyms>
+      <synonym>Alpha-ketobutyric acid</synonym>
+    </synonyms>
+  </metabolite>
+</hmdb>

@@ -15,8 +15,8 @@ from pysec2pri.parsers.wikidata import WikidataParser, parse_wikidata
 __all__ = [
     "BaseParser",
     "ChEBIParser",
-    "HMDBParser",
     "HGNCParser",
+    "HMDBParser",
     "NCBIParser",
     "UniProtParser",
     "WikidataParser",

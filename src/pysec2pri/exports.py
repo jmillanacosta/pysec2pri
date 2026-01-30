@@ -10,21 +10,27 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pysec2pri.constants import (
+    DatasourceConfig,
+    OutputType,
+    get_datasource_config,
+    get_output_filename,
+)
 from pysec2pri.models import BaseMapping
 
 if TYPE_CHECKING:
     from pysec2pri.models import MappingSet
 
 __all__ = [
+    "write_name2synonym",
+    # Multi-output helper
+    "write_outputs",
+    "write_sec2pri",
     # SSSOM output
     "write_sssom",
     # Legacy output formats
-    "write_primary_ids",
-    "write_sec2pri",
-    "write_name2synonym",
+    "write_subject_ids",
     "write_symbol2prev",
-    # Multi-output helper
-    "write_outputs",
 ]
 
 
@@ -34,7 +40,7 @@ __all__ = [
 
 
 def write_sssom(
-    mapping_set: "MappingSet",
+    mapping_set: MappingSet,
     output_path: Path | str,
     mapping_date: str | None = None,
 ) -> None:
@@ -46,21 +52,14 @@ def write_sssom(
         mapping_set: The pysec2pri MappingSet to write.
         output_path: Path to the output file.
         mapping_date: Date string (YYYY-MM-DD). Defaults to today.
-
-    Example:
-        >>> from pysec2pri import parse_chebi
-        >>> from pysec2pri.exports import write_sssom
-        >>> mapping_set = parse_chebi("ChEBI_complete_3star.sdf")
-        >>> write_sssom(mapping_set, "chebi_mappings.sssom.tsv")
     """
-    # Import here to avoid circular imports
-    from pysec2pri.api import to_sssom_dataframe
+    # Avoid circular imports
     from sssom import write_tsv
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    msdf = to_sssom_dataframe(mapping_set, mapping_date)
+    msdf = mapping_set.to_sssom_dataframe(mapping_date)
 
     with output_path.open("w", encoding="utf-8") as f:
         write_tsv(msdf, f)
@@ -71,8 +70,8 @@ def write_sssom(
 # =============================================================================
 
 
-def write_primary_ids(
-    mapping_set: "MappingSet",
+def write_subject_ids(
+    mapping_set: MappingSet,
     output_path: Path | str,
 ) -> None:
     """Write primary IDs to a TSV file (legacy format).
@@ -91,20 +90,16 @@ def write_primary_ids(
     seen: set[str] = set()
     rows: list[dict[str, str]] = []
     for m in mapping_set.mappings:
-        if (m.primary_id not in seen
-                and m.primary_id != BaseMapping.WITHDRAWN_SENTINEL):
-            seen.add(m.primary_id)
+        if m.subject_id not in seen and m.subject_id != BaseMapping.withdrawn_entry:
+            seen.add(m.subject_id)
             legacy = m.to_legacy_dict()
-            row = {"primaryID": legacy["primaryID"]}
-            # Get symbol/label from legacy dict
-            if "primarySymbol" in legacy and legacy["primarySymbol"]:
-                row["primarySymbol"] = legacy["primarySymbol"]
-            elif "primaryLabel" in legacy and legacy["primaryLabel"]:
-                row["primarySymbol"] = legacy["primaryLabel"]
+            primary_id = legacy["primaryID"] if legacy["primaryID"] is not None else ""
+            symbol = legacy.get("primarySymbol") or legacy.get("primaryLabel") or ""
+            row: dict[str, str] = {"primaryID": primary_id, "primarySymbol": symbol}
             rows.append(row)
 
-    # Determine columns
-    has_symbol = any("primarySymbol" in r for r in rows)
+    # Determine columns - check if any row has non-empty symbol
+    has_symbol = any(r.get("primarySymbol") for r in rows)
     columns = ["primaryID", "primarySymbol"] if has_symbol else ["primaryID"]
 
     with output_path.open("w", encoding="utf-8") as f:
@@ -115,7 +110,7 @@ def write_primary_ids(
 
 
 def write_sec2pri(
-    mapping_set: "MappingSet",
+    mapping_set: MappingSet,
     output_path: Path | str,
 ) -> None:
     """Write secondary to primary ID mappings to a TSV file (legacy format).
@@ -132,8 +127,11 @@ def write_sec2pri(
     rows: list[dict[str, str]] = []
     has_symbol = False
     for m in mapping_set.mappings:
-        row = m.to_legacy_dict()
-        if "primarySymbol" in row:
+        legacy = m.to_legacy_dict()
+        # Ensure all values are str, never None
+        row = {k: (v if v is not None else "") for k, v in legacy.items()}
+        # Check if any symbol data is present (non-empty)
+        if row.get("primarySymbol") or row.get("secondarySymbol"):
             has_symbol = True
         rows.append(row)
 
@@ -167,7 +165,7 @@ def write_sec2pri(
 
 
 def write_name2synonym(
-    mapping_set: "MappingSet",
+    mapping_set: MappingSet,
     output_path: Path | str,
 ) -> None:
     """Write name to synonym mappings to a TSV file (legacy format).
@@ -187,14 +185,16 @@ def write_name2synonym(
     for m in mapping_set.mappings:
         legacy = m.to_legacy_dict()
         # Get name and synonym from label fields
-        name = legacy.get("primaryLabel", "")
-        synonym = legacy.get("secondaryLabel", "")
+        name = legacy.get("primaryLabel") or ""
+        synonym = legacy.get("secondaryLabel") or ""
         if name or synonym:
-            rows.append({
-                "primaryID": legacy["primaryID"],
-                "name": name,
-                "synonym": synonym,
-            })
+            rows.append(
+                {
+                    "primaryID": legacy["primaryID"] if legacy["primaryID"] is not None else "",
+                    "name": name,
+                    "synonym": synonym,
+                }
+            )
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
@@ -204,7 +204,7 @@ def write_name2synonym(
 
 
 def write_symbol2prev(
-    mapping_set: "MappingSet",
+    mapping_set: MappingSet,
     output_path: Path | str,
 ) -> None:
     """Write symbol to alias/previous symbol mappings (legacy format).
@@ -231,18 +231,21 @@ def write_symbol2prev(
 
     for m in mapping_set.mappings:
         legacy = m.to_legacy_dict()
-        if "primarySymbol" in legacy:
-            rows.append({
-                "primaryID": legacy["primaryID"],
-                "primarySymbol": legacy["primarySymbol"],
-                "secondarySymbol": legacy["secondarySymbol"],
-                "predicateID": legacy["predicateID"],
-                "mapping_cardinality_sec2pri": legacy[
-                    "mapping_cardinality_sec2pri"
-                ],
-                "comment": legacy["comment"],
-                "source": legacy["source"],
-            })
+        # Only include rows that have symbol data (non-empty)
+        if legacy.get("primarySymbol") or legacy.get("secondarySymbol"):
+            rows.append(
+                {
+                    "primaryID": legacy["primaryID"] if legacy["primaryID"] is not None else "",
+                    "primarySymbol": legacy.get("primarySymbol") or "",
+                    "secondarySymbol": legacy.get("secondarySymbol") or "",
+                    "predicateID": (
+                        legacy["predicateID"] if legacy["predicateID"] is not None else ""
+                    ),
+                    "mapping_cardinality_sec2pri": legacy.get("mapping_cardinality_sec2pri") or "",
+                    "comment": legacy.get("comment") or "",
+                    "source": legacy.get("source") or "",
+                }
+            )
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
@@ -256,85 +259,167 @@ def write_symbol2prev(
 # =============================================================================
 
 
+def resolve_output_types(
+    *,
+    output_types: list[str] | None,
+    config: DatasourceConfig | None,
+) -> list[OutputType]:
+    """Resolve requested output types into concrete OutputType values.
+
+    If output_types is None, defaults to all outputs available for the
+    datasource config. If no config is available, defaults to SSSOM only.
+
+    String values are resolved first by enum value, then by case-insensitive
+    enum name match. Unknown values are silently dropped.
+
+    Args:
+        output_types: User-requested output type identifiers, or None.
+        config: Datasource configuration object, or None.
+
+    Returns:
+        List of resolved OutputType values, filtered to those supported
+        by the datasource if a config is provided.
+    """
+    if output_types is None:
+        if config:
+            return list(config.available_outputs)
+        return [OutputType.SSSOM]
+
+    resolved: list[OutputType] = []
+
+    for ot_name in output_types:
+        try:
+            resolved.append(OutputType(ot_name))
+            continue
+        except ValueError:
+            pass
+
+        for ot in OutputType:
+            if ot.name.lower() == ot_name.lower():
+                resolved.append(ot)
+                break
+
+    if config:
+        resolved = [t for t in resolved if t in config.available_outputs]
+
+    return resolved
+
+
+def write_output(
+    *,
+    mapping_set: MappingSet,
+    output_type: str,
+    output_path: Path,
+    mapping_date: str | None,
+) -> None:
+    """Write a single output file for a specific output type.
+
+    Dispatches to the correct writer implementation based on output_type.
+    Raises if an unsupported output type is provided.
+
+    Args:
+        mapping_set: MappingSet to serialize.
+        output_type: OutputType specifying which output to write.
+        output_path: Destination file path.
+        mapping_date: Optional mapping date for formats that require it.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If output_type is not handled explicitly.
+    """
+    if output_type == OutputType.SSSOM:
+        write_sssom(mapping_set, output_path, mapping_date=mapping_date)
+    elif output_type == OutputType.PRIMARY_IDS:
+        write_subject_ids(mapping_set, output_path)
+    elif output_type == OutputType.SEC2PRI:
+        write_sec2pri(mapping_set, output_path)
+    elif output_type == OutputType.NAME2SYNONYM:
+        write_name2synonym(mapping_set, output_path)
+    elif output_type == OutputType.SYMBOL2PREV:
+        write_symbol2prev(mapping_set, output_path)
+    else:
+        raise ValueError(f"Unhandled output type: {output_type}")
+
+
+def resolve_output_path(
+    *,
+    output_dir: Path,
+    datasource_name: str,
+    output_type: OutputType,
+    config: DatasourceConfig,
+) -> Path:
+    """Determine the filesystem path for a given output type.
+
+    Uses datasource configuration to generate filenames when available.
+    Falls back to a default naming scheme otherwise.
+
+    Args:
+        output_dir: Directory where outputs are written.
+        datasource_name: Datasource name used for fallback filenames.
+        output_type: OutputType being written.
+        config: Datasource configuration object, or None.
+
+    Returns:
+        Full Path to the output file.
+    """
+    if config:
+        filename = get_output_filename(config, output_type)
+    else:
+        filename = f"{datasource_name}_{output_type.value}.tsv"
+
+    return output_dir / filename
+
+
 def write_outputs(
-    mapping_set: "MappingSet",
+    mapping_set: MappingSet,
     output_dir: Path | str,
     output_types: list[str] | None = None,
     datasource_name: str | None = None,
     mapping_date: str | None = None,
 ) -> dict[str, Path]:
-    """Write multiple output files based on requested output types.
+    """Write one or more output files for a MappingSet.
 
     Args:
-        mapping_set: The pysec2pri MappingSet to write.
+        mapping_set: The MappingSet to write.
         output_dir: Directory to write output files to.
-        output_types: List of output type names to generate.
-            If None, generates all available outputs for the datasource.
-        datasource_name: Name of the datasource (for filename generation).
-            If not provided, uses mapping_set.datasource_name.
-        mapping_date: Date string for SSSOM output.
+        output_types: Optional list of output type identifiers.
+        datasource_name: Optional datasource name override.
+        mapping_date: Optional mapping date string for outputs that require it.
 
     Returns:
-        Dictionary mapping output type names to their file paths.
+        Dictionary mapping output type values to their written file paths.
     """
-    from pysec2pri.constants import (
-        OutputType,
-        get_datasource_config,
-        get_output_filename,
-    )
-
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ds_name = datasource_name or mapping_set.datasource_name
-
     config = get_datasource_config(ds_name)
+    if config is None:
+        raise ValueError(f"No datasource config found for '{ds_name}'")
 
-    # Determine which outputs to generate
-    if output_types is None:
-        # Default to all available outputs for this datasource
-        if config:
-            types_to_write = list(config.available_outputs)
-        else:
-            types_to_write = [OutputType.SSSOM]
-    else:
-        # Parse the requested output types
-        types_to_write = []
-        for ot_name in output_types:
-            try:
-                types_to_write.append(OutputType(ot_name))
-            except ValueError:
-                # Try to match by name
-                for ot in OutputType:
-                    if ot.name.lower() == ot_name.lower():
-                        types_to_write.append(ot)
-                        break
-
-    # Filter to only available outputs for this datasource
-    if config:
-        types_to_write = [
-            t for t in types_to_write if t in config.available_outputs
-        ]
+    types_to_write = resolve_output_types(
+        output_types=output_types,
+        config=config,
+    )
 
     written_files: dict[str, Path] = {}
 
     for output_type in types_to_write:
-        if config:
-            filename = get_output_filename(config, output_type)
-        else:
-            filename = f"{ds_name}_{output_type.value}.tsv"
-        output_path = output_dir / filename
+        output_path = resolve_output_path(
+            output_dir=output_dir,
+            datasource_name=ds_name,
+            output_type=output_type,
+            config=config,
+        )
 
-        if output_type == OutputType.SSSOM:
-            write_sssom(mapping_set, output_path, mapping_date=mapping_date)
-        elif output_type == OutputType.PRIMARY_IDS:
-            write_primary_ids(mapping_set, output_path)
-        elif output_type == OutputType.SEC2PRI:
-            write_sec2pri(mapping_set, output_path)
-        elif output_type == OutputType.NAME2SYNONYM:
-            write_name2synonym(mapping_set, output_path)
-        elif output_type == OutputType.SYMBOL2PREV:
-            write_symbol2prev(mapping_set, output_path)
+        write_output(
+            mapping_set=mapping_set,
+            output_type=output_type,
+            output_path=output_path,
+            mapping_date=mapping_date,
+        )
 
         written_files[output_type.value] = output_path
 

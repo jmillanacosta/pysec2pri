@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import gzip
 import re
-import shutil
+from collections.abc import Generator, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -24,9 +25,9 @@ from pysec2pri.logging import logger
 
 __all__ = [
     "ReleaseInfo",
-    "download_file",
-    "download_datasource",
     "check_release",
+    "download_datasource",
+    "download_file",
     "get_latest_release_info",
 ]
 
@@ -46,7 +47,7 @@ def download_file(
     url: str,
     output_path: Path,
     decompress_gz: bool = True,
-    timeout: float = 300.0,
+    timeout: float | None = None,
     show_progress: bool = True,
     description: str | None = None,
 ) -> Path:
@@ -68,7 +69,6 @@ def download_file(
     # Get filename for progress bar description
     if description is None:
         description = output_path.name
-
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         with client.stream("GET", url) as response:
             response.raise_for_status()
@@ -81,62 +81,22 @@ def download_file(
             final_path = output_path
 
             if is_gzip:
-                # Download to temp, then decompress
-                temp_path = output_path.with_suffix(output_path.suffix + ".gz")
-                with temp_path.open("wb") as f:
-                    if show_progress and total_size > 0:
-                        with tqdm(
-                            total=total_size,
-                            unit="B",
-                            unit_scale=True,
-                            desc=f"Downloading {description}",
-                        ) as pbar:
-                            for chunk in response.iter_bytes(chunk_size=8192):
-                                f.write(chunk)
-                                pbar.update(len(chunk))
-                    else:
-                        for chunk in response.iter_bytes(chunk_size=8192):
-                            f.write(chunk)
-
-                # Decompress with progress
-                if show_progress:
-                    compressed_size = temp_path.stat().st_size
-                    with tqdm(
-                        total=compressed_size,
-                        unit="B",
-                        unit_scale=True,
-                        desc=f"Decompressing {description}",
-                    ) as pbar:
-                        with gzip.open(temp_path, "rb") as f_in:
-                            with final_path.open("wb") as f_out:
-                                while True:
-                                    chunk = f_in.read(8192)
-                                    if not chunk:
-                                        break
-                                    f_out.write(chunk)
-                                    pbar.update(len(chunk))
-                else:
-                    with gzip.open(temp_path, "rb") as f_in:
-                        with final_path.open("wb") as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-
-                temp_path.unlink()
+                _download_gzip(
+                    output_path,
+                    show_progress,
+                    response,
+                    total_size,
+                    final_path,
+                    description,
+                )
             else:
-                with output_path.open("wb") as f:
-                    if show_progress and total_size > 0:
-                        with tqdm(
-                            total=total_size,
-                            unit="B",
-                            unit_scale=True,
-                            desc=f"Downloading {description}",
-                        ) as pbar:
-                            for chunk in response.iter_bytes(chunk_size=8192):
-                                f.write(chunk)
-                                pbar.update(len(chunk))
-                    else:
-                        for chunk in response.iter_bytes(chunk_size=8192):
-                            f.write(chunk)
-
+                _download_nogzip(
+                    output_path,
+                    total_size,
+                    response,
+                    show_progress,
+                    description,
+                )
     return final_path
 
 
@@ -262,9 +222,6 @@ def check_hgnc_release() -> ReleaseInfo:
     Returns:
         ReleaseInfo with the latest HGNC release details.
     """
-    # Query Google Cloud Storage JSON API to list bucket contents
-    # Bucket: public-download-files
-    # Prefix: hgnc/archive/archive/quarterly/tsv/
     gcs_api_url = (
         "https://storage.googleapis.com/storage/v1/b/public-download-files/o"
         "?prefix=hgnc/archive/archive/quarterly/tsv/"
@@ -306,7 +263,9 @@ def check_hgnc_release() -> ReleaseInfo:
 
     # Build URLs for the quarterly archive files
     # Files are hosted on Google Cloud Storage
-    base_url = "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv"  # noqa: E501
+    base_url = (
+        "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv"
+    )
     complete_url = f"{base_url}/hgnc_complete_set_{latest_date}.txt"
     withdrawn_url = f"{base_url}/withdrawn_{latest_date}.txt"
 
@@ -346,10 +305,7 @@ def get_latest_release_info(datasource: str) -> ReleaseInfo:
     }
 
     if datasource.lower() not in checkers:
-        raise ValueError(
-            f"Unknown datasource: {datasource}. "
-            f"Supported: {list(checkers.keys())}"
-        )
+        raise ValueError(f"Unknown datasource: {datasource}. Supported: {list(checkers.keys())}")
 
     return checkers[datasource.lower()]()
 
@@ -439,3 +395,116 @@ def check_release(
         )
 
     return info
+
+
+@contextmanager
+def iter_with_progress(
+    iterator: Iterable[bytes],
+    *,
+    enabled: bool,
+    total: int | None,
+    description: str,
+) -> Iterator[Iterable[bytes]]:
+    """Wrap an iterator with optional progress bar.
+
+    Args:
+        iterator: The byte iterator to wrap.
+        enabled: Whether to show progress.
+        total: Total size in bytes.
+        description: Description for progress bar.
+
+    Yields:
+        The wrapped iterator.
+    """
+    if enabled and total and total > 0:
+        with tqdm(
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=description,
+        ) as pbar:
+
+            def gen() -> Generator[bytes, None, None]:
+                """Yield chunks."""
+                for chunk in iterator:
+                    pbar.update(len(chunk))
+                    yield chunk
+
+            yield gen()
+    else:
+        yield iterator
+
+
+def _download_gzip(
+    output_path: Path,
+    show_progress: bool,
+    response: httpx.Response,
+    total_size: int,
+    final_path: Path,
+    description: str | None = None,
+) -> None:
+    """Help download gzipped files.
+
+    Args:
+        output_path: Path for the output file.
+        show_progress: Whether to show progress bar.
+        response: HTTP response object.
+        total_size: Total size in bytes.
+        final_path: Final destination path.
+        description: Description for progress bar.
+    """
+    temp_path = output_path.with_suffix(output_path.suffix + ".gz")
+
+    with temp_path.open("wb") as f:
+        with iter_with_progress(
+            response.iter_bytes(chunk_size=8192),
+            enabled=show_progress,
+            total=total_size,
+            description=f"Downloading {description}",
+        ) as chunks:
+            for chunk in chunks:
+                f.write(chunk)
+
+    if show_progress:
+        compressed_size = temp_path.stat().st_size
+    else:
+        compressed_size = None
+
+    with gzip.open(temp_path, "rb") as f_in, final_path.open("wb") as f_out:
+        with iter_with_progress(
+            iter(lambda: f_in.read(8192), b""),
+            enabled=show_progress,
+            total=compressed_size,
+            description=f"Decompressing {description}",
+        ) as chunks:
+            for chunk in chunks:
+                f_out.write(chunk)
+
+    temp_path.unlink()
+
+
+def _download_nogzip(
+    output_path: Path,
+    total_size: int,
+    response: httpx.Response,
+    show_progress: bool,
+    description: str | None,
+) -> None:
+    """Help download non-gzipped files.
+
+    Args:
+        output_path: Path for the output file.
+        total_size: Total size in bytes.
+        response: HTTP response object.
+        show_progress: Whether to show progress bar.
+        description: Description for progress bar.
+    """
+    with output_path.open("wb") as f:
+        with iter_with_progress(
+            response.iter_bytes(chunk_size=8192),
+            enabled=show_progress,
+            total=total_size,
+            description=f"Downloading {description}",
+        ) as chunks:
+            for chunk in chunks:
+                f.write(chunk)

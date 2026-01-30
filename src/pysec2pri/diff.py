@@ -30,11 +30,11 @@ class MappingDiff:
     new_version: str | None
     datasource: str
 
-    # Added mappings (secondary_id, primary_id)
+    # Added mappings (object_id, subject_id)
     added: pl.DataFrame = field(default_factory=pl.DataFrame)
-    # Removed mappings (secondary_id, primary_id)
+    # Removed mappings (object_id, subject_id)
     removed: pl.DataFrame = field(default_factory=pl.DataFrame)
-    # Changed mappings (same secondary_id, different primary_id)
+    # Changed mappings (same object_id, different subject_id)
     changed: pl.DataFrame = field(default_factory=pl.DataFrame)
 
     @property
@@ -63,31 +63,33 @@ class MappingDiff:
         return self.total_changes > 0
 
 
-def mapping_set_to_dataframe(mapping_set: "MappingSet") -> pl.DataFrame:
+def mapping_set_to_dataframe(mapping_set: MappingSet) -> pl.DataFrame:
     """Convert a MappingSet to a Polars DataFrame for comparison.
 
     Args:
         mapping_set: The MappingSet to convert.
 
     Returns:
-        Polars DataFrame with columns: primary_id, secondary_id.
+        Polars DataFrame with columns: subject_id, object_id.
     """
     rows = []
     for mapping in mapping_set.iter_mappings():
-        rows.append({
-            "primary_id": mapping.primary_id,
-            "secondary_id": mapping.secondary_id,
-        })
+        rows.append(
+            {
+                "subject_id": mapping.subject_id,
+                "object_id": mapping.object_id,
+            }
+        )
 
     if not rows:
-        return pl.DataFrame(schema={"primary_id": pl.Utf8, "secondary_id": pl.Utf8})
+        return pl.DataFrame(schema={"subject_id": pl.Utf8, "object_id": pl.Utf8})
 
     return pl.DataFrame(rows)
 
 
 def diff_mapping_sets(
-    old_set: "MappingSet",
-    new_set: "MappingSet",
+    old_set: MappingSet,
+    new_set: MappingSet,
 ) -> MappingDiff:
     """Compare two MappingSets and find differences.
 
@@ -174,12 +176,14 @@ def _read_sssom_to_dataframe(path: Path) -> pl.DataFrame:
     )
 
     # Normalize column names for comparison
-    # SSSOM uses subject_id/object_id, we use primary_id/secondary_id
+    # SSSOM uses subject_id/object_id, we use subject_id/object_id
     if "subject_id" in df.columns and "object_id" in df.columns:
-        df = df.select([
-            pl.col("subject_id").alias("primary_id"),
-            pl.col("object_id").alias("secondary_id"),
-        ])
+        df = df.select(
+            [
+                pl.col("subject_id").alias("subject_id"),
+                pl.col("object_id").alias("object_id"),
+            ]
+        )
 
     return df
 
@@ -226,48 +230,47 @@ def _diff_dataframes(
     """
     # Ensure consistent schema
     if old_df.is_empty():
-        old_df = pl.DataFrame(
-            schema={"primary_id": pl.Utf8, "secondary_id": pl.Utf8}
-        )
+        old_df = pl.DataFrame(schema={"subject_id": pl.Utf8, "object_id": pl.Utf8})
     if new_df.is_empty():
-        new_df = pl.DataFrame(
-            schema={"primary_id": pl.Utf8, "secondary_id": pl.Utf8}
-        )
+        new_df = pl.DataFrame(schema={"subject_id": pl.Utf8, "object_id": pl.Utf8})
 
-    # Find mappings by (primary_id, secondary_id) pairs
-    old_pairs = old_df.select(["primary_id", "secondary_id"]).unique()
-    new_pairs = new_df.select(["primary_id", "secondary_id"]).unique()
+    # Find mappings by (subject_id, object_id) pairs
+    old_pairs = old_df.select(["subject_id", "object_id"]).unique()
+    new_pairs = new_df.select(["subject_id", "object_id"]).unique()
 
     # Added: in new but not in old
     added = new_pairs.join(
         old_pairs,
-        on=["primary_id", "secondary_id"],
+        on=["subject_id", "object_id"],
         how="anti",
     )
 
     # Removed: in old but not in new
     removed = old_pairs.join(
         new_pairs,
-        on=["primary_id", "secondary_id"],
+        on=["subject_id", "object_id"],
         how="anti",
     )
 
-    # Changed: same secondary_id but different primary_id
+    # Changed: same object_id but different subject_id
     # Get unique secondary IDs with their primary mappings
-    old_by_sec = old_df.select([
-        pl.col("secondary_id"),
-        pl.col("primary_id").alias("old_primary_id"),
-    ]).unique()
+    old_by_sec = old_df.select(
+        [
+            pl.col("object_id"),
+            pl.col("subject_id").alias("old_subject_id"),
+        ]
+    ).unique()
 
-    new_by_sec = new_df.select([
-        pl.col("secondary_id"),
-        pl.col("primary_id").alias("new_primary_id"),
-    ]).unique()
+    new_by_sec = new_df.select(
+        [
+            pl.col("object_id"),
+            pl.col("subject_id").alias("new_subject_id"),
+        ]
+    ).unique()
 
-    # Join on secondary_id and filter where primary changed
-    changed = (
-        old_by_sec.join(new_by_sec, on="secondary_id", how="inner")
-        .filter(pl.col("old_primary_id") != pl.col("new_primary_id"))
+    # Join on object_id and filter where primary changed
+    changed = old_by_sec.join(new_by_sec, on="object_id", how="inner").filter(
+        pl.col("old_subject_id") != pl.col("new_subject_id")
     )
 
     return MappingDiff(
@@ -304,25 +307,20 @@ def summarize_diff(diff: MappingDiff) -> str:
         lines.append("")
         lines.append("  Added:")
         for row in diff.added.iter_rows(named=True):
-            lines.append(
-                f"    {row['secondary_id']} -> {row['primary_id']}"
-            )
+            lines.append(f"    {row['object_id']} -> {row['subject_id']}")
 
     if diff.removed_count > 0 and diff.removed_count <= 10:
         lines.append("")
         lines.append("  Removed:")
         for row in diff.removed.iter_rows(named=True):
-            lines.append(
-                f"    {row['secondary_id']} -> {row['primary_id']}"
-            )
+            lines.append(f"    {row['object_id']} -> {row['subject_id']}")
 
     if diff.changed_count > 0 and diff.changed_count <= 10:
         lines.append("")
         lines.append("  Changed:")
         for row in diff.changed.iter_rows(named=True):
             lines.append(
-                f"    {row['secondary_id']}: "
-                f"{row['old_primary_id']} -> {row['new_primary_id']}"
+                f"    {row['object_id']}: {row['old_subject_id']} -> {row['new_subject_id']}"
             )
 
     return "\n".join(lines)

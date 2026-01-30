@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import zipfile
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -19,7 +20,6 @@ from pysec2pri.models import (
     MappingSet,
 )
 from pysec2pri.parsers.base import BaseParser
-
 
 # HMDB XML namespace
 HMDB_NS = "http://www.hmdb.ca"
@@ -34,6 +34,46 @@ TAG_SYNONYMS = f"{{{HMDB_NS}}}synonyms"
 TAG_SYNONYM = f"{{{HMDB_NS}}}synonym"
 
 
+def _get_text(elem: etree._Element | None) -> str | None:
+    """Extract stripped text from an element, returning None if empty."""
+    if elem is None or elem.text is None:
+        return None
+    text = elem.text.strip()
+    return text or None
+
+
+def _get_primary_accession(elem: etree._Element) -> str | None:
+    """Get primary accession from a metabolite element."""
+    return _get_text(elem.find(TAG_ACCESSION))
+
+
+def _iter_secondary_accessions(elem: etree._Element) -> Iterable[str]:
+    """Iterate over secondary accessions in a metabolite element."""
+    container = elem.find(TAG_SECONDARY_ACCESSIONS)
+    if container is None:
+        return
+    for child in container:
+        text = _get_text(child)
+        if text:
+            yield text
+
+
+def _get_primary_name(elem: etree._Element) -> str | None:
+    """Get primary name from a metabolite element."""
+    return _get_text(elem.find(TAG_NAME))
+
+
+def _iter_synonyms(elem: etree._Element) -> Iterable[str]:
+    """Iterate over synonyms in a metabolite element."""
+    container = elem.find(TAG_SYNONYMS)
+    if container is None:
+        return
+    for syn_elem in container.findall(TAG_SYNONYM):
+        text = _get_text(syn_elem)
+        if text:
+            yield text
+
+
 class HMDBParser(BaseParser):
     """Parser for HMDB XML files using lxml iterparse.
 
@@ -46,11 +86,9 @@ class HMDBParser(BaseParser):
     """
 
     datasource_name = "HMDB"
-    default_source_url = (
-        "https://hmdb.ca/system/downloads/current/hmdb_metabolites.zip"
-    )
+    default_source_url = "https://hmdb.ca/system/downloads/current/hmdb_metabolites.zip"
 
-    def parse(self, input_path: Path | str) -> MappingSet:
+    def parse(self, input_path: Path | str | None) -> MappingSet:
         """Parse HMDB XML files.
 
         Args:
@@ -60,7 +98,9 @@ class HMDBParser(BaseParser):
         Returns:
             MappingSet with HMDB identifier and synonym mappings.
         """
-        input_path = Path(input_path)
+        if input_path is None:
+            raise ValueError("input_path must not be None")
+        input_path = Path(str(input_path))
 
         raw_id_mappings: list[tuple[str, str]] = []
         raw_name_mappings: list[tuple[str, str, str]] = []
@@ -74,9 +114,7 @@ class HMDBParser(BaseParser):
                 metabolite_count = self._count_metabolites(input_path)
 
             with input_path.open("rb") as f:
-                self._parse_xml_stream(
-                    f, raw_id_mappings, raw_name_mappings, metabolite_count
-                )
+                self._parse_xml_stream(f, raw_id_mappings, raw_name_mappings, metabolite_count)
 
         # Compute cardinality
         cardinality_map = self._compute_cardinality(raw_id_mappings)
@@ -89,14 +127,23 @@ class HMDBParser(BaseParser):
         if self.show_progress:
             id_iter = tqdm(raw_id_mappings, desc="Creating ID mappings")
 
-        for primary_id, secondary_id in id_iter:
+        for subject_id, object_id in id_iter:
             cardinality = cardinality_map.get(
-                (primary_id, secondary_id),
+                (subject_id, object_id),
                 MappingCardinality.ONE_TO_ONE,
             )
+            # Use IAO:0100001 (term replaced by) for clear replacements
+            predicate = "IAO:0100001"
+            if cardinality in (
+                MappingCardinality.ONE_TO_MANY,
+                MappingCardinality.MANY_TO_MANY,
+                MappingCardinality.ONE_TO_ZERO,
+            ):
+                predicate = "oboInOwl:consider"
             mapping = HMDBMapping(
-                primary_id=primary_id,
-                secondary_id=secondary_id,
+                subject_id=subject_id,
+                predicate_id=predicate,
+                object_id=object_id,
                 mapping_cardinality=cardinality,
                 source_url=self.default_source_url,
             )
@@ -105,16 +152,15 @@ class HMDBParser(BaseParser):
         # Add name/synonym mappings with progress
         name_iter = raw_name_mappings
         if self.show_progress:
-            name_iter = tqdm(
-                raw_name_mappings, desc="Creating synonym mappings"
-            )
+            name_iter = tqdm(raw_name_mappings, desc="Creating synonym mappings")
 
-        for primary_id, name, synonym in name_iter:
+        for subject_id, name, synonym in name_iter:
             mapping = HMDBMapping(
-                primary_id=primary_id,
-                secondary_id=None,
-                primary_label=name,
-                secondary_label=synonym,
+                subject_id=subject_id,
+                predicate_id="oboInOwl:hasRelatedSynonym",
+                object_id=synonym,
+                subject_label=name,
+                object_label=synonym,
                 source_url=self.default_source_url,
             )
             mappings.append(mapping)
@@ -129,8 +175,7 @@ class HMDBParser(BaseParser):
                 "generated for the omicsFixID project."
             ),
             comment=(
-                "object_label represents a synonym name by which "
-                "the subject_label is also known."
+                "object_label represents a synonym name by which the subject_label is also known."
             ),
             curie_map={
                 "HMDB:": "http://www.hmdb.ca/metabolites/",
@@ -164,12 +209,16 @@ class HMDBParser(BaseParser):
             metabolite_count = None
             if self.show_progress:
                 with zf.open(xml_name) as f:
-                    metabolite_count = self._count_metabolites_stream(f)
+                    import typing
+
+                    metabolite_count = self._count_metabolites_stream(typing.cast("BinaryIO", f))
 
             # Parse the XML stream
             with zf.open(xml_name) as f:
+                import typing
+
                 self._parse_xml_stream(
-                    f, id_mappings, name_mappings, metabolite_count
+                    typing.cast("BinaryIO", f), id_mappings, name_mappings, metabolite_count
                 )
 
     def _count_metabolites(self, file_path: Path) -> int:
@@ -180,7 +229,7 @@ class HMDBParser(BaseParser):
     def _count_metabolites_stream(self, stream: BinaryIO) -> int:
         """Count metabolite elements by fast scanning for closing tags."""
         count = 0
-        # Fast byte-level scan for </metabolite> tags
+        # Scan for </metabolite> tags
         for line in stream:
             if b"</metabolite>" in line:
                 count += 1
@@ -202,7 +251,8 @@ class HMDBParser(BaseParser):
         pbar = None
         if self.show_progress:
             pbar = tqdm(
-                total=total, desc="Parsing HMDB metabolites",  # unit=" mol"
+                total=total,
+                desc="Parsing HMDB metabolites",  # unit=" mol"
             )
 
         # Use iterparse with events for metabolite elements
@@ -213,7 +263,7 @@ class HMDBParser(BaseParser):
             recover=True,  # Continue on malformed XML
         )
 
-        for event, elem in context:
+        for _event, elem in context:
             self._process_metabolite(elem, id_mappings, name_mappings)
 
             # Clear element and its ancestors to free memory
@@ -236,41 +286,19 @@ class HMDBParser(BaseParser):
         name_mappings: list[tuple[str, str, str]],
     ) -> None:
         """Extract mappings from a single metabolite element."""
-        # Get primary accession (first direct child accession)
-        accession_elem = elem.find(TAG_ACCESSION)
-        if accession_elem is None or not accession_elem.text:
+        subject_id = _get_primary_accession(elem)
+        if not subject_id:
             return
 
-        primary_id = accession_elem.text.strip()
-        if not primary_id:
+        for object_id in _iter_secondary_accessions(elem):
+            id_mappings.append((subject_id, object_id))
+
+        primary_name = _get_primary_name(elem)
+        if not primary_name:
             return
 
-        # Get secondary accessions
-        sec_container = elem.find(TAG_SECONDARY_ACCESSIONS)
-        if sec_container is not None:
-            for sec_elem in sec_container:
-                if sec_elem.text:
-                    secondary_id = sec_elem.text.strip()
-                    if secondary_id:
-                        id_mappings.append((primary_id, secondary_id))
-
-        # Get name
-        name_elem = elem.find(TAG_NAME)
-        primary_name = None
-        if name_elem is not None and name_elem.text:
-            primary_name = name_elem.text.strip()
-
-        # Get synonyms
-        if primary_name:
-            syn_container = elem.find(TAG_SYNONYMS)
-            if syn_container is not None:
-                for syn_elem in syn_container.findall(TAG_SYNONYM):
-                    if syn_elem.text:
-                        synonym = syn_elem.text.strip()
-                        if synonym:
-                            name_mappings.append(
-                                (primary_id, primary_name, synonym)
-                            )
+        for synonym in _iter_synonyms(elem):
+            name_mappings.append((subject_id, primary_name, synonym))
 
     def _compute_cardinality(
         self,

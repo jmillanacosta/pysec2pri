@@ -1,0 +1,5 @@
+hgnc_id	status	symbol	prev_symbol	merged_into_report(i.e. hgnc_id/symbol/status)
+HGNC:1001	Entry Withdrawn		OLD_SYMBOL1	
+HGNC:1002	Merged/Split	MERGED_SYM	OLD_SYMBOL2	HGNC:2001/BRCA1/Approved
+HGNC:1003	Merged/Split	MERGED_SYM2	OLD_SYMBOL3	HGNC:2002/TP53/Approved
+HGNC:1004	Merged/Split	MERGED_SYM3		HGNC:2001/BRCA1/Approved

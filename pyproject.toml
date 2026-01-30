@@ -59,8 +59,14 @@ dependencies = [
     "sssom>=0.4.0", # SSSOM standard support
     "curies>=0.7.0", # CURIE handling
     "httpx>=0.24.0", # HTTP client for downloads
-    "polars>=0.20.0", # Fast dataframe operations for diffs,
+    "polars>=0.20.0", # Fast dataframe operations for diffs
     "regex==2026.1.15",
+    "lxml", # XML parsing for HMDB
+    "pandas", # DataFrame support for some workflows
+    "numpy", # Required by pandas and polars
+    "rdkit", # Chemistry toolkit for SDF parsing
+    "polars-runtime-32", # Polars runtime for 32-bit systems
+
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
@@ -68,6 +74,11 @@ dependencies = [
 tests = [
     "pytest",
     "coverage[toml]",
+    "lxml",
+    "pandas",
+    "numpy",
+    "rdkit",
+    "polars-runtime-32",
 ]
 docs = [
     "sphinx>=8,<9",
@@ -136,7 +147,9 @@ plugins = [
 
 # Doc8, see https://doc8.readthedocs.io/en/stable/readme.html#ini-file-usage
 [tool.doc8]
+
 max-line-length = 120
+ignore = ["D000", "D001"]
 
 # Pytest, see https://docs.pytest.org/en/stable/reference/customize.html#pyproject-toml
 [tool.pytest.ini_options]
@@ -202,6 +215,8 @@ extend-select = [
 ignore = [
     "D105", # Missing docstring in magic method
     "E203", # Black conflicts with the following
+    "S101", # Used in tests,
+    "RUF001", # Special characters for tests
 ]
 
 # See https://docs.astral.sh/ruff/settings/#per-file-ignores

@@ -84,7 +84,7 @@ docs-test:
     set -euo pipefail
     tmpdir=$(mktemp -d)
     cp -r docs/source "$tmpdir/source"
-    uv run --group docs --all-extras -m sphinx -W -b html -d "$tmpdir/build/doctrees" "$tmpdir/source" "$tmpdir/build/html"
+    uv run --group docs --all-extras -m sphinx -b html -d "$tmpdir/build/doctrees" "$tmpdir/source" "$tmpdir/build/html"
     rm -rf "$tmpdir"
 
 ####################

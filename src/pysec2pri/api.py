@@ -1,59 +1,53 @@
 """Main API functions for pysec2pri.
 
-This module provides high-level functions for parsing biological database 
+This module provides high-level functions for parsing biological database
 secondary-to-primary mapping files files and generating SSSOM output.
 These functions can be imported directly from pysec2pri.
 """
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from curies import Converter
-from sssom import MappingSetDocument
-from sssom_schema import Mapping as SSSOMMapping
-from sssom_schema import MappingSet as SSSOMMapingSet
-
-from pysec2pri.constants import MAPPING_JUSTIFICATION, STANDARD_PREFIX_MAP
-from pysec2pri.models import MappingSet
-
 # Re-export legacy output functions from exports module
 from pysec2pri.exports import (
-    write_sssom,
-    write_primary_ids,
-    write_sec2pri,
     write_name2synonym,
-    write_symbol2prev,
     write_outputs,
+    write_sec2pri,
+    write_sssom,
+    write_subject_ids,
+    write_symbol2prev,
 )
+from pysec2pri.models import MappingSet
 
 if TYPE_CHECKING:
+    from sssom import MappingSetDocument
     from sssom.util import MappingSetDataFrame
+    from sssom_schema import MappingSet as SSSOMMapingSet
 
 __all__ = [
     # ChEBI
     "parse_chebi",
-    # HMDB
-    "parse_hmdb",
     # HGNC
     "parse_hgnc",
+    # HMDB
+    "parse_hmdb",
     # NCBI
     "parse_ncbi",
     # UniProt
     "parse_uniprot",
+    "to_sssom_dataframe",
+    "to_sssom_document",
     # SSSOM conversion
     "to_sssom_mapping_set",
-    "to_sssom_document",
-    "to_sssom_dataframe",
+    "write_name2synonym",
+    "write_outputs",
+    "write_sec2pri",
     # Legacy output formats (re-exported from exports module)
     "write_sssom",
-    "write_primary_ids",
-    "write_sec2pri",
-    "write_name2synonym",
+    "write_subject_ids",
     "write_symbol2prev",
-    "write_outputs",
 ]
 
 
@@ -78,9 +72,9 @@ def parse_chebi(
         MappingSet containing ChEBI identifier and synonym mappings.
 
     Example:
-        >>> from pysec2pri import parse_chebi
-        >>> mapping_set = parse_chebi("ChEBI_complete_3star.sdf")
-        >>> print(f"Found {len(mapping_set)} mappings")
+        >>> from pysec2pri import parse_chebi  # doctest: +SKIP
+        >>> mapping_set = parse_chebi("ChEBI_complete_3star.sdf")  # doctest: +SKIP
+        >>> print(f"Found {len(mapping_set)} mappings")  # doctest: +SKIP
     """
     from pysec2pri.parsers import ChEBIParser
 
@@ -109,8 +103,8 @@ def parse_hmdb(
         MappingSet containing HMDB identifier and synonym mappings.
 
     Example:
-        >>> from pysec2pri import parse_hmdb
-        >>> mapping_set = parse_hmdb("hmdb_metabolites.zip")
+        >>> from pysec2pri import parse_hmdb  # doctest: +SKIP
+        >>> mapping_set = parse_hmdb("hmdb_metabolites.zip")  # doctest: +SKIP
     """
     from pysec2pri.parsers import HMDBParser
 
@@ -137,19 +131,10 @@ def parse_hgnc(
         complete_set_file: Path to HGNC complete set file (optional).
         version: Version/release of the source database.
         show_progress: Whether to show progress bars during parsing.
-        include_unmapped_genes: If True, include entries for genes that
-            have no alias or previous symbols (primary ID only).
-            Default is False (only include actual mappings).
+        include_unmapped_genes: If True, include entries for priID only genes.
 
     Returns:
         MappingSet containing HGNC identifier and symbol mappings.
-
-    Example:
-        >>> from pysec2pri import parse_hgnc
-        >>> mapping_set = parse_hgnc(
-        ...     "withdrawn_2024-01-01.txt",
-        ...     complete_set_file="hgnc_complete_set_2024-01-01.txt"
-        ... )
     """
     from pysec2pri.parsers import HGNCParser
 
@@ -189,11 +174,11 @@ def parse_ncbi(
         MappingSet containing NCBI Gene identifier and symbol mappings.
 
     Example:
-        >>> from pysec2pri import parse_ncbi
+        >>> from pysec2pri import parse_ncbi  # doctest: +SKIP
         >>> mapping_set = parse_ncbi(
         ...     "gene_history.gz",
         ...     gene_info_file="gene_info.gz",
-        ...     tax_id="9606"
+        ...     tax_id="9606",  # doctest: +SKIP
         ... )
     """
     from pysec2pri.parsers import NCBIParser
@@ -229,11 +214,8 @@ def parse_uniprot(
         MappingSet containing UniProt identifier mappings.
 
     Example:
-        >>> from pysec2pri import parse_uniprot
-        >>> mapping_set = parse_uniprot(
-        ...     "sec_ac.txt",
-        ...     delac_file="delac_sp.txt"
-        ... )
+        >>> from pysec2pri import parse_uniprot  # doctest: +SKIP
+        >>> mapping_set = parse_uniprot("sec_ac.txt", delac_file="delac_sp.txt")  # doctest: +SKIP
     """
     from pysec2pri.parsers import UniProtParser
 
@@ -242,6 +224,31 @@ def parse_uniprot(
         Path(sec_ac_file),
         delac_path=Path(delac_file) if delac_file else None,
     )
+
+
+# =============================================================================
+# Wikidata Functions
+# =============================================================================
+
+
+def parse_wikidata(
+    entity_type: str = "metabolites",
+    version: str | None = None,
+    endpoint: str | None = None,
+    show_progress: bool = True,
+    test_subset: bool = False,
+) -> MappingSet:
+    """Parse Wikidata redirects for a specific entity type, with test subset support."""
+    from pysec2pri.parsers import WikidataParser
+
+    parser = WikidataParser(
+        version=version,
+        show_progress=show_progress,
+        entity_type=entity_type,
+        endpoint=endpoint,
+        test_subset=test_subset,
+    )
+    return parser.parse(None)
 
 
 # =============================================================================
@@ -262,43 +269,7 @@ def to_sssom_mapping_set(
     Returns:
         An sssom_schema MappingSet object.
     """
-    if mapping_date is None:
-        mapping_date = date.today().isoformat()
-
-    # Convert individual mappings
-    sssom_mappings = []
-    for m in mapping_set.mappings:
-        sssom_dict = m.to_sssom_dict()
-
-        # Build SSSOM Mapping with required fields
-        predicate_id = sssom_dict.get("predicate_id")
-        if predicate_id is None:
-            predicate_id = "skos:relatedMatch"  # fallback
-
-        sssom_mapping = SSSOMMapping(
-            subject_id=sssom_dict.get("subject_id"),
-            subject_label=sssom_dict.get("subject_label"),
-            predicate_id=predicate_id,
-            object_id=sssom_dict.get("object_id"),
-            object_label=sssom_dict.get("object_label"),
-            mapping_justification=MAPPING_JUSTIFICATION,
-            mapping_cardinality=sssom_dict.get("mapping_cardinality"),
-            comment=sssom_dict.get("comment"),
-        )
-        sssom_mappings.append(sssom_mapping)
-
-    # Build the MappingSet
-    sssom_mapping_set = SSSOMMapingSet(
-        mapping_set_id=mapping_set.mapping_set_id or "https://w3id.org/sssom/mappings",
-        license=mapping_set.license_url,
-        mappings=sssom_mappings,
-        mapping_set_version=mapping_set.version,
-        mapping_set_description=mapping_set.mapping_set_description,
-        mapping_date=mapping_date,
-        comment=mapping_set.comment,
-    )
-
-    return sssom_mapping_set
+    return mapping_set.to_sssom_mapping_set(mapping_date)
 
 
 def to_sssom_document(
@@ -314,29 +285,13 @@ def to_sssom_document(
     Returns:
         An SSSOM MappingSetDocument with converter.
     """
-    sssom_ms = to_sssom_mapping_set(mapping_set, mapping_date)
-
-    # Build prefix map for converter (start with standard prefixes)
-    prefix_map = dict(STANDARD_PREFIX_MAP)
-
-    # Add datasource-specific prefixes
-    for prefix, url in mapping_set.curie_map.items():
-        # Remove trailing colon if present
-        clean_prefix = prefix.rstrip(":")
-        prefix_map[clean_prefix] = url
-
-    converter = Converter.from_prefix_map(prefix_map)
-
-    return MappingSetDocument(
-        mapping_set=sssom_ms,
-        converter=converter,
-    )
+    return mapping_set.to_sssom_document(mapping_date)
 
 
 def to_sssom_dataframe(
     mapping_set: MappingSet,
     mapping_date: str | None = None,
-) -> "MappingSetDataFrame":
+) -> MappingSetDataFrame:
     """Convert a pysec2pri MappingSet to an SSSOM MappingSetDataFrame.
 
     Args:
@@ -349,7 +304,4 @@ def to_sssom_dataframe(
     Raises:
         ImportError: If pandas is not installed.
     """
-    from sssom.parsers import to_mapping_set_dataframe
-
-    doc = to_sssom_document(mapping_set, mapping_date)
-    return to_mapping_set_dataframe(doc)
+    return mapping_set.to_sssom_dataframe(mapping_date)

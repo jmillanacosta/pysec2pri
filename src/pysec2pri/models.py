@@ -1,278 +1,193 @@
 """Pydantic data models for secondary to primary identifier mapping.
 
-This module provides a class-based, DRY data model for representing mappings
-between secondary (retired/withdrawn) identifiers and primary (current) identifiers
-across various biological databases (ChEBI, HMDB, HGNC, NCBI, UniProt, etc.).
+This module provides a simple, SSSOM-focused data model for representing
+mappings between secondary (retired/withdrawn) identifiers and primary
+(current) identifiers across various biological databases (ChEBI, HMDB,
+HGNC, NCBI, UniProt, etc.).
+
+SSSOM Semantics:
+- subject_id = PRIMARY/CURRENT identifier (the one to use)
+- object_id = SECONDARY/OLD identifier (the retired/merged one)
+- subject_label = label/symbol for the primary
+- object_label = label/symbol for the secondary
+
+For legacy export formats:
+- primaryID = subject_id
+- secondaryID = object_id
+- primarySymbol/primaryLabel = subject_label
+- secondarySymbol/secondaryLabel = object_label
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from collections.abc import Iterator, Sequence
+from datetime import date
 from enum import Enum
-from typing import ClassVar, Optional
+from typing import TYPE_CHECKING, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from pysec2pri.constants import (
     CHEBI,
     HGNC,
     HMDB,
+    MAPPING_JUSTIFICATION,
     NCBI,
+    STANDARD_PREFIX_MAP,
     UNIPROT,
-    WITHDRAWN_CURIE,
 )
+
+if TYPE_CHECKING:
+    from sssom import MappingSetDocument
+    from sssom.util import MappingSetDataFrame
+    from sssom_schema import MappingSet as SSSOMMapingSet
+
+
+# =============================================================================
+# Enums for mapping metadata
+# =============================================================================
 
 
 class MappingCardinality(str, Enum):
-    """Cardinality of mapping between secondary and primary identifiers.
+    """Cardinality of mapping between secondary and primary identifiers."""
 
-    - ONE_TO_ONE (1:1): A single secondary ID replaced by a single primary ID.
-    - MANY_TO_ONE (n:1): Multiple secondary IDs merged into one primary ID.
-    - ONE_TO_MANY (1:n): A single secondary ID split into multiple primary IDs.
-    - MANY_TO_MANY (n:n): Multiple secondary IDs merged/split into multiple primary IDs.
-    - ONE_TO_ZERO (1:0): A secondary ID that was withdrawn/deprecated with no replacement.
-    """
-
-    ONE_TO_ONE = "1:1"
-    MANY_TO_ONE = "n:1"
-    ONE_TO_MANY = "1:n"
-    MANY_TO_MANY = "n:n"
-    ONE_TO_ZERO = "1:0"
+    ONE_TO_ONE = "1:1"  # Single secondary replaced by single primary
+    MANY_TO_ONE = "n:1"  # Multiple secondaries merged into one primary
+    ONE_TO_MANY = "1:n"  # Single secondary split into multiple primaries
+    MANY_TO_MANY = "n:n"  # Complex merge/split
+    ONE_TO_ZERO = "1:0"  # Withdrawn with no replacement
 
 
 class PredicateID(str, Enum):
-    """Predicate IDs for SSSOM mapping relationships.
+    """SSSOM predicate IDs."""
 
-    - TERM_REPLACED_BY: The subject term was replaced by the object term (IAO:0100001).
-      Used for 1:1 and n:1 mappings (clear replacement or merge).
-    - CONSIDER: The subject term should be considered in relation to the object
-      (oboInOwl:consider). Used for 1:n, n:n, and 1:0 mappings (split, complex, withdrawn).
-    """
-
-    TERM_REPLACED_BY = "IAO:0100001"
-    CONSIDER = "oboInOwl:consider"
+    TERM_REPLACED_BY = "IAO:0100001"  # Clear replacement (1:1, n:1)
+    CONSIDER = "oboInOwl:consider"  # Split/complex/withdrawn (1:n, n:n, 1:0)
+    SAMEAS = "owl:sameAs"  # Same entity
 
 
-def get_predicate_for_cardinality(cardinality: MappingCardinality | None) -> PredicateID | None:
-    """Determine the appropriate predicate based on mapping cardinality.
-
-    Args:
-        cardinality: The mapping cardinality type.
-
-    Returns:
-        The appropriate predicate ID or None if cardinality is None.
-    """
+def get_predicate_for_cardinality(
+    cardinality: MappingCardinality | None,
+) -> PredicateID | None:
+    """Get appropriate predicate for a cardinality type."""
     if cardinality is None:
         return None
-    if cardinality in (MappingCardinality.ONE_TO_ONE, MappingCardinality.MANY_TO_ONE):
+    if cardinality in (
+        MappingCardinality.ONE_TO_ONE,
+        MappingCardinality.MANY_TO_ONE,
+    ):
         return PredicateID.TERM_REPLACED_BY
     return PredicateID.CONSIDER
 
 
 def get_comment_for_cardinality(cardinality: MappingCardinality | None) -> str:
-    """Generate a human-readable comment for a mapping cardinality.
-
-    Args:
-        cardinality: The mapping cardinality type.
-
-    Returns:
-        A descriptive comment string.
-    """
+    """Get human-readable comment for a cardinality type."""
     comments = {
-        MappingCardinality.ONE_TO_ONE: "ID (subject) is replaced.",
-        MappingCardinality.MANY_TO_ONE: "This ID (subject) and other ID(s) are merged into one ID.",
-        MappingCardinality.ONE_TO_MANY: "ID (subject) is split into multiple.",
-        MappingCardinality.MANY_TO_MANY: (
-            "This ID (subject) and other ID(s) are merged/split into multiple ID(s)."
-        ),
-        MappingCardinality.ONE_TO_ZERO: "ID (subject) withdrawn/deprecated.",
+        MappingCardinality.ONE_TO_ONE: "ID replaced.",
+        MappingCardinality.MANY_TO_ONE: "IDs merged into one.",
+        MappingCardinality.ONE_TO_MANY: "ID split into multiple.",
+        MappingCardinality.MANY_TO_MANY: "IDs merged/split into multiple.",
+        MappingCardinality.ONE_TO_ZERO: "ID withdrawn/deprecated.",
     }
     return comments.get(cardinality, "") if cardinality else ""
 
 
-class BaseMapping(BaseModel, ABC):
-    """Abstract base class for all mapping types.
+# =============================================================================
+# Base Mapping Class
+# =============================================================================
 
-    Provides common functionality for secondary-to-primary identifier mappings.
-    Subclasses implement specific mapping types (ID-only or ID+symbol).
+
+WITHDRAWN_ENTRY = "sec2pri:WithdrawnEntry"
+
+
+class BaseMapping(BaseModel):
+    """Base class for SSSOM-style subject-predicate-object mappings.
+
+    Mapping semantics:
+        subject_id = PRIMARY (current) identifier
+        object_id = SECONDARY (old/retired) identifier
+        subject_label = label for primary
+        object_label = label for secondary
+
+    For withdrawn entries with no replacement:
+        subject_id = WITHDRAWN_ENTRY sentinel
+        object_id = the withdrawn identifier
     """
 
     model_config = ConfigDict(use_enum_values=False, frozen=True)
 
-    # Class-level metadata to be overridden by subclasses
+    # Class-level constants (override in subclasses)
     datasource_name: ClassVar[str] = ""
     datasource_prefix: ClassVar[str] = ""
     curie_base_url: ClassVar[str] = ""
 
-    primary_id: str = Field(..., description="The primary (current) identifier")
-    secondary_id: str | None = Field(default=None, description="The secondary (retired) identifier")
+    # Instance fields: SymbolMapping and IdentifierMapping decide which fields
+    # are needed
+    subject_id: str = Field(..., description="Primary/current identifier")
+    predicate_id: None | str = Field(..., description="SSSOM predicate")
+    object_id: None | str = Field(..., description="Secondary/old identifier")
+    subject_label: str | None = Field(default=None, description="Label for primary")
+    object_label: str | None = Field(default=None, description="Label for secondary")
+    comment: str | None = Field(default=None, description="Mapping context")
+    source_url: str | None = Field(default=None, description="Source data URL")
     mapping_cardinality: MappingCardinality | None = Field(
-        default=None, description="Cardinality of the mapping relationship"
+        default=None, description="Cardinality of the mapping"
     )
-    comment: str | None = Field(default=None, description="Additional context about the mapping")
-    source_url: str | None = Field(default=None, description="URL of the source data file")
 
-    @computed_field
-    @property
-    def predicate_id(self) -> PredicateID | None:
-        """Compute the predicate based on cardinality."""
-        return get_predicate_for_cardinality(self.mapping_cardinality)
-
-    @computed_field
-    @property
-    def is_withdrawn(self) -> bool:
-        """Check if this mapping represents a withdrawn/deprecated entry."""
-        return self.mapping_cardinality == MappingCardinality.ONE_TO_ZERO
-
-    # CURIE for withdrawn/deleted entries with no replacement
-    # Uses sec2pri namespace: sec2pri:WithdrawnEntry
-    WITHDRAWN_SENTINEL: ClassVar[str] = WITHDRAWN_CURIE
+    # Class constant for withdrawn entries
+    withdrawn_entry: ClassVar[str] = WITHDRAWN_ENTRY
 
     @classmethod
     def curie(cls, identifier: str | None) -> str | None:
-        """Format an identifier as a CURIE (Compact URI).
-
-        Args:
-            identifier: The raw identifier.
-
-        Returns:
-            The identifier formatted with the datasource prefix,
-            or None if identifier is None/empty.
-        """
+        """Convert identifier to CURIE format if needed."""
         if not identifier:
             return None
-        # Withdrawn sentinel is already a valid CURIE
-        if identifier == cls.WITHDRAWN_SENTINEL:
-            return identifier
-        # If already a CURIE (contains :), return as-is
         if ":" in identifier:
             return identifier
-        if cls.datasource_prefix:
-            return f"{cls.datasource_prefix}:{identifier}"
+        # Use getattr to get the value if it's a FieldInfo
+        prefix = getattr(cls, "datasource_prefix", "")
+        if isinstance(prefix, str) and prefix:
+            return f"{prefix}:{identifier}"
         return identifier
 
-    @classmethod
-    def format_primary_id(cls, primary_id: str) -> str | None:
-        """Format primary ID for output, handling withdrawn entries.
+    def to_sssom_dict(self) -> dict[str, str | None]:
+        """Convert to SSSOM-compatible dictionary."""
+        return {
+            "subject_id": self.curie(self.subject_id),
+            "subject_label": getattr(self, "subject_label", None),
+            "predicate_id": self.predicate_id,
+            "object_id": self.curie(self.object_id),
+            "object_label": getattr(self, "object_label", None),
+            "mapping_cardinality": (
+                self.mapping_cardinality.name if self.mapping_cardinality else None
+            ),
+            "comment": self.comment,
+            "source": self.source_url,
+        }
 
-        Args:
-            primary_id: The primary identifier.
+    def to_legacy_dict(self) -> dict[str, str | None]:
+        """Convert to legacy export format.
 
-        Returns:
-            Formatted ID or None for withdrawn entries.
-        """
-        if primary_id == cls.WITHDRAWN_SENTINEL:
-            return None
-        return cls.curie(primary_id)
-
-    @abstractmethod
-    def to_sssom_dict(self) -> dict:
-        """Convert the mapping to a dictionary suitable for SSSOM output.
-
-        Returns:
-            Dictionary with SSSOM-compatible field names.
-        """
-
-    def to_legacy_dict(self) -> dict:
-        """Convert the mapping to a dictionary for legacy output formats.
-
-        Returns a consistent dictionary with all possible fields.
-        Subclasses may override to add additional fields.
-
-        Returns:
-            Dictionary with legacy format field names.
+        Maps SSSOM fields to legacy column names:
+        - subject_id -> primaryID
+        - object_id -> secondaryID
+        - subject_label -> primarySymbol/primaryLabel
+        - object_label -> secondarySymbol/secondaryLabel
         """
         return {
-            "primaryID": self.primary_id,
-            "secondaryID": self.secondary_id or "",
-            "predicateID": self.predicate_id.value if self.predicate_id else "",
+            "primaryID": self.subject_id,
+            "secondaryID": self.object_id,
+            "primaryLabel": getattr(self, "subject_label", "") or "",
+            "secondaryLabel": getattr(self, "object_label", "") or "",
+            "primarySymbol": getattr(self, "subject_label", "") or "",
+            "secondarySymbol": getattr(self, "object_label", "") or "",
+            "predicateID": self.predicate_id,
             "mapping_cardinality_sec2pri": (
-                self.mapping_cardinality.value if self.mapping_cardinality else ""
+                self.mapping_cardinality.name if self.mapping_cardinality else ""
             ),
             "comment": self.comment or "",
             "source": self.source_url or "",
-            "objectID": self.primary_id,
         }
-
-
-class IdMapping(BaseMapping):
-    """Mapping between secondary and primary identifiers only.
-
-    Used for databases like ChEBI, HMDB, and UniProt where the mapping
-    is purely identifier-based without symbol/name information.
-    """
-
-    primary_label: str | None = Field(
-        default=None, description="Name/label for the primary ID"
-    )
-    secondary_label: str | None = Field(
-        default=None, description="Synonym/label for the secondary ID"
-    )
-
-    def to_sssom_dict(self) -> dict:
-        """Convert to SSSOM dictionary format."""
-        predicate = self.predicate_id.value if self.predicate_id else None
-        object_id = self.curie(self.secondary_id) if self.secondary_id else None
-        cardinality = (
-            self.mapping_cardinality.value if self.mapping_cardinality else None
-        )
-        return {
-            "subject_id": self.curie(self.primary_id),
-            "subject_label": self.primary_label,
-            "predicate_id": predicate,
-            "object_id": object_id,
-            "object_label": self.secondary_label,
-            "mapping_cardinality": cardinality,
-            "comment": self.comment,
-            "source": self.source_url,
-        }
-
-    def to_legacy_dict(self) -> dict:
-        """Convert to legacy format with label fields."""
-        base = super().to_legacy_dict()
-        base["primaryLabel"] = self.primary_label or ""
-        base["secondaryLabel"] = self.secondary_label or ""
-        return base
-
-
-class SymbolMapping(BaseMapping):
-    """Mapping that includes symbol/gene name information.
-
-    Used for gene databases like HGNC and NCBI where both identifiers
-    and symbols need to be tracked.
-    """
-
-    primary_symbol: str | None = Field(
-        default=None, description="Primary symbol (e.g., gene symbol)"
-    )
-    secondary_symbol: str | None = Field(
-        default=None, description="Secondary/previous symbol"
-    )
-
-    def to_sssom_dict(self) -> dict:
-        """Convert to SSSOM dictionary format."""
-        predicate = self.predicate_id.value if self.predicate_id else None
-        object_id = self.curie(self.secondary_id) if self.secondary_id else None
-        cardinality = (
-            self.mapping_cardinality.value if self.mapping_cardinality else None
-        )
-        return {
-            "subject_id": self.curie(self.primary_id),
-            "subject_label": self.primary_symbol,
-            "predicate_id": predicate,
-            "object_id": object_id,
-            "object_label": self.secondary_symbol,
-            "mapping_cardinality": cardinality,
-            "comment": self.comment,
-            "source": self.source_url,
-        }
-
-    def to_legacy_dict(self) -> dict:
-        """Convert to legacy format with symbol fields."""
-        base = super().to_legacy_dict()
-        base["primarySymbol"] = self.primary_symbol or ""
-        base["secondarySymbol"] = self.secondary_symbol or ""
-        return base
 
 
 # =============================================================================
@@ -280,8 +195,31 @@ class SymbolMapping(BaseMapping):
 # =============================================================================
 
 
+class IdMapping(BaseMapping):
+    """Mapping for ID-only resources (ChEBI, HMDB, UniProt).
+
+    Requires subject_id, predicate_id, and object_id (all identifiers).
+    Labels are optional.
+    """
+
+    # Override to make object_id required (not None)
+    object_id: str | None = Field(default=None, description="Secondary/old ID")
+
+
+class SymbolMapping(BaseMapping):
+    """Mapping with symbol/label fields (HGNC, NCBI).
+
+    Requires subject_id, predicate_id, and labels for subject and object.
+    object_id may be None for symbol-only mappings.
+    """
+
+    # Override to make labels required
+    subject_label: str | None = Field(default=None, description="Primary label/symbol")
+    object_label: str | None = Field(default=None, description="Secondary label/symbol")
+
+
 class ChEBIMapping(IdMapping):
-    """ChEBI (Chemical Entities of Biological Interest) identifier mapping."""
+    """ChEBI identifier mapping."""
 
     datasource_name: ClassVar[str] = CHEBI.name
     datasource_prefix: ClassVar[str] = CHEBI.prefix
@@ -289,7 +227,7 @@ class ChEBIMapping(IdMapping):
 
 
 class HMDBMapping(IdMapping):
-    """HMDB (Human Metabolome Database) identifier mapping."""
+    """HMDB identifier mapping."""
 
     datasource_name: ClassVar[str] = HMDB.name
     datasource_prefix: ClassVar[str] = HMDB.prefix
@@ -297,7 +235,7 @@ class HMDBMapping(IdMapping):
 
 
 class UniProtMapping(IdMapping):
-    """UniProt protein identifier mapping."""
+    """UniProt identifier mapping."""
 
     datasource_name: ClassVar[str] = UNIPROT.name
     datasource_prefix: ClassVar[str] = UNIPROT.prefix
@@ -305,7 +243,7 @@ class UniProtMapping(IdMapping):
 
 
 class HGNCMapping(SymbolMapping):
-    """HGNC (HUGO Gene Nomenclature Committee) gene identifier mapping."""
+    """HGNC gene identifier mapping."""
 
     datasource_name: ClassVar[str] = HGNC.name
     datasource_prefix: ClassVar[str] = HGNC.prefix
@@ -336,18 +274,29 @@ class MappingSet(BaseModel):
 
     mappings: list[BaseMapping] = Field(default_factory=list)
     datasource_name: str = Field(..., description="Name of the datasource")
-    version: str | None = Field(default=None, description="Version/release of the datasource")
-    mapping_set_id: str | None = Field(default=None, description="Unique identifier for this set")
-    mapping_set_description: str | None = Field(
-        default=None, description="Description of the mapping set"
+    version: str | None = Field(
+        default=None,
+        description="Version/release of the datasource",
     )
-    mapping_date: str | None = Field(default=None, description="Date the mappings were generated")
+    mapping_set_id: str | None = Field(
+        default=None,
+        description="Unique identifier for this set",
+    )
+    mapping_set_description: str | None = Field(
+        default=None,
+        description="Description of the mapping set",
+    )
+    mapping_date: str | None = Field(
+        default=None,
+        description="Date the mappings were generated",
+    )
     license_url: str = Field(
         default="https://creativecommons.org/publicdomain/zero/1.0/",
         description="License URL for the mapping set",
     )
     curie_map: dict[str, str] = Field(
-        default_factory=dict, description="CURIE prefix to URL mappings"
+        default_factory=dict,
+        description="CURIE prefix to URL mappings",
     )
     source_metadata: str | None = Field(
         default=None, description="Source metadata (version info, etc.)"
@@ -359,19 +308,130 @@ class MappingSet(BaseModel):
 
     def add_mapping(self, mapping: BaseMapping) -> None:
         """Add a mapping to the set."""
+        # Convert to list if needed
+        if not isinstance(self.mappings, list):
+            self.mappings = list(self.mappings)
         self.mappings.append(mapping)
 
-    def add_mappings(self, mappings: list[BaseMapping]) -> None:
+    def add_mappings(self, mappings: Sequence[BaseMapping]) -> None:
         """Add multiple mappings to the set."""
+        if not isinstance(self.mappings, list):
+            self.mappings = list(self.mappings)
         self.mappings.extend(mappings)
 
     def __len__(self) -> int:
         """Return the number of mappings in the set."""
         return len(self.mappings)
 
-    def iter_mappings(self):
+    def iter_mappings(self) -> Iterator[BaseMapping]:
         """Iterate over mappings."""
         return iter(self.mappings)
+
+    def to_sssom_mapping_set(
+        self,
+        mapping_date: str | None = None,
+    ) -> SSSOMMapingSet:
+        """Convert this MappingSet to an sssom_schema MappingSet.
+
+        Args:
+            mapping_date: Date string (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            An sssom_schema MappingSet object.
+        """
+        from sssom_schema import Mapping as SSSOMMapping
+        from sssom_schema import MappingSet as SSSOMMapingSet
+
+        if mapping_date is None:
+            mapping_date = date.today().isoformat()
+
+        # Convert individual mappings
+        sssom_mappings = []
+        for m in self.mappings:
+            sssom_dict = m.to_sssom_dict()
+
+            # Build SSSOM Mapping with required fields
+            predicate_id = sssom_dict.get("predicate_id")
+            if predicate_id is None:
+                predicate_id = "skos:relatedMatch"  # fallback
+
+            sssom_mapping = SSSOMMapping(
+                subject_id=sssom_dict.get("subject_id"),
+                subject_label=sssom_dict.get("subject_label"),
+                predicate_id=predicate_id,
+                object_id=sssom_dict.get("object_id"),
+                object_label=sssom_dict.get("object_label"),
+                mapping_justification=MAPPING_JUSTIFICATION,
+                mapping_cardinality=sssom_dict.get("mapping_cardinality"),
+                comment=sssom_dict.get("comment"),
+            )
+            sssom_mappings.append(sssom_mapping)
+
+        # Build the MappingSet
+        sssom_mapping_set = SSSOMMapingSet(
+            mapping_set_id=(self.mapping_set_id or "https://w3id.org/sssom/mappings"),
+            license=self.license_url,
+            mappings=sssom_mappings,
+            mapping_set_version=self.version,
+            mapping_set_description=self.mapping_set_description,
+            mapping_date=mapping_date,
+            comment=self.comment,
+        )
+
+        return sssom_mapping_set
+
+    def to_sssom_document(
+        self,
+        mapping_date: str | None = None,
+    ) -> MappingSetDocument:
+        """Convert this MappingSet to an SSSOM MappingSetDocument.
+
+        Args:
+            mapping_date: Date string (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            An SSSOM MappingSetDocument with converter.
+        """
+        from curies import Converter
+        from sssom import MappingSetDocument
+
+        sssom_ms = self.to_sssom_mapping_set(mapping_date)
+
+        # Build prefix map for converter (start with standard prefixes)
+        prefix_map = dict(STANDARD_PREFIX_MAP)
+
+        # Add datasource-specific prefixes
+        for prefix, url in dict(self.curie_map).items():
+            # Remove trailing colon if present
+            clean_prefix = prefix.rstrip(":")
+            prefix_map[clean_prefix] = url
+
+        converter = Converter.from_prefix_map(prefix_map)
+
+        return MappingSetDocument(
+            mapping_set=sssom_ms,
+            converter=converter,
+        )
+
+    def to_sssom_dataframe(
+        self,
+        mapping_date: str | None = None,
+    ) -> MappingSetDataFrame:
+        """Convert this MappingSet to an SSSOM MappingSetDataFrame.
+
+        Args:
+            mapping_date: Date string (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            An SSSOM MappingSetDataFrame.
+
+        Raises:
+            ImportError: If pandas is not installed.
+        """
+        from sssom.parsers import to_mapping_set_dataframe  # type: ignore[attr-defined]
+
+        doc = self.to_sssom_document(mapping_date)
+        return to_mapping_set_dataframe(doc)
 
 
 # =============================================================================
@@ -382,16 +442,16 @@ class MappingSet(BaseModel):
 def compute_cardinality(
     mappings: list[tuple[str, str]],
 ) -> dict[tuple[str, str], MappingCardinality]:
-    """Compute cardinality for a list of (primary_id, secondary_id) pairs.
+    """Compute cardinality for a list of (subject_id, object_id) pairs.
 
     This function analyzes the relationships between primary and secondary IDs
     to determine the cardinality of each mapping.
 
     Args:
-        mappings: List of (primary_id, secondary_id) tuples.
+        mappings: List of (subject_id, object_id) tuples.
 
     Returns:
-        Dictionary mapping each (primary_id, secondary_id) pair to its cardinality.
+    Dictionary mapping each (subject_id, object_id) pair to its cardinality.
     """
     from collections import Counter
 
@@ -399,24 +459,24 @@ def compute_cardinality(
     primary_counts: Counter[str] = Counter()
     secondary_counts: Counter[str] = Counter()
 
-    for primary_id, secondary_id in mappings:
-        if primary_id and secondary_id:
-            primary_counts[primary_id] += 1
-            secondary_counts[secondary_id] += 1
+    for subject_id, object_id in mappings:
+        if subject_id and object_id:
+            primary_counts[subject_id] += 1
+            secondary_counts[object_id] += 1
 
     result: dict[tuple[str, str], MappingCardinality] = {}
 
-    for primary_id, secondary_id in mappings:
-        if not secondary_id:
+    for subject_id, object_id in mappings:
+        if not object_id:
             continue
 
         # Check for withdrawn entries
-        if primary_id in (BaseMapping.WITHDRAWN_SENTINEL, "-", "", None):
-            result[(primary_id, secondary_id)] = MappingCardinality.ONE_TO_ZERO
+        if subject_id in (BaseMapping.withdrawn_entry, "-", "", None):
+            result[(subject_id, object_id)] = MappingCardinality.ONE_TO_ZERO
             continue
 
-        pri_count = primary_counts.get(primary_id, 1)
-        sec_count = secondary_counts.get(secondary_id, 1)
+        pri_count = primary_counts.get(subject_id, 1)
+        sec_count = secondary_counts.get(object_id, 1)
 
         if pri_count > 1 and sec_count == 1:
             # Multiple secondary IDs map to one primary ID (merge)
@@ -433,29 +493,31 @@ def compute_cardinality(
         else:
             cardinality = MappingCardinality.ONE_TO_ONE  # fallback
 
-        result[(primary_id, secondary_id)] = cardinality
+        result[(subject_id, object_id)] = cardinality
 
     return result
 
 
 __all__ = [
-    # Enums
-    "MappingCardinality",
-    "PredicateID",
+    # Constants
+    "WITHDRAWN_ENTRY",
     # Base classes
     "BaseMapping",
-    "IdMapping",
-    "SymbolMapping",
     # Datasource-specific classes
     "ChEBIMapping",
-    "HMDBMapping",
-    "UniProtMapping",
     "HGNCMapping",
-    "NCBIGeneMapping",
+    "HMDBMapping",
+    "IdMapping",
+    # Enums
+    "MappingCardinality",
     # Container
     "MappingSet",
+    "NCBIGeneMapping",
+    "PredicateID",
+    "SymbolMapping",
+    "UniProtMapping",
     # Utility functions
     "compute_cardinality",
-    "get_predicate_for_cardinality",
     "get_comment_for_cardinality",
+    "get_predicate_for_cardinality",
 ]

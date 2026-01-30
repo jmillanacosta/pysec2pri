@@ -28,182 +28,58 @@ Outputs mappings in [SSSOM format](https://w3id.org/sssom).
 
 ## Supported Databases
 
-| Database  | Description                              | Auto-download |
-| --------- | ---------------------------------------- | ------------- |
-| ChEBI     | Chemical Entities of Biological Interest | Supported            |
-| HMDB      | Human Metabolome Database                | Supported            |
-| HGNC      | HUGO Gene Nomenclature Committee         | Supported            |
-| NCBI Gene | Entrez Gene                              | Supported            |
-| UniProt   | Protein sequence database                | Supported            |
-| Wikidata  | Redirect mappings via SPARQL             | Supported            |
+| Datasource | license                                                                                                                            | citation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ChEBI      | [CC BY 4.0](docs/licenses/chebi/LICENSE).                                                                                          | Hastings J, Owen G, Dekker A, et al. ChEBI in 2016: Improved services and an expanding collection of metabolites. Nucleic Acids Research. 2016 Jan;44(D1):D1214-9. DOI: [10.1093/nar/gkv1031](https://doi.org/10.1093/nar/gkv1031). PMID: 26467479; PMCID: PMC4702775.                                                                                                                                                                                                                                                                                                                                        |
+| HMDB       | [CC0](https://hmdb.ca/about#compliance:~:text=international%20scientific%20conferences.-,Citing%20the%20HMDB,-HMDB%20is%20offered) | Wishart DS, Guo A, Oler E, Wang F, Anjum A, Peters H, Dizon R, Sayeeda Z, Tian S, Lee BL, Berjanskii M, Mah R, Yamamoto M, Jovel J, Torres-Calzada C, Hiebert-Giesbrecht M, Lui VW, Varshavi D, Varshavi D, Allen D, Arndt D, Khetarpal N, Sivakumaran A, Harford K, Sanford S, Yee K, Cao X, Budinski Z, Liigand J, Zhang L, Zheng J, Mandal R, Karu N, Dambrova M, Schiöth HB, Greiner R, Gautam V. HMDB 5.0: the Human Metabolome Database for 2022. Nucleic Acids Res. 2022 Jan 7;50(D1):D622-D631. doi: [10.1093/nar/gkab1062](https://doi.org/10.1093/nar/gkab1062). PMID: 34986597; PMCID: PMC8728138. |
+| HGNC       | [link](https://www.genenames.org/about/license/)                                                                                   | Seal RL, Braschi B, Gray K, Jones TEM, Tweedie S, Haim-Vilmovsky L, Bruford EA. Genenames.org: the HGNC resources in 2023. Nucleic Acids Res. 2023 Jan 6;51(D1):D1003-D1009. doi: [10.1093/nar/gkac888](https://doi.org/10.1093/nar/gkac888). PMID: 36243972; PMCID: PMC9825485.                                                                                                                                                                                                                                                                                                                              |
+| NCBI       | [link](https://www.ncbi.nlm.nih.gov/home/about/policies/)                                                                          | Sayers EW, Bolton EE, Brister JR, Canese K, Chan J, Comeau DC, Connor R, Funk K, Kelly C, Kim S, Madej T, Marchler-Bauer A, Lanczycki C, Lathrop S, Lu Z, Thibaud-Nissen F, Murphy T, Phan L, Skripchenko Y, Tse T, Wang J, Williams R, Trawick BW, Pruitt KD, Sherry ST. Database resources of the national center for biotechnology information. Nucleic Acids Res. 2022 Jan 7;50(D1):D20-D26. doi: [10.1093/nar/gkab1112](https://doi.org/10.1093/nar/gkab1112). PMID: 34850941; PMCID: PMC8728269.                                                                                                        |
+| UniProt    | [CC BY 4.0](https://ftp.uniprot.org/pub/docs/licenses/uniprot/current_release/knowledgebase/complete/LICENSE)                      | UniProt Consortium. UniProt: the universal protein knowledgebase in 2021. Nucleic Acids Res. 2021 Jan 8;49(D1):D480-D489. doi: [10.1093/nar/gkaa1100](https://doi.org/10.1093/nar/gkaa1100). PMID: 33237286; PMCID: PMC7778908.                                                                                                                                                                                                                                                                                                                                                                               |
+| Wikidata   |                                                                                                                                    | Vrandecic, D., Krotzsch, M. Wikidata: a free collaborative knowledgebase. Communications of the ACM. 2014. doi: [10.1145/2629489](https://doi.org/10.1145/2629489).                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Installation
 
 ```console
-pip install pysec2pri
+uv pip install pysec2pri
 ```
 
 Or install from source:
 
 ```console
-pip install git+https://github.com/sec2pri/pysec2pri.git
+uv pip install git+https://github.com/sec2pri/pysec2pri.git
 ```
 
 ## Quick Start
 
-**Auto-download and process** (recommended):
+### Command Line Usage
 
-```console
-# Download latest ChEBI and generate mappings
-pysec2pri chebi -o chebi_sec2pri.sssom.tsv
+To obtain the secondary to primary identifier SSSOM mapping set for ChEBI:
 
-# Download latest HMDB and generate mappings
-pysec2pri hmdb -o hmdb_sec2pri.sssom.tsv
+```bash
+pysec2pri chebi
 ```
 
-**Use local files**:
+This will automatically download the latest ChEBI release and generate an SSSOM
+mapping file in your current directory.
 
-```console
-# Use a local file instead of downloading
-pysec2pri chebi --input ChEBI_complete_3star.sdf -o chebi_sec2pri.sssom.tsv
+To process locally and specify the output:
+
+```bash
+pysec2pri chebi ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
 ```
 
-## Command Line Interface
+For more options and help on any command:
 
-All commands auto-download source files by default. Use input options to
-specify local files.
-
-### ChEBI
-
-```console
-# Auto-download (recommended)
-pysec2pri chebi -o chebi_sec2pri.sssom.tsv
-
-# Use local file
-pysec2pri chebi --input ChEBI_complete_3star.sdf -o chebi_sec2pri.sssom.tsv
+```bash
+pysec2pri --help
+pysec2pri chebi --help
 ```
 
-### HMDB
+### SSSOM Output
 
-```console
-# Auto-download
-pysec2pri hmdb -o hmdb_sec2pri.sssom.tsv
-
-# Use local file
-pysec2pri hmdb --input hmdb_metabolites.zip -o hmdb_sec2pri.sssom.tsv
-```
-
-### HGNC
-
-```console
-# Auto-download
-pysec2pri hgnc -o hgnc_sec2pri.sssom.tsv
-
-# Use local files
-pysec2pri hgnc --withdrawn withdrawn.txt --complete-set hgnc_complete_set.txt
-```
-
-### NCBI Gene
-
-```console
-# Auto-download (human genes by default)
-pysec2pri ncbi -o ncbi_sec2pri.sssom.tsv
-
-# Different organism (mouse)
-pysec2pri ncbi --tax-id 10090 -o ncbi_mouse_sec2pri.sssom.tsv
-
-# Use local files
-pysec2pri ncbi --history gene_history.gz --gene-info gene_info.gz
-```
-
-### UniProt
-
-```console
-# Auto-download
-pysec2pri uniprot -o uniprot_sec2pri.sssom.tsv
-
-# Use local files
-pysec2pri uniprot --sec-ac sec_ac.txt --delac delac_sp.txt
-```
-
-### Wikidata (SPARQL query)
-
-```console
-# Query metabolite redirects
-pysec2pri wikidata --type metabolites -o wikidata_metabolites.sssom.tsv
-
-# Query gene redirects
-pysec2pri wikidata --type genes -o wikidata_genes.sssom.tsv
-```
-
-### Utility Commands
-
-```console
-# Download files only (without processing)
-pysec2pri download chebi -o ./data
-pysec2pri download all -o ./data
-
-# Check for new releases
-pysec2pri check-release chebi
-pysec2pri check-release all
-
-# Compare two SSSOM files
-pysec2pri diff old.sssom.tsv new.sssom.tsv
-```
-
-## Python API
-
-```python
-from pysec2pri import parse_chebi, write_sssom
-
-# Parse source file
-mapping_set = parse_chebi("ChEBI_complete_3star.sdf")
-
-# Write SSSOM output
-write_sssom(mapping_set, "chebi_sec2pri.sssom.tsv")
-```
-
-### Download and Parse
-
-```python
-from pysec2pri import parse_chebi, write_sssom
-from pysec2pri.download import download_datasource
-
-# Download latest files
-files = download_datasource("chebi", output_dir="./data")
-
-# Parse downloaded file
-mapping_set = parse_chebi(files["sdf"])
-write_sssom(mapping_set, "chebi_sec2pri.sssom.tsv")
-```
-
-### Compare Releases
-
-```python
-from pysec2pri import parse_chebi
-from pysec2pri.diff import diff_mapping_sets, summarize_diff
-
-old_set = parse_chebi("chebi_v220.sdf")
-new_set = parse_chebi("chebi_v221.sdf")
-
-diff = diff_mapping_sets(old_set, new_set)
-print(summarize_diff(diff))
-```
-
-### Supported Functions
-
-| Function               | Description                        |
-| ---------------------- | ---------------------------------- |
-| `parse_chebi()`        | Parse ChEBI SDF file               |
-| `parse_hmdb()`         | Parse HMDB XML/ZIP file            |
-| `parse_hgnc()`         | Parse HGNC withdrawn + complete    |
-| `parse_ncbi()`         | Parse NCBI gene_history + gene_info|
-| `parse_uniprot()`      | Parse UniProt sec_ac + delac files |
-| `write_sssom()`        | Write MappingSet to SSSOM TSV      |
-| `download_datasource()`| Download source files              |
-| `check_release()`      | Check for new upstream releases    |
-| `diff_mapping_sets()`  | Compare two MappingSets            |
-| `diff_sssom_files()`   | Compare two SSSOM files            |
+The default output is in
+[SSSOM](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://mapping-commons.github.io/sssom/&ved=2ahUKEwiwwcOYjLKSAxXR2wIHHXXRB4gQFnoECA4QAQ&usg=AOvVaw3eQLVYhT0H9PXyznzUSExF)
+(Simple Standard for Sharing Ontology Mappings) TSV format.
 
 ## Documentation
 

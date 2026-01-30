@@ -18,18 +18,35 @@ Supported databases:
 Quick Start
 ===========
 
-.. code-block:: python
 
-    from pysec2pri import parse_chebi, write_sssom
-
-    mapping_set = parse_chebi("ChEBI_complete_3star.sdf")
-    write_sssom(mapping_set, "chebi_sec2pri.sssom.tsv")
-
-Or via CLI:
 
 .. code-block:: bash
 
-    pysec2pri chebi ChEBI_complete_3star.sdf -o chebi_sec2pri.sssom.tsv
+    pysec2pri chebi
+
+This will automatically download and process the latest ChEBI release, generating a default SSSOM mapping file in the current directory.
+
+You can also process a local file:
+
+.. code-block:: bash
+
+    pysec2pri chebi ChEBI_complete_3star.sdf
+
+This will generate a default SSSOM mapping file from your local SDF file.
+
+Other possibilities:
+
+- **Specify output file:**
+
+    .. code-block:: bash
+
+            pysec2pri chebi ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
+
+    Use this to choose a custom output filename.
+
+- **Specifying outputs:**
+
+    .. code-block:: bash
 
 .. toctree::
     :maxdepth: 2
@@ -37,17 +54,15 @@ Or via CLI:
     :name: start
 
     installation
-    usage
     cli
 
 .. toctree::
     :maxdepth: 2
-    :caption: Features
+    :caption: Helpers
     :name: features
 
     download
     diff
-    wikidata
 
 .. toctree::
     :maxdepth: 2
@@ -57,11 +72,4 @@ Or via CLI:
     api
     models
     constants
-
-********************
- Indices and Tables
-********************
-
-- :ref:`genindex`
-- :ref:`modindex`
-- :ref:`search`
+    parsers
