@@ -1,0 +1,65 @@
+
+  Fake ChEBI Entry 1
+
+ 10 10  0  0  0  0  0  0  0  0999 V2000
+M  END
+> <chebi id>
+CHEBI:10001
+
+> <chebi name>
+alpha-glucose
+
+> <secondary chebi id>
+CHEBI:99901
+CHEBI:99902
+
+> <synonyms>
+glucose
+D-glucose
+
+$$$$
+
+  Fake ChEBI Entry 2
+
+ 10 10  0  0  0  0  0  0  0  0999 V2000
+M  END
+> <chebi id>
+CHEBI:10002
+
+> <chebi name>
+beta-glucose
+
+> <secondary chebi id>
+CHEBI:99903
+
+> <synonyms>
+B-glucose
+
+$$$$
+
+  Fake ChEBI Entry 3 - No Secondary IDs
+
+ 10 10  0  0  0  0  0  0  0  0999 V2000
+M  END
+> <chebi id>
+CHEBI:10003
+
+> <chebi name>
+water
+
+$$$$
+
+  Fake ChEBI Entry 4 - Merged Entry (same secondary maps to this and entry 1)
+
+ 10 10  0  0  0  0  0  0  0  0999 V2000
+M  END
+> <chebi id>
+CHEBI:10004
+
+> <chebi name>
+fructose
+
+> <secondary chebi id>
+CHEBI:99904
+
+$$$$
