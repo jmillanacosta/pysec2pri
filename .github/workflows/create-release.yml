@@ -20,11 +20,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Get version from version.py
+        id: get_version
+        run: |
+          VERSION=$(python3 -c "import sys; sys.path.insert(0, 'src'); from pysec2pri.version import VERSION; print(VERSION)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release with auto notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
+          set -e
+          if gh release view v${{ steps.get_version.outputs.version }} --repo ${{ github.repository }} > /dev/null 2>&1; then
+            echo "Release tag v${{ steps.get_version.outputs.version }} already exists. Skipping release creation."
+            exit 0
+          fi
+          gh release create v${{ steps.get_version.outputs.version }} \
+            --title "v${{ steps.get_version.outputs.version }}" \
             --repo ${{ github.repository }} \
             --generate-notes
