@@ -1,0 +1,9 @@
+#curie_map:
+#  CHEBI: http://purl.obolibrary.org/obo/CHEBI_
+#  IAO: http://purl.obolibrary.org/obo/IAO_
+#mapping_set_version: "v1.0"
+subject_id	subject_label	predicate_id	object_id	object_label	mapping_cardinality	comment
+CHEBI:10001	alpha-glucose	IAO:0100001	CHEBI:99901	old-glucose-1	1:1	ID replaced.
+CHEBI:10001	alpha-glucose	IAO:0100001	CHEBI:99902	old-glucose-2	n:1	IDs merged into one.
+CHEBI:10002	beta-glucose	IAO:0100001	CHEBI:99903	old-beta	1:1	ID replaced.
+CHEBI:10003	water	IAO:0100001	CHEBI:99904	old-water	1:1	ID replaced.

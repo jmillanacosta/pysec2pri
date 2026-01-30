@@ -1,0 +1,4 @@
+hgnc_id	symbol	status	alias_symbol	prev_symbol	locus_group
+HGNC:2001	BRCA1	Approved	BRCC1|RNF53	PSCP	protein-coding gene
+HGNC:2002	TP53	Approved	P53|LFS1	tumor_p53	protein-coding gene
+HGNC:2003	MYC	Approved	c-Myc	v-myc	protein-coding gene
