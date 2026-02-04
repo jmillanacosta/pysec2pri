@@ -1,21 +1,25 @@
-"""NCBI Gene TSV file parser using Polars for memory efficiency."""
+"""NCBI Gene TSV file parser for secondary-to-primary identifier mappings.
+
+This parser extracts:
+1. ID-to-ID mappings: discontinued Gene IDs -> current Gene IDs
+2. Label-to-label mappings: gene symbol synonyms -> current symbols
+
+Uses SSSOM-compliant MappingSet classes with cardinality computation.
+"""
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable
 from pathlib import Path
 
 import polars as pl
-from tqdm import tqdm
+from sssom_schema import Mapping
 
-from pysec2pri.models import (
-    MappingCardinality,
-    MappingSet,
-    NCBIGeneMapping,
-    get_comment_for_cardinality,
+from pysec2pri.parsers.base import (
+    WITHDRAWN_ENTRY,
+    WITHDRAWN_ENTRY_LABEL,
+    BaseParser,
+    Sec2PriMappingSet,
 )
-from pysec2pri.parsers.base import BaseParser
 
 
 class NCBIParser(BaseParser):
@@ -23,83 +27,109 @@ class NCBIParser(BaseParser):
 
     Extracts secondary-to-primary NCBI Gene identifier mappings including
     gene symbols from gene_history and gene_info files.
+
+    Returns:
+    - IdMappingSet for ID-to-ID mappings (discontinued Gene IDs)
+    - LabelMappingSet for symbol mappings (gene synonyms)
     """
 
-    datasource_name = "NCBI"
-    history_source_url = "https://ftp.ncbi.nih.gov/gene/DATA/gene_history.gz"
-    info_source_url = "https://ftp.ncbi.nih.gov/gene/DATA/gene_info.gz"
+    datasource_name = "ncbi"
+
+    @property
+    def history_source_url(self) -> str:
+        """Get the gene_history download URL from config."""
+        return self.get_download_url("gene_history") or ""
+
+    @property
+    def info_source_url(self) -> str:
+        """Get the gene_info download URL from config."""
+        return self.get_download_url("gene_info") or ""
 
     def parse(
         self,
         input_path: Path | str | None = None,
-        gene_info_path: Path | str | None = None,
         tax_id: str = "9606",
-    ) -> MappingSet:
-        """Parse NCBI Gene files.
+    ) -> Sec2PriMappingSet:
+        """Parse NCBI gene_history file into an IdMappingSet.
 
         Args:
             input_path: Path to gene_history file (can be .gz compressed).
-            gene_info_path: Path to gene_info file for symbol information.
             tax_id: Taxonomy ID to filter by (default: "9606" for human).
 
         Returns:
-            MappingSet with NCBI Gene identifier and symbol mappings.
+            IdMappingSet with computed cardinalities based on IDs.
         """
-        if input_path is not None:
-            input_path = Path(input_path)
+        if input_path is None:
+            raise ValueError("input_path must not be None")
+        input_path = Path(input_path)
 
-        mappings: list[NCBIGeneMapping] = []
+        # Parse gene_history for ID mappings
+        mappings = self._parse_gene_history(input_path, tax_id)
 
-        # Parse gene_history file
-        history_mappings: list[NCBIGeneMapping] = []
-        symbol_info: dict[str, str] = {}
-        if input_path is not None:
-            history_mappings, symbol_info = self._parse_gene_history(input_path, tax_id)
-        mappings.extend(history_mappings)
-
-        # Parse gene_info file if provided
-        if gene_info_path:
-            gene_info_path = Path(gene_info_path)
-            symbol_mappings = self._parse_gene_info(gene_info_path, tax_id, symbol_info)
-            mappings.extend(symbol_mappings)
-
-        mapping_set = MappingSet(
-            mappings=mappings,
-            datasource_name=self.datasource_name,
-            version=self.version,
-            mapping_set_id="omicsfixid_ncbi_01",
-            mapping_set_description=(
-                "Secondary to primary ID mappings for NCBI database, "
-                "generated for the omicsFixID project."
-            ),
-            comment=(
-                "object_label represents an alternative symbol "
-                "by which the subject_label is also known."
-            ),
-            curie_map={
-                "NCBIGene:": "http://www.ncbi.nlm.nih.gov/gene/",
-                "IAO:": "http://purl.obolibrary.org/obo/IAO_",
-                "oboInOwl:": "http://www.geneontology.org/formats/oboInOwl#",
-            },
-        )
-
+        # Create IdMappingSet and compute cardinalities
+        mapping_set = self._create_mapping_set(mappings, mapping_type="id")
         return mapping_set
 
-    def _decompress_if_needed(self, file_path: Path) -> Path:
-        """Decompress gzip file if needed, return path to readable file."""
-        if file_path.suffix == ".gz":
-            # Polars can read gzip directly, but for very large files
-            # it's sometimes faster to decompress first
-            return file_path
-        return file_path
+    def parse_symbols(
+        self,
+        gene_info_path: Path | str | None,
+        tax_id: str = "9606",
+    ) -> Sec2PriMappingSet:
+        """Parse NCBI gene_info file for symbol (label) mappings.
 
-    def _load_gene_history_df(
+        Args:
+            gene_info_path: Path to gene_info file.
+            tax_id: Taxonomy ID to filter by (default: "9606" for human).
+
+        Returns:
+            LabelMappingSet with computed cardinalities based on labels.
+        """
+        if gene_info_path is None:
+            raise ValueError("gene_info_path must not be None")
+        gene_info_path = Path(gene_info_path)
+
+        # Parse gene_info for symbol mappings
+        mappings = self._parse_gene_info(gene_info_path, tax_id)
+
+        # Create LabelMappingSet and compute cardinalities
+        mapping_set = self._create_mapping_set(mappings, mapping_type="label")
+        return mapping_set
+
+    def parse_all(
+        self,
+        gene_history_path: Path | str | None,
+        gene_info_path: Path | str | None,
+        tax_id: str = "9606",
+    ) -> tuple[Sec2PriMappingSet, Sec2PriMappingSet]:
+        """Parse both gene_history and gene_info files.
+
+        Args:
+            gene_history_path: Path to gene_history file.
+            gene_info_path: Path to gene_info file.
+            tax_id: Taxonomy ID to filter by.
+
+        Returns:
+            Tuple of (IdMappingSet, LabelMappingSet).
+        """
+        id_mappings = self.parse(gene_history_path, tax_id)
+        label_mappings = self.parse_symbols(gene_info_path, tax_id)
+        return id_mappings, label_mappings
+
+    def _parse_gene_history(
         self,
         file_path: Path,
         tax_id: str,
-    ) -> pl.DataFrame:
-        """Load and filter gene_history by tax_id."""
-        return (
+    ) -> list[Mapping]:
+        """Parse the gene_history file for ID-to-ID mappings.
+
+        Args:
+            file_path: Path to gene_history file.
+            tax_id: Taxonomy ID to filter by.
+
+        Returns:
+            List of SSSOM Mapping objects.
+        """
+        df = (
             pl.scan_csv(
                 file_path,
                 separator="\t",
@@ -110,194 +140,100 @@ class NCBIParser(BaseParser):
             .collect()
         )
 
-    def _compute_gene_history_stats(
-        self,
-        df: pl.DataFrame,
-    ) -> tuple[
-        dict[str, int],
-        dict[str, int],
-        set[str],
-        dict[str, str],
-    ]:
-        """Compute primary/secondary cardinality counts and symbol info."""
-        primary_counts: dict[str, int] = defaultdict(int)
-        secondary_counts: dict[str, int] = defaultdict(int)
-        all_object_ids: set[str] = set()
-        symbol_info: dict[str, str] = {}
+        if df.is_empty():
+            return []
 
-        rows = df.iter_rows(named=True)
-        if self.show_progress:
-            rows = tqdm(
-                rows,
-                total=len(df),
-                desc="Pass 1: Computing cardinality",
-            )
+        m_meta = self.get_mapping_metadata()
+        mappings: list[Mapping] = []
 
-        for row in rows:
-            subject_id = self.normalize_subject_id(str(row.get("GeneID") or ""))
-            object_id = str(row.get("Discontinued_GeneID") or "")
-            sec_symbol = row.get("Discontinued_Symbol")
-
-            primary_counts[subject_id] += 1
-            secondary_counts[object_id] += 1
-            all_object_ids.add(object_id)
-
-            if sec_symbol:
-                symbol_info[object_id] = str(sec_symbol)
-
-        return primary_counts, secondary_counts, all_object_ids, symbol_info
-
-    def _infer_gene_history_cardinality(
-        self,
-        subject_id: str,
-        object_id: str,
-        primary_counts: dict[str, int],
-        secondary_counts: dict[str, int],
-    ) -> MappingCardinality:
-        pri_count = primary_counts.get(subject_id, 1)
-        sec_count = secondary_counts.get(object_id, 1)
-
-        if pri_count > 1 and sec_count > 1:
-            return MappingCardinality.MANY_TO_MANY
-        if pri_count > 1:
-            return MappingCardinality.MANY_TO_ONE
-        if sec_count > 1:
-            return MappingCardinality.ONE_TO_MANY
-        return MappingCardinality.ONE_TO_ONE
-
-    def _iter_gene_history_mappings(
-        self,
-        df: pl.DataFrame,
-        primary_counts: dict[str, int],
-        secondary_counts: dict[str, int],
-        all_object_ids: set[str],
-    ) -> Iterable[NCBIGeneMapping]:
-        rows = df.iter_rows(named=True)
-        if self.show_progress:
-            rows = tqdm(
-                rows,
-                total=len(df),
-                desc="Pass 2: Creating mappings",
-            )
-
-        for row in rows:
-            subject_id = self.normalize_subject_id(str(row.get("GeneID") or ""))
+        rows = list(df.iter_rows(named=True))
+        for row in self._progress(rows, desc="Processing gene_history"):
+            subject_id = str(row.get("GeneID") or "")
             object_id = str(row.get("Discontinued_GeneID") or "")
             sec_symbol = row.get("Discontinued_Symbol")
             disc_date = row.get("Discontinue_Date")
 
-            cardinality = self._infer_gene_history_cardinality(
-                subject_id,
-                object_id,
-                primary_counts,
-                secondary_counts,
-            )
+            if not object_id:
+                continue
 
+            # Normalize withdrawn IDs
+            subject_id = self.normalize_withdrawn_id(subject_id)
+
+            # Determine if this is a withdrawn entry with no replacement
             if self.is_withdrawn_primary(subject_id):
-                cardinality = MappingCardinality.ONE_TO_ZERO
+                mapping = Mapping(
+                    subject_id=WITHDRAWN_ENTRY,
+                    object_id=f"NCBIGene:{object_id}",
+                    subject_label=WITHDRAWN_ENTRY_LABEL,
+                    object_label=str(sec_symbol) if sec_symbol else "",
+                    predicate_id="oboInOwl:consider",
+                    mapping_justification=m_meta["mapping_justification"],
+                    subject_source=m_meta.get("subject_source"),
+                    object_source=m_meta.get("object_source"),
+                    mapping_tool=m_meta.get("mapping_tool"),
+                    license=m_meta.get("license"),
+                    comment=f"Withdrawn on {disc_date}." if disc_date else None,
+                )
+            else:
+                # Normal replacement mapping
+                mapping = Mapping(
+                    subject_id=f"NCBIGene:{subject_id}",
+                    object_id=f"NCBIGene:{object_id}",
+                    object_label=str(sec_symbol) if sec_symbol else "",
+                    predicate_id=m_meta["predicate_id"],
+                    mapping_justification=m_meta["mapping_justification"],
+                    subject_source=m_meta.get("subject_source"),
+                    object_source=m_meta.get("object_source"),
+                    mapping_tool=m_meta.get("mapping_tool"),
+                    license=m_meta.get("license"),
+                    comment=f"Discontinued on {disc_date}." if disc_date else None,
+                )
+            mappings.append(mapping)
 
-            # Use IAO:0100001 (term replaced by) for clear replacements
-            predicate = "IAO:0100001"
-            if cardinality in (
-                MappingCardinality.ONE_TO_MANY,
-                MappingCardinality.MANY_TO_MANY,
-                MappingCardinality.ONE_TO_ZERO,
-            ):
-                predicate = "oboInOwl:consider"
-
-            comment_parts = []
-            if disc_date:
-                comment_parts.append(f"Withdrawn date: {disc_date}.")
-            comment_parts.append(get_comment_for_cardinality(cardinality))
-            if subject_id in all_object_ids:
-                comment_parts.append("Object is also withdrawn.")
-            if self.version:
-                comment_parts.append(f"Release: {self.version}.")
-
-            yield NCBIGeneMapping(
-                subject_id=subject_id,
-                predicate_id=predicate,
-                object_id=object_id,
-                subject_label="",  # No primary label available from history
-                object_label=str(sec_symbol) if sec_symbol else "",
-                mapping_cardinality=cardinality,
-                comment=" ".join(comment_parts),
-                source_url=self.history_source_url,
-            )
-
-    def _parse_gene_history(
-        self,
-        file_path: Path,
-        tax_id: str,
-    ) -> tuple[list[NCBIGeneMapping], dict[str, str]]:
-        """Parse the gene_history file."""
-        df = self._load_gene_history_df(file_path, tax_id)
-
-        if df.is_empty():
-            return [], {}
-
-        (
-            primary_counts,
-            secondary_counts,
-            all_object_ids,
-            symbol_info,
-        ) = self._compute_gene_history_stats(df)
-
-        mappings = list(
-            self._iter_gene_history_mappings(
-                df,
-                primary_counts,
-                secondary_counts,
-                all_object_ids,
-            )
-        )
-
-        return mappings, symbol_info
+        return mappings
 
     def _parse_gene_info(
         self,
         file_path: Path,
         tax_id: str,
-        symbol_info: dict[str, str],
-    ) -> list[NCBIGeneMapping]:
-        """Parse the gene_info file for symbol mappings using Polars."""
-        # Read with Polars lazy evaluation
-        df = pl.scan_csv(
-            file_path,
-            separator="\t",
-            infer_schema_length=10000,
-            null_values=["-"],
+    ) -> list[Mapping]:
+        """Parse the gene_info file for symbol (label) mappings.
+
+        Args:
+            file_path: Path to gene_info file.
+            tax_id: Taxonomy ID to filter by.
+
+        Returns:
+            List of SSSOM Mapping objects for symbol mappings.
+        """
+        df = (
+            pl.scan_csv(
+                file_path,
+                separator="\t",
+                infer_schema_length=10000,
+                null_values=["-"],
+            )
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .collect()
         )
 
-        # Filter by tax_id
-        df_filtered = df.filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id).collect()
+        if df.is_empty():
+            return []
 
-        if self.show_progress:
-            pass
+        m_meta = self.get_mapping_metadata()
+        mappings: list[Mapping] = []
 
-        mappings: list[NCBIGeneMapping] = []
-
-        rows = df_filtered.iter_rows(named=True)
-        if self.show_progress:
-            rows = tqdm(
-                rows,
-                total=len(df_filtered),
-                desc="Processing gene_info",
-            )
-
-        for row in rows:
-            subject_id = str(row.get("GeneID") or "")
+        rows = list(df.iter_rows(named=True))
+        for row in self._progress(rows, desc="Processing gene_info"):
+            gene_id = str(row.get("GeneID") or "")
             pri_symbol = row.get("Symbol")
             synonyms = row.get("Synonyms")
-            auth_sym = row.get("Symbol_from_nomenclature_authority")
 
-            if not subject_id:
+            if not gene_id or not pri_symbol:
                 continue
 
-            # Handle nomenclature authority symbol
-            pri_symbol_str = str(pri_symbol) if pri_symbol else ""
-            if auth_sym and str(auth_sym) != pri_symbol_str:
-                pri_symbol_str = f"{pri_symbol_str}|{auth_sym}"
+            pri_symbol_str = str(pri_symbol)
+            curie_id = f"NCBIGene:{gene_id}"
 
             # Process synonyms
             if synonyms:
@@ -305,22 +241,31 @@ class NCBIParser(BaseParser):
                 for syn in synonyms_str.split("|"):
                     syn = syn.strip()
                     if syn:
-                        comment = "Unofficial symbol for the gene."
-                        if self.version:
-                            comment += f" Release: {self.version}."
-
-                        mapping = NCBIGeneMapping(
-                            subject_id=subject_id,
-                            predicate_id="oboInOwl:hasRelatedSynonym",
-                            object_id=syn,
-                            subject_label=pri_symbol_str or "",
+                        mapping = Mapping(
+                            subject_id=curie_id,
+                            subject_label=pri_symbol_str,
+                            object_id=curie_id,  # Same entity
                             object_label=syn,
-                            comment=comment,
-                            source_url=self.info_source_url,
+                            predicate_id="oboInOwl:hasRelatedSynonym",
+                            mapping_justification=m_meta["mapping_justification"],
+                            subject_source=m_meta.get("subject_source"),
+                            object_source=m_meta.get("object_source"),
+                            mapping_tool=m_meta.get("mapping_tool"),
+                            license=m_meta.get("license"),
+                            comment="Gene symbol synonym.",
                         )
                         mappings.append(mapping)
 
         return mappings
+
+    def _create_mapping_set(
+        self, mappings: list[Mapping], mapping_type: str = "id"
+    ) -> Sec2PriMappingSet:
+        """Create an IdMappingSet or LabelMappingSet with config metadata.
+
+        Delegates to BaseParser.create_mapping_set().
+        """
+        return self.create_mapping_set(mappings, mapping_type)
 
 
 __all__ = ["NCBIParser"]

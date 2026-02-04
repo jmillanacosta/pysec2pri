@@ -1,13 +1,17 @@
-"""Tests for pysec2pri.diff module.
+"""Tests for the diff module.
 
 Tests cover:
-- MappingDiff dataclass
-- diff_mapping_sets function
-- diff_sssom_files function
-- summarize_diff function
+- MappingDiff dataclass properties
+- mapping_set_to_dataframe conversion
+- diff_mapping_sets comparison logic
+- summarize_diff output formatting
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import polars as pl
 import pytest
@@ -19,15 +23,11 @@ from pysec2pri.diff import (
     mapping_set_to_dataframe,
     summarize_diff,
 )
-from pysec2pri.models import (
-    BaseMapping,
-    ChEBIMapping,
-    MappingSet,
-)
 
-# Path to test data directory
-TEST_DATA_DIR = Path(__file__).parent / "data"
+if TYPE_CHECKING:
+    pass
 
+from sssom_schema import Mapping, MappingSet
 
 # =============================================================================
 # Fixtures
@@ -35,76 +35,74 @@ TEST_DATA_DIR = Path(__file__).parent / "data"
 
 
 @pytest.fixture
-def sssom_v1_path() -> Path:
-    """Path to fake SSSOM v1 file."""
-    return TEST_DATA_DIR / Path("fake_sssom_v1.tsv")
-
-
-@pytest.fixture
-def sssom_v2_path() -> Path:
-    """Path to fake SSSOM v2 file."""
-    return TEST_DATA_DIR / Path("fake_sssom_v2.tsv")
-
-
-@pytest.fixture
 def empty_mapping_set() -> MappingSet:
     """Create an empty MappingSet."""
-    return MappingSet(datasource_name="Test", version="1.0")
+    return MappingSet(mapping_set_id="test:empty", license="https://example.org/license")
 
 
 @pytest.fixture
 def simple_mapping_set_v1() -> MappingSet:
     """Create a simple MappingSet (version 1)."""
-    ms = MappingSet(datasource_name="Test", version="1.0")
-    ms.add_mappings(
-        [
-            BaseMapping(
-                subject_id="PRIMARY1",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY1",
-            ),
-            BaseMapping(
-                subject_id="PRIMARY2",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY2",
-            ),
-            BaseMapping(
-                subject_id="PRIMARY3",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY3",
-            ),
-        ]
+    ms = MappingSet(
+        mapping_set_id="test:v1",
+        license="https://example.org/license",
+        mapping_set_version="1.0",
     )
+    ms.mappings = [
+        Mapping(
+            subject_id="PRIMARY1",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY1",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        Mapping(
+            subject_id="PRIMARY2",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY2",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        Mapping(
+            subject_id="PRIMARY3",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY3",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+    ]
     return ms
 
 
 @pytest.fixture
 def simple_mapping_set_v2() -> MappingSet:
     """Create a simple MappingSet (version 2) with changes."""
-    ms = MappingSet(datasource_name="Test", version="2.0")
-    ms.add_mappings(
-        [
-            # Unchanged
-            BaseMapping(
-                subject_id="PRIMARY1",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY1",
-            ),
-            # Changed: SECONDARY2 now maps to PRIMARY4 instead of PRIMARY2
-            BaseMapping(
-                subject_id="PRIMARY4",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY2",
-            ),
-            # New mapping (added)
-            BaseMapping(
-                subject_id="PRIMARY5",
-                predicate_id="IAO:0100001",
-                object_id="SECONDARY5",
-            ),
-            # SECONDARY3 -> PRIMARY3 removed (not in v2)
-        ]
+    ms = MappingSet(
+        mapping_set_id="test:v2",
+        license="https://example.org/license",
+        mapping_set_version="2.0",
     )
+    ms.mappings = [
+        # Unchanged
+        Mapping(
+            subject_id="PRIMARY1",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY1",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        # Changed: SECONDARY2 now maps to PRIMARY4 instead of PRIMARY2
+        Mapping(
+            subject_id="PRIMARY4",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY2",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        # New mapping (added)
+        Mapping(
+            subject_id="PRIMARY5",
+            predicate_id="IAO:0100001",
+            object_id="SECONDARY5",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        # SECONDARY3 -> PRIMARY3 removed (not in v2)
+    ]
     return ms
 
 
@@ -126,30 +124,75 @@ class TestMappingDiff:
         assert diff.old_version == "1.0"
         assert diff.new_version == "2.0"
         assert diff.datasource == "Test"
-        assert diff.added_count == 0
-        assert diff.removed_count == 0
-        assert diff.changed_count == 0
+        assert isinstance(diff.added, pl.DataFrame)
+        assert isinstance(diff.removed, pl.DataFrame)
+        assert isinstance(diff.changed, pl.DataFrame)
 
-    def test_diff_properties(self) -> None:
-        """Test diff property accessors."""
+    def test_added_count(self) -> None:
+        """Test added_count property."""
         diff = MappingDiff(
             old_version="1.0",
             new_version="2.0",
             datasource="Test",
-            added=pl.DataFrame({"subject_id": ["A"], "object_id": ["1"]}),
-            removed=pl.DataFrame({"subject_id": ["B", "C"], "object_id": ["2", "3"]}),
+            added=pl.DataFrame({"subject_id": ["A", "B"], "object_id": ["X", "Y"]}),
+        )
+        assert diff.added_count == 2
+
+    def test_removed_count(self) -> None:
+        """Test removed_count property."""
+        diff = MappingDiff(
+            old_version="1.0",
+            new_version="2.0",
+            datasource="Test",
+            removed=pl.DataFrame({"subject_id": ["A"], "object_id": ["X"]}),
+        )
+        assert diff.removed_count == 1
+
+    def test_changed_count(self) -> None:
+        """Test changed_count property."""
+        diff = MappingDiff(
+            old_version="1.0",
+            new_version="2.0",
+            datasource="Test",
             changed=pl.DataFrame(
                 {
-                    "object_id": ["4"],
-                    "old_subject_id": ["D"],
-                    "new_subject_id": ["E"],
+                    "object_id": ["X"],
+                    "old_subject_id": ["A"],
+                    "new_subject_id": ["B"],
+                }
+            ),
+        )
+        assert diff.changed_count == 1
+
+    def test_total_changes(self) -> None:
+        """Test total_changes property."""
+        diff = MappingDiff(
+            old_version="1.0",
+            new_version="2.0",
+            datasource="Test",
+            added=pl.DataFrame({"subject_id": ["A"], "object_id": ["X"]}),
+            removed=pl.DataFrame({"subject_id": ["B"], "object_id": ["Y"]}),
+            changed=pl.DataFrame(
+                {
+                    "object_id": ["Z"],
+                    "old_subject_id": ["C"],
+                    "new_subject_id": ["D"],
                 }
             ),
         )
         assert diff.added_count == 1
-        assert diff.removed_count == 2
+        assert diff.removed_count == 1
         assert diff.changed_count == 1
-        assert diff.total_changes == 4
+        assert diff.total_changes == 3
+
+    def test_has_changes_true(self) -> None:
+        """Test has_changes is True when there are changes."""
+        diff = MappingDiff(
+            old_version="1.0",
+            new_version="2.0",
+            datasource="Test",
+            added=pl.DataFrame({"subject_id": ["A"], "object_id": ["X"]}),
+        )
         assert diff.has_changes is True
 
     def test_has_changes_false_when_empty(self) -> None:
@@ -260,20 +303,22 @@ class TestDiffMappingSets:
         changed_objects = diff.changed["object_id"].to_list()
         assert "SECONDARY2" in changed_objects
 
-    def test_diff_captures_versions(
+    def test_diff_with_datasource(self, simple_mapping_set_v1: MappingSet) -> None:
+        """Test diff includes datasource name."""
+        diff = diff_mapping_sets(
+            simple_mapping_set_v1,
+            simple_mapping_set_v1,
+            datasource="TestSource",
+        )
+        assert diff.datasource == "TestSource"
+
+    def test_diff_versions(
         self, simple_mapping_set_v1: MappingSet, simple_mapping_set_v2: MappingSet
     ) -> None:
-        """Test that versions are captured in diff."""
+        """Test diff captures versions."""
         diff = diff_mapping_sets(simple_mapping_set_v1, simple_mapping_set_v2)
         assert diff.old_version == "1.0"
         assert diff.new_version == "2.0"
-
-    def test_diff_captures_datasource(
-        self, simple_mapping_set_v1: MappingSet, simple_mapping_set_v2: MappingSet
-    ) -> None:
-        """Test that datasource is captured in diff."""
-        diff = diff_mapping_sets(simple_mapping_set_v1, simple_mapping_set_v2)
-        assert diff.datasource == "Test"
 
 
 # =============================================================================
@@ -284,54 +329,57 @@ class TestDiffMappingSets:
 class TestDiffSssomFiles:
     """Tests for diff_sssom_files function."""
 
-    def test_diff_sssom_files(self, sssom_v1_path: str, sssom_v2_path: str) -> None:
-        """Test diffing SSSOM files."""
-        diff = diff_sssom_files(
-            sssom_v1_path,
-            sssom_v2_path,
-            datasource="ChEBI",
-        )
+    def test_diff_sssom_files(self) -> None:
+        """Test diffing SSSOM TSV files."""
+        with TemporaryDirectory() as tmpdir:
+            old_file = Path(tmpdir) / "old.tsv"
+            new_file = Path(tmpdir) / "new.tsv"
 
-        assert isinstance(diff, MappingDiff)
-        assert diff.datasource == "ChEBI"
-        assert diff.has_changes is True
+            # Create old file
+            old_content = """#mapping_set_version: "1.0"
+subject_id\tobject_id
+PRIMARY1\tSECONDARY1
+PRIMARY2\tSECONDARY2
+"""
+            old_file.write_text(old_content)
 
-    def test_diff_detects_file_changes(self, sssom_v1_path: str, sssom_v2_path: str) -> None:
-        """Test that file changes are detected."""
-        diff = diff_sssom_files(
-            sssom_v1_path,
-            sssom_v2_path,
-            datasource="ChEBI",
-        )
+            # Create new file with changes
+            new_content = """#mapping_set_version: "2.0"
+subject_id\tobject_id
+PRIMARY1\tSECONDARY1
+PRIMARY3\tSECONDARY3
+"""
+            new_file.write_text(new_content)
 
-        # v2 has:
-        # - CHEBI:99905 added
-        # - CHEBI:99904 removed
-        # - CHEBI:99903 changed (10002 -> 10004)
+            diff = diff_sssom_files(old_file, new_file, datasource="test")
 
-        assert diff.added_count >= 1
-        assert diff.removed_count >= 1
-        assert diff.changed_count >= 1
+            assert diff.old_version == "1.0"
+            assert diff.new_version == "2.0"
+            # SECONDARY2 removed, SECONDARY3 added
+            assert diff.removed_count == 1
+            assert diff.added_count == 1
 
-    def test_diff_same_file(self, sssom_v1_path: str) -> None:
-        """Test diffing a file with itself."""
-        diff = diff_sssom_files(
-            sssom_v1_path,
-            sssom_v1_path,
-            datasource="Test",
-        )
-        assert diff.has_changes is False
+    def test_diff_sssom_files_no_version(self) -> None:
+        """Test diffing SSSOM files without version metadata."""
+        with TemporaryDirectory() as tmpdir:
+            old_file = Path(tmpdir) / "old.tsv"
+            new_file = Path(tmpdir) / "new.tsv"
 
-    def test_extracts_version_from_metadata(self, sssom_v1_path: str, sssom_v2_path: str) -> None:
-        """Test that version is extracted from SSSOM metadata."""
-        diff = diff_sssom_files(
-            sssom_v1_path,
-            sssom_v2_path,
-            datasource="ChEBI",
-        )
-        # Versions should be extracted from #mapping_set_version
-        assert diff.old_version == "v1.0"
-        assert diff.new_version == "v2.0"
+            old_content = """subject_id\tobject_id
+PRIMARY1\tSECONDARY1
+"""
+            old_file.write_text(old_content)
+
+            new_content = """subject_id\tobject_id
+PRIMARY1\tSECONDARY1
+"""
+            new_file.write_text(new_content)
+
+            diff = diff_sssom_files(old_file, new_file)
+
+            assert diff.old_version is None
+            assert diff.new_version is None
+            assert diff.has_changes is False
 
 
 # =============================================================================
@@ -343,120 +391,75 @@ class TestSummarizeDiff:
     """Tests for summarize_diff function."""
 
     def test_summarize_empty_diff(self) -> None:
-        """Test summarizing empty diff."""
+        """Test summarizing an empty diff."""
         diff = MappingDiff(
             old_version="1.0",
             new_version="2.0",
-            datasource="Test",
+            datasource="TestDB",
         )
         summary = summarize_diff(diff)
 
-        assert "Test" in summary
+        assert "TestDB" in summary
         assert "1.0" in summary
         assert "2.0" in summary
-        assert "0" in summary  # Counts are 0
+        assert "Added mappings:" in summary
+        assert "0" in summary
 
-    def test_summarize_with_changes(
-        self, simple_mapping_set_v1: MappingSet, simple_mapping_set_v2: MappingSet
-    ) -> None:
-        """Test summarizing diff with changes."""
-        diff = diff_mapping_sets(simple_mapping_set_v1, simple_mapping_set_v2)
-        summary = summarize_diff(diff)
-
-        assert "Test" in summary
-        assert "Added" in summary
-        assert "Removed" in summary
-        assert "Changed" in summary
-
-    def test_summarize_shows_details_for_small_diffs(self) -> None:
-        """Test that small diffs show detailed changes."""
+    def test_summarize_with_changes(self) -> None:
+        """Test summarizing a diff with changes."""
         diff = MappingDiff(
             old_version="1.0",
             new_version="2.0",
-            datasource="Test",
-            added=pl.DataFrame(
+            datasource="TestDB",
+            added=pl.DataFrame({"subject_id": ["A"], "object_id": ["X"]}),
+            removed=pl.DataFrame({"subject_id": ["B"], "object_id": ["Y"]}),
+        )
+        summary = summarize_diff(diff)
+
+        assert "Added mappings:" in summary
+        assert "Removed mappings:" in summary
+        assert "X" in summary  # Added object shown
+        assert "Y" in summary  # Removed object shown
+
+    def test_summarize_with_changed_mappings(self) -> None:
+        """Test summarizing a diff with changed mappings."""
+        diff = MappingDiff(
+            old_version="1.0",
+            new_version="2.0",
+            datasource="TestDB",
+            changed=pl.DataFrame(
                 {
-                    "subject_id": ["NEW_PRI"],
-                    "object_id": ["NEW_SEC"],
+                    "object_id": ["SEC1"],
+                    "old_subject_id": ["OLD_PRI"],
+                    "new_subject_id": ["NEW_PRI"],
                 }
             ),
         )
         summary = summarize_diff(diff)
 
-        # Small diffs should show details
-        assert "NEW_SEC" in summary or "Added:" in summary
+        assert "Changed:" in summary
+        assert "SEC1" in summary
+        assert "OLD_PRI" in summary
+        assert "NEW_PRI" in summary
 
-    def test_summarize_format(self) -> None:
-        """Test summary format is readable."""
+    def test_summarize_truncates_large_lists(self) -> None:
+        """Test that large change lists are not fully printed."""
+        # Create more than 10 added mappings
+        added = pl.DataFrame(
+            {
+                "subject_id": [f"PRI{i}" for i in range(20)],
+                "object_id": [f"SEC{i}" for i in range(20)],
+            }
+        )
         diff = MappingDiff(
             old_version="1.0",
             new_version="2.0",
-            datasource="ChEBI",
+            datasource="TestDB",
+            added=added,
         )
         summary = summarize_diff(diff)
 
-        # Check it's a multi-line string
-        lines = summary.split("\n")
-        assert len(lines) > 1
-
-        # Check it contains expected sections
-        assert any("Diff Summary" in line for line in lines)
-        assert any("Old version" in line for line in lines)
-        assert any("New version" in line for line in lines)
-
-
-# =============================================================================
-# Integration Tests
-# =============================================================================
-
-
-class TestDiffIntegration:
-    """Integration tests for diff functionality."""
-
-    def test_diff_workflow(
-        self, simple_mapping_set_v1: MappingSet, simple_mapping_set_v2: MappingSet
-    ) -> None:
-        """Test complete diff workflow."""
-        # Create diff
-        diff = diff_mapping_sets(simple_mapping_set_v1, simple_mapping_set_v2)
-
-        # Generate summary
-        summary = summarize_diff(diff)
-
-        # Verify complete workflow
-        assert diff.has_changes
-        assert len(summary) > 0
-        assert diff.total_changes > 0
-
-    def test_diff_with_chebi_mappings(self) -> None:
-        """Test diff with ChEBI-specific mappings."""
-        ms1 = MappingSet(datasource_name="ChEBI", version="2024-01")
-        ms1.add_mappings(
-            [
-                ChEBIMapping(
-                    subject_id="CHEBI:10001",
-                    predicate_id="IAO:0100001",
-                    object_id="CHEBI:99901",
-                ),
-            ]
-        )
-
-        ms2 = MappingSet(datasource_name="ChEBI", version="2024-02")
-        ms2.add_mappings(
-            [
-                ChEBIMapping(
-                    subject_id="CHEBI:10001",
-                    predicate_id="IAO:0100001",
-                    object_id="CHEBI:99901",
-                ),
-                ChEBIMapping(
-                    subject_id="CHEBI:10002",
-                    predicate_id="IAO:0100001",
-                    object_id="CHEBI:99902",
-                ),
-            ]
-        )
-
-        diff = diff_mapping_sets(ms1, ms2)
-        assert diff.added_count == 1
-        assert diff.removed_count == 0
+        # Should show count but not list all 20
+        assert "20" in summary
+        # SEC19 should not be in the summary since it truncates after 10
+        assert "SEC19" not in summary

@@ -2,895 +2,608 @@
 
 from __future__ import annotations
 
+import tempfile
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
-from pysec2pri.constants import OutputType, get_output_directory_name
-from pysec2pri.logging import set_log_level
-from pysec2pri.models import MappingSet
+if TYPE_CHECKING:
+    from sssom_schema import MappingSet
 
-# Suppress FutureWarning from sssom library (pandas downcasting deprecation)
 warnings.filterwarnings("ignore", category=FutureWarning, module="sssom")
 
-# Type alias for click.Path with path_type - workaround for mypy type-var issue
-# See: https://github.com/pallets/click/issues/2558
 PathType: Any = click.Path(path_type=Path)  # type: ignore[type-var]
-ExistingPathType: Any = click.Path(  # type: ignore[type-var]
-    exists=True, path_type=Path
+ExistingPathType: Any = click.Path(
+    exists=True,
+    path_type=Path,  # type: ignore[type-var]
 )
 
 
-# === Helpers for CLI commands ===
-def _subset_gzip_file(path: Path, output_dir: Path, max_lines: int) -> Path:
-    """Create a subset of a gzip file with limited lines."""
-    import gzip
-    from pathlib import Path
-
-    subset_path = Path(output_dir) / path.name.replace(".gz", "_testsubset.gz")
-    with (
-        gzip.open(path, "rt", encoding="utf-8") as fin,
-        gzip.open(subset_path, "wt", encoding="utf-8") as fout,
-    ):
-        for i, line in enumerate(fin):
-            if i >= max_lines:
-                break
-            fout.write(line)
-    return subset_path
-
-
-def _subset_zip_file(path: Path, output_dir: Path, max_lines: int) -> Path:
-    """Create a subset of a zip file with limited lines per entry."""
-    import zipfile
-    from pathlib import Path
-
-    subset_path = Path(output_dir) / path.name.replace(".zip", "_testsubset.zip")
-    with (
-        zipfile.ZipFile(path, "r") as zin,
-        zipfile.ZipFile(subset_path, "w") as zout,
-    ):
-        for name in zin.namelist():
-            with zin.open(name) as fin:
-                data = b"".join(line for i, line in enumerate(fin) if i < max_lines)
-                zout.writestr(name, data)
-    return subset_path
-
-
-def _subset_text_file(path: Path, output_dir: Path, max_lines: int) -> Path:
-    """Create a subset of a text file with limited lines."""
-    from pathlib import Path
-
-    subset_path = Path(output_dir) / path.name.replace(path.suffix, f"_testsubset{path.suffix}")
-    with (
-        path.open("r", encoding="utf-8") as fin,
-        subset_path.open("w", encoding="utf-8") as fout,
-    ):
-        for i, line in enumerate(fin):
-            if i >= max_lines:
-                break
-            fout.write(line)
-    return subset_path
-
-
-def _download_and_subset(
+def _download_if_needed(
     datasource: str,
-    output_dir: Path,
-    test_subset: bool = False,
-    subset_lines: int = 1000,
-    subset_gz_lines: int = 1000,
-    subset_zip_lines: int = 1000,
-    file_keys: list[str] | None = None,
-) -> dict[str, Path]:
-    """Download files for a datasource and optionally subset them."""
-    from pysec2pri.download import download_datasource
+    input_file: Path | None,
+    file_key: str = "main",
+    version: str | None = None,
+) -> Path:
+    """Download datasource file if not provided."""
+    if input_file is not None:
+        return input_file
 
-    if file_keys is None:
-        file_keys = []
-    downloaded_files = download_datasource(datasource, output_dir)
+    from pysec2pri.download import download_datasource, get_download_urls
 
-    if not (test_subset and downloaded_files):
-        return downloaded_files
+    version_str = f" version {version}" if version else ""
+    click.echo(f"No input file provided. Downloading {datasource}{version_str}...")
 
-    subsetted = {}
-    for key, path in downloaded_files.items():
-        if file_keys and key not in file_keys:
-            continue
+    # Show URLs that will be downloaded
+    urls = get_download_urls(datasource, version=version)
+    for key, url in urls.items():
+        click.echo(f"  {key}: {url}")
 
-        if path.suffix == ".gz":
-            subsetted[key] = _subset_gzip_file(path, output_dir, subset_gz_lines)
-        elif path.suffix == ".zip":
-            subsetted[key] = _subset_zip_file(path, output_dir, subset_zip_lines)
-        else:
-            subsetted[key] = _subset_text_file(path, output_dir, subset_lines)
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_{datasource}_"))
+    downloaded = download_datasource(datasource, tmpdir, version=version)
 
-    downloaded_files.update(subsetted)
-    return downloaded_files
+    if file_key in downloaded:
+        return downloaded[file_key]
+    # Return first available file
+    return next(iter(downloaded.values()))
 
 
-def _write_outputs_and_report(
-    mapping_set: MappingSet,
-    output_dir: Path,
-    outputs: list[str] | None,
-    datasource_name: str,
-    mapping_date: str | None,
-    click_echo: Callable[..., Any] = print,
-) -> dict[str, Path]:
-    from pysec2pri.api import write_outputs
-
-    written = write_outputs(
-        mapping_set,
-        output_dir,
-        output_types=outputs,
-        datasource_name=datasource_name,
-        mapping_date=mapping_date,
-    )
-    click_echo(f"Generated {len(written)} output file(s) in {output_dir}:")
-    for output_type, path in written.items():
-        click_echo(f"  {output_type}: {path.name}")
-    click_echo(f"Total mappings: {len(mapping_set)}")
-    return written
+def _get_output_filename(
+    datasource: str,
+    output_format: str,
+    version: str | None = None,
+) -> Path:
+    """Generate output filename with optional version."""
+    if version:
+        return Path(f"{datasource}_{version}_{output_format}.tsv")
+    return Path(f"{datasource}_{output_format}.tsv")
 
 
-def _cleanup_downloaded(
-    downloaded_files: dict[str, Path] | None,
-    keep_download: bool,
-    click_echo: Callable[..., Any] = print,
-) -> None:
-    if not keep_download and downloaded_files:
-        for path in downloaded_files.values():
-            if path.exists():
-                path.unlink()
-                click_echo(f"Cleaned up: {path}")
+def _get_output_dir(
+    datasource: str,
+    version: str | None = None,
+) -> Path:
+    """Generate output directory name for 'all' format."""
+    if version:
+        return Path(f"{datasource}_{version}")
+    return Path(datasource)
 
 
-"""Command line interface for :mod:`pysec2pri`.
+def _resolve_all_format_dir(
+    output: Path | None,
+    datasource: str,
+    version: str | None,
+) -> Path:
+    """Resolve output directory for 'all' format.
 
-This CLI provides commands for parsing various biological database formats
-and generating SSSOM (Simple Standard for Sharing Ontology Mappings) files
-as well as legacy output formats.
-
-By default, commands auto-download source files from upstream databases.
-Use input options to specify local files instead.
-
-Output files are placed in a date-stamped folder: {database}{ddmmyy}/
-"""
-
-
-__all__ = [
-    "main",
-]
-
-
-def get_available_outputs_for_db(db_name: str) -> list[str]:
-    """Get available output types for a database."""
-    from pysec2pri.constants import get_datasource_config
-
-    config = get_datasource_config(db_name)
-    if config:
-        return [ot.value for ot in config.available_outputs]
-    return [OutputType.SSSOM.value]
-
-
-def validate_outputs(
-    ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
-) -> list[str] | None:
-    """Validate and convert output type values."""
-    if not value:
-        return None
-    valid_types = {ot.value for ot in OutputType}
-    for v in value:
-        if v not in valid_types:
-            raise click.BadParameter(
-                f"Invalid output type '{v}'. Valid types: {', '.join(valid_types)}"
-            )
-    return list(value)
-
-
-# Common options as decorators
-def common_options(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Add common options to database commands."""
-    f = click.option(
-        "--output-dir",
-        type=PathType,
-        default=None,
-        help="Base output directory. Default: ./{database}{ddmmyy}/",
-    )(f)
-    f = click.option(
-        "--outputs",
-        multiple=True,
-        callback=validate_outputs,
-        help=(
-            "Output types to generate. Can be specified multiple times. "
-            "Options: sssom, priIDs, secID2priID, name2synonym, symbol2prev. "
-            "Default: all available for the database."
-        ),
-    )(f)
-    f = click.option(
-        "-v",
-        "--version",
-        "source_version",
-        help="Version/release of the source database.",
-    )(f)
-    f = click.option(
-        "-d",
-        "--date",
-        "mapping_date",
-        help="Mapping date (YYYY-MM-DD format).",
-    )(f)
-    f = click.option(
-        "--keep-download",
-        is_flag=True,
-        help="Keep downloaded files after processing.",
-    )(f)
-    f = click.option(
-        "--test-subset",
-        is_flag=True,
-        help="Process only a small test subset (first lines/records).",
-        default=False,
-    )(f)
-    return f
+    If output is provided and looks like a file (has .tsv extension),
+    use its parent directory plus versioned folder.
+    If output is a directory, use it directly.
+    If output is None, generate default directory name.
+    """
+    if output is not None:
+        # If output looks like a file path (has extension), use parent dir
+        if output.suffix:
+            return output.parent / _get_output_dir(datasource, version)
+        # Output is a directory - use it directly without adding subfolder
+        return output
+    # No output specified - create versioned folder in current directory
+    return _get_output_dir(datasource, version)
 
 
 @click.group()
 @click.version_option()
-@click.option(
-    "--log-level",
-    type=click.Choice(
-        ["debug", "info", "warning", "error", "critical"],
-        case_sensitive=False,
-    ),
-    default="critical",
-    help="Set logging verbosity (default: critical).",
-)
-def main(log_level: str) -> None:
-    """pysec2pri: Secondary to Primary Identifier Mapping.
-
-    Convert biological database secondary identifier mappings to SSSOM files
-    and legacy output formats.
-
-    By default, commands auto-download source files from upstream databases.
-    Output is written to {database}{ddmmyy}/ folder.
-    """
-    set_log_level(log_level)
-
-
-# =============================================================================
-# ChEBI command
-# =============================================================================
+def main() -> None:
+    """pysec2pri: Secondary to Primary ID mapping tool."""
 
 
 @main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
 @click.option(
-    "-i",
-    "--input",
-    "input_file",
-    type=ExistingPathType,
-    help="Local ChEBI SDF file. If not provided, downloads from upstream.",
+    "--version",
+    "data_version",
+    help="Data version string (e.g. 245)",
 )
-@common_options
+@click.option(
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "name2synonym", "all"]),
+    help="Output format",
+)
 def chebi(
     input_file: Path | None,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
-    keep_download: bool,
-    test_subset: bool,
+    output: Path | None,
+    data_version: str | None,
+    output_format: str,
 ) -> None:
-    r"""Parse ChEBI SDF file and generate mapping files.
-
-    By default, downloads the latest ChEBI SDF from upstream.
-    Use --input to specify a local file instead.
-
-    Available outputs: sssom, priIDs, secID2priID, name2synonym
-
-
-    Examples:
-        # Auto-download and process (all outputs)
-        pysec2pri chebi
-
-        # Only generate SSSOM and priIDs
-        pysec2pri chebi --outputs sssom --outputs priIDs
-
-        # Use local file with custom output directory
-        pysec2pri chebi --input ChEBI_complete_3star.sdf --output-dir ./results
-    """
-    from pysec2pri.api import parse_chebi
-
-    # Determine output directory
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("chebi")
-    downloaded_files = None
-    if input_file is None:
-        click.echo("Downloading ChEBI SDF file...")
-        downloaded_files = _download_and_subset(
-            "chebi", output_dir, test_subset, subset_lines=50000, file_keys=["sdf"]
-        )
-        input_file = downloaded_files.get("sdf")
-        if input_file is None:
-            raise click.ClickException("Failed to download ChEBI SDF file")
-        click.echo(f"Downloaded: {input_file}")
-    click.echo(f"Parsing {input_file}...")
-    mapping_set = parse_chebi(input_file, version=source_version)
-    _write_outputs_and_report(
-        mapping_set, output_dir, outputs, "chebi", mapping_date, click_echo=click.echo
+    """Parse ChEBI SDF file and generate mappings."""
+    from pysec2pri.api import parse_chebi, parse_chebi_synonyms
+    from pysec2pri.exports import (
+        write_name2synonym,
+        write_pri_ids,
+        write_sec2pri,
+        write_sssom,
     )
-    _cleanup_downloaded(downloaded_files, keep_download, click_echo=click.echo)
 
+    input_file = _download_if_needed("chebi", input_file, "sdf", version=data_version)
 
-# =============================================================================
-# HMDB command
-# =============================================================================
+    if output_format == "name2synonym":
+        result = parse_chebi_synonyms(input_file, version=data_version)
+    else:
+        result = parse_chebi(input_file, version=data_version)
+
+    # Get version from result for output naming
+    version = getattr(result, "mapping_set_version", None) or data_version
+    v_suffix = f"_{version}" if version else ""
+
+    if output_format == "all":
+        out_dir = _resolve_all_format_dir(output, "chebi", version)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_sssom(result, out_dir / f"chebi{v_suffix}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"chebi{v_suffix}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"chebi{v_suffix}_pri_ids.tsv")
+        name2syn = out_dir / f"chebi{v_suffix}_name2synonym.tsv"
+        write_name2synonym(result, name2syn)
+        click.echo(f"Wrote all formats to {out_dir}/")
+    else:
+        out_path = output or _get_output_filename("chebi", output_format, version)
+        if output_format == "sssom":
+            write_sssom(result, out_path)
+        elif output_format == "sec2pri":
+            write_sec2pri(result, out_path)
+        elif output_format == "pri_ids":
+            write_pri_ids(result, out_path)
+        elif output_format == "name2synonym":
+            write_name2synonym(result, out_path)
+        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
 
 
 @main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
 @click.option(
-    "-i",
-    "--input",
-    "input_file",
-    type=ExistingPathType,
-    help="Local HMDB ZIP file. If not provided, downloads from upstream.",
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    help="Output format",
 )
-@common_options
 def hmdb(
     input_file: Path | None,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
-    keep_download: bool,
-    test_subset: bool,
+    output: Path | None,
+    output_format: str,
 ) -> None:
-    r"""Parse HMDB XML files and generate mapping files.
-
-    By default, downloads the latest HMDB metabolites ZIP from upstream.
-    Use --input to specify a local file instead.
-
-    Available outputs: sssom, priIDs, secID2priID, name2synonym
-
-
-    Examples:
-        # Auto-download and process (all outputs)
-        pysec2pri hmdb
-
-        # Only generate SSSOM
-        pysec2pri hmdb --outputs sssom
-
-        # Use local file
-        pysec2pri hmdb --input hmdb_metabolites.zip
-    """
+    """Parse HMDB XML file and generate mappings."""
     from pysec2pri.api import parse_hmdb
+    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
 
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("hmdb")
-    downloaded_files = None
-    if input_file is None:
-        click.echo("Downloading HMDB metabolites file...")
-        downloaded_files = _download_and_subset(
-            "hmdb", output_dir, test_subset, file_keys=["metabolites"]
-        )
-        input_file = downloaded_files.get("metabolites")
-        if input_file is None:
-            raise click.ClickException("Failed to download HMDB file")
-        click.echo(f"Downloaded: {input_file}")
-    click.echo(f"Parsing {input_file}...")
-    mapping_set = parse_hmdb(input_file, version=source_version)
-    _write_outputs_and_report(
-        mapping_set, output_dir, outputs, "hmdb", mapping_date, click_echo=click.echo
-    )
-    _cleanup_downloaded(downloaded_files, keep_download, click_echo=click.echo)
+    input_file = _download_if_needed("hmdb", input_file, "metabolites")
 
+    result = parse_hmdb(input_file)
+    version = getattr(result, "mapping_set_version", None)
+    v_suffix = f"_{version}" if version else ""
 
-# =============================================================================
-# HGNC command
-# =============================================================================
-
-
-@main.command()
-@click.option(
-    "-w",
-    "--withdrawn",
-    "withdrawn_file",
-    type=ExistingPathType,
-    help="Local HGNC withdrawn file. Downloads from upstream if not set.",
-)
-@click.option(
-    "-c",
-    "--complete-set",
-    type=ExistingPathType,
-    help="Local HGNC complete set file. Downloaded if --withdrawn is not set.",
-)
-@click.option(
-    "--include-unmapped",
-    is_flag=True,
-    help="Include genes with no alias/previous symbols (primary ID only).",
-    default=True,
-)
-@common_options
-def hgnc(
-    withdrawn_file: Path | None,
-    complete_set: Path | None,
-    include_unmapped: bool,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
-    keep_download: bool,
-    test_subset: bool,
-) -> None:
-    r"""Parse HGNC files and generate mapping files.
-
-    By default, downloads the latest HGNC files from upstream.
-    Use --withdrawn and --complete-set to specify local files.
-
-    Available outputs: sssom, priIDs, secID2priID, symbol2prev
-
-
-    Examples:
-        # Auto-download and process (all outputs)
-        pysec2pri hgnc
-
-        # Only generate SSSOM
-        pysec2pri hgnc --outputs sssom
-
-        # Use local files
-        pysec2pri hgnc --withdrawn withdrawn.txt --complete-set hgnc_complete.txt
-    """
-    from pysec2pri.api import parse_hgnc
-
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("hgnc")
-    downloaded_files = None
-    if withdrawn_file is None:
-        click.echo("Downloading HGNC files...")
-        downloaded_files = _download_and_subset(
-            "hgnc", output_dir, test_subset, file_keys=["withdrawn", "complete"]
-        )
-        withdrawn_file = downloaded_files.get("withdrawn")
-        complete_set = downloaded_files.get("complete")
-        if withdrawn_file is None:
-            raise click.ClickException("Failed to download HGNC files")
-        click.echo(f"Downloaded withdrawn: {withdrawn_file}")
-        if complete_set:
-            click.echo(f"Downloaded complete set: {complete_set}")
-    click.echo(f"Parsing {withdrawn_file}...")
-    mapping_set = parse_hgnc(
-        withdrawn_file,
-        complete_set_file=complete_set,
-        version=source_version,
-        include_unmapped_genes=include_unmapped,
-    )
-    _write_outputs_and_report(
-        mapping_set, output_dir, outputs, "hgnc", mapping_date, click_echo=click.echo
-    )
-    _cleanup_downloaded(downloaded_files, keep_download, click_echo=click.echo)
-
-
-# =============================================================================
-# NCBI command
-# =============================================================================
+    if output_format == "all":
+        out_dir = _resolve_all_format_dir(output, "hmdb", version)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_sssom(result, out_dir / f"hmdb{v_suffix}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"hmdb{v_suffix}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"hmdb{v_suffix}_pri_ids.tsv")
+        click.echo(f"Wrote all formats to {out_dir}/")
+    else:
+        out_path = output or _get_output_filename("hmdb", output_format, version)
+        if output_format == "sssom":
+            write_sssom(result, out_path)
+        elif output_format == "sec2pri":
+            write_sec2pri(result, out_path)
+        elif output_format == "pri_ids":
+            write_pri_ids(result, out_path)
+        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
 
 
 @main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
 @click.option(
-    "-H",
-    "--history",
-    "history_file",
-    type=ExistingPathType,
-    help="Local gene_history file. If not provided, downloads from upstream.",
-)
-@click.option(
-    "-I",
-    "--gene-info",
-    type=ExistingPathType,
-    help="Local gene_info file. Downloaded if --history is not set.",
-)
-@click.option(
-    "-t",
-    "--tax-id",
-    default="9606",
-    help="Taxonomy ID to filter (default: 9606 for human, others unsupported).",
-)
-@common_options
-def ncbi(
-    history_file: Path | None,
-    gene_info: Path | None,
-    tax_id: str,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
-    keep_download: bool,
-    test_subset: bool,
-) -> None:
-    r"""Parse NCBI Gene files and generate mapping files.
-
-    By default, downloads the latest NCBI Gene files from upstream.
-    Use --history and --gene-info to specify local files.
-
-    Available outputs: sssom, priIDs, secID2priID, symbol2prev
-
-
-    Examples:
-        # Auto-download and process (human genes, all outputs)
-        pysec2pri ncbi
-
-        # Different organism
-        pysec2pri ncbi --tax-id 10090
-
-        # Use local files
-        pysec2pri ncbi --history gene_history.gz --gene-info gene_info.gz
-    """
-    from pysec2pri.api import parse_ncbi
-
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("ncbi")
-    downloaded_files = None
-    if history_file is None:
-        click.echo("Downloading NCBI Gene files...")
-        downloaded_files = _download_and_subset(
-            "ncbi", output_dir, test_subset, file_keys=["gene_history", "gene_info"]
-        )
-        history_file = downloaded_files.get("gene_history")
-        gene_info = downloaded_files.get("gene_info")
-        if history_file is None:
-            raise click.ClickException("Failed to download NCBI files")
-        click.echo(f"Downloaded history: {history_file}")
-        if gene_info:
-            click.echo(f"Downloaded gene_info: {gene_info}")
-    click.echo(f"Parsing {history_file} (tax_id={tax_id})...")
-    mapping_set = parse_ncbi(
-        history_file,
-        gene_info_file=gene_info,
-        tax_id=tax_id,
-        version=source_version,
-    )
-    _write_outputs_and_report(
-        mapping_set, output_dir, outputs, "ncbi", mapping_date, click_echo=click.echo
-    )
-    _cleanup_downloaded(downloaded_files, keep_download, click_echo=click.echo)
-
-
-# =============================================================================
-# UniProt command
-# =============================================================================
-
-
-@main.command()
-@click.option(
-    "-s",
-    "--sec-ac",
-    "sec_ac_file",
-    type=ExistingPathType,
-    help="Local sec_ac.txt file. If not provided, downloads from upstream.",
-)
-@click.option(
-    "--delac",
-    type=ExistingPathType,
-    help="Local delac_sp.txt file. Downloaded if --sec-ac is not set.",
-)
-@common_options
-def uniprot(
-    sec_ac_file: Path | None,
-    delac: Path | None,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
-    keep_download: bool,
-    test_subset: bool,
-) -> None:
-    r"""Parse UniProt files and generate mapping files.
-
-    By default, downloads the latest UniProt files from upstream.
-    Use --sec-ac and --delac to specify local files.
-
-    Available outputs: sssom, priIDs, secID2priID
-
-
-    Examples:
-        # Auto-download and process (all outputs)
-        pysec2pri uniprot
-
-        # Only generate SSSOM
-        pysec2pri uniprot --outputs sssom
-
-        # Use local files
-        pysec2pri uniprot --sec-ac sec_ac.txt --delac delac_sp.txt
-    """
-    from pysec2pri.api import parse_uniprot
-
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("uniprot")
-    downloaded_files = None
-    if sec_ac_file is None:
-        click.echo("Downloading UniProt files...")
-        downloaded_files = _download_and_subset(
-            "uniprot", output_dir, test_subset, file_keys=["secondary", "deleted"]
-        )
-        sec_ac_file = downloaded_files.get("secondary")
-        delac = downloaded_files.get("deleted")
-        if sec_ac_file is None:
-            raise click.ClickException("Failed to download UniProt files")
-        click.echo(f"Downloaded sec_ac: {sec_ac_file}")
-        if delac:
-            click.echo(f"Downloaded delac: {delac}")
-    click.echo(f"Parsing {sec_ac_file}...")
-    mapping_set = parse_uniprot(
-        sec_ac_file,
-        delac_file=delac,
-        version=source_version,
-    )
-    _write_outputs_and_report(
-        mapping_set, output_dir, outputs, "uniprot", mapping_date, click_echo=click.echo
-    )
-    _cleanup_downloaded(downloaded_files, keep_download, click_echo=click.echo)
-
-
-# =============================================================================
-# Wikidata command
-# =============================================================================
-
-
-@main.command()
-@click.option(
-    "-t",
-    "--type",
-    "entity_type",
-    type=click.Choice(["all", "metabolites", "genes", "proteins"]),
-    default="all",
-    help="Type of Wikidata entities to query. Use 'all' to query all types.",
-)
-@click.option(
-    "--output-dir",
-    type=PathType,
-    default=None,
-    help="Output directory. Default: ./wikidata{ddmmyy}/",
-)
-@click.option(
-    "--outputs",
-    multiple=True,
-    callback=validate_outputs,
-    help=(
-        "Output types to generate. Can be specified multiple times. "
-        "Options: sssom, secID2priID. Default: all available."
-    ),
-)
-@click.option(
-    "-v",
     "--version",
-    "source_version",
-    help="Version/date string for the mappings.",
+    "data_version",
+    help="Data version string (eg 2023-07-01)",
 )
 @click.option(
-    "-d",
-    "--date",
-    "mapping_date",
-    help="Mapping date (YYYY-MM-DD format).",
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "all"]),
+    help="Output format",
+)
+@click.option(
+    "--symbols-file",
+    type=ExistingPathType,
+    help="HGNC complete set file for symbol mappings",
+)
+def hgnc(
+    input_file: Path | None,
+    output: Path | None,
+    data_version: str | None,
+    output_format: str,
+    symbols_file: Path | None,
+) -> None:
+    """Parse HGNC withdrawn file and generate mappings."""
+    from pysec2pri.api import parse_hgnc, parse_hgnc_symbols
+    from pysec2pri.exports import (
+        write_pri_ids,
+        write_sec2pri,
+        write_sssom,
+        write_symbol2prev,
+    )
+
+    if output_format == "symbol2prev":
+        if symbols_file is None:
+            symbols_file = _download_if_needed("hgnc", None, "complete", version=data_version)
+        result = parse_hgnc_symbols(symbols_file, version=data_version)
+    else:
+        input_file = _download_if_needed("hgnc", input_file, "withdrawn", version=data_version)
+        result = parse_hgnc(input_file, version=data_version)
+
+    version = getattr(result, "mapping_set_version", None) or data_version
+    v_suffix = f"_{version}" if version else ""
+
+    if output_format == "all":
+        out_dir = _resolve_all_format_dir(output, "hgnc", version)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_sssom(result, out_dir / f"hgnc{v_suffix}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"hgnc{v_suffix}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"hgnc{v_suffix}_pri_ids.tsv")
+        write_symbol2prev(result, out_dir / f"hgnc{v_suffix}_symbol2prev.tsv")
+        click.echo(f"Wrote all formats to {out_dir}/")
+    else:
+        out_path = output or _get_output_filename("hgnc", output_format, version)
+        if output_format == "sssom":
+            write_sssom(result, out_path)
+        elif output_format == "sec2pri":
+            write_sec2pri(result, out_path)
+        elif output_format == "symbol2prev":
+            write_symbol2prev(result, out_path)
+        elif output_format == "pri_ids":
+            write_pri_ids(result, out_path)
+        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
+
+
+@main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
+@click.option("--tax-id", default="9606", help="Taxonomy ID (default: 9606)")
+@click.option(
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "all"]),
+    help="Output format",
+)
+@click.option(
+    "--symbols-file",
+    type=ExistingPathType,
+    help="Gene info file for symbol mappings",
+)
+def ncbi(
+    input_file: Path | None,
+    output: Path | None,
+    tax_id: str,
+    output_format: str,
+    symbols_file: Path | None,
+) -> None:
+    """Parse NCBI Gene history file and generate mappings."""
+    from pysec2pri.api import parse_ncbi, parse_ncbi_symbols
+    from pysec2pri.exports import (
+        write_pri_ids,
+        write_sec2pri,
+        write_sssom,
+        write_symbol2prev,
+    )
+
+    if output_format == "symbol2prev":
+        if symbols_file is None:
+            symbols_file = _download_if_needed("ncbi", None, "gene_info")
+        result = parse_ncbi_symbols(symbols_file, tax_id=tax_id)
+    else:
+        input_file = _download_if_needed("ncbi", input_file, "gene_history")
+        result = parse_ncbi(input_file, tax_id=tax_id)
+
+    version = getattr(result, "mapping_set_version", None)
+    v_suffix = f"_{version}" if version else ""
+
+    if output_format == "all":
+        out_dir = _resolve_all_format_dir(output, "ncbi", version)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_sssom(result, out_dir / f"ncbi{v_suffix}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"ncbi{v_suffix}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"ncbi{v_suffix}_pri_ids.tsv")
+        write_symbol2prev(result, out_dir / f"ncbi{v_suffix}_symbol2prev.tsv")
+        click.echo(f"Wrote all formats to {out_dir}/")
+    else:
+        out_path = output or _get_output_filename("ncbi", output_format, version)
+        if output_format == "sssom":
+            write_sssom(result, out_path)
+        elif output_format == "sec2pri":
+            write_sec2pri(result, out_path)
+        elif output_format == "symbol2prev":
+            write_symbol2prev(result, out_path)
+        elif output_format == "pri_ids":
+            write_pri_ids(result, out_path)
+        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
+
+
+@main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
+@click.option(
+    "--version",
+    "data_version",
+    help="Release version (e.g., 2024_01)",
+)
+@click.option(
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    help="Output format",
+)
+@click.option(
+    "--delac-file",
+    type=ExistingPathType,
+    help="Deleted accessions file (delac_sp.txt)",
+)
+def uniprot(
+    input_file: Path | None,
+    output: Path | None,
+    data_version: str | None,
+    output_format: str,
+    delac_file: Path | None,
+) -> None:
+    """Parse UniProt secondary accessions file and generate mappings."""
+    from pysec2pri.api import parse_uniprot
+    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
+
+    input_file = _download_if_needed("uniprot", input_file, "sec_ac", version=data_version)
+
+    result = parse_uniprot(input_file, delac_file=delac_file)
+    version = getattr(result, "mapping_set_version", None) or data_version
+    v_suffix = f"_{version}" if version else ""
+
+    if output_format == "all":
+        out_dir = _resolve_all_format_dir(output, "uniprot", version)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_sssom(result, out_dir / f"uniprot{v_suffix}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"uniprot{v_suffix}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"uniprot{v_suffix}_pri_ids.tsv")
+        click.echo(f"Wrote all formats to {out_dir}/")
+    else:
+        out_path = output or _get_output_filename("uniprot", output_format, version)
+        if output_format == "sssom":
+            write_sssom(result, out_path)
+        elif output_format == "sec2pri":
+            write_sec2pri(result, out_path)
+        elif output_format == "pri_ids":
+            write_pri_ids(result, out_path)
+        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
+
+
+@main.command()
+@click.argument("input_file", type=ExistingPathType, required=False)
+@click.option("-o", "--output", type=PathType, help="Output file path")
+@click.option(
+    "--format",
+    "output_format",
+    default="sssom",
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    help="Output format",
+)
+@click.option(
+    "--entity-type",
+    default=None,
+    type=click.Choice(["metabolites", "chemicals", "genes", "proteins"]),
+    help="Entity type to query. If not specified, queries all types.",
 )
 @click.option(
     "--test-subset",
     is_flag=True,
-    help="Process only a small test subset (uses _test.rq query).",
-    default=False,
+    help="Use test queries with LIMIT 10 (for testing)",
 )
 def wikidata(
-    entity_type: str,
-    output_dir: Path | None,
-    outputs: list[str] | None,
-    source_version: str | None,
-    mapping_date: str | None,
+    input_file: Path | None,
+    output: Path | None,
+    output_format: str,
+    entity_type: str | None,
     test_subset: bool,
 ) -> None:
-    r"""Query Wikidata for redirect mappings.
+    """Query Wikidata SPARQL endpoint for redirect mappings.
 
-    Queries the QLever Wikidata endpoint for owl:sameAs redirect mappings.
+    By default, queries ALL entity types (metabolites, genes, proteins)
+    defined in the config. Use --entity-type to query a specific type.
 
-    Available outputs: sssom, secID2priID
+    Each entity type is saved to a separate file with appropriate naming.
 
+    If INPUT_FILE is provided, parses pre-downloaded TSV results instead
+    of querying the SPARQL endpoint.
 
-    Examples:
-        # Query metabolite redirects
-        pysec2pri wikidata --type metabolites
-
-        # Query gene redirects
-        pysec2pri wikidata --type genes
+    Uses the QLever endpoint for better performance.
     """
-    from pysec2pri.api import write_outputs
-    from pysec2pri.parsers.wikidata import parse_wikidata
+    from pysec2pri.api import parse_wikidata
+    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
 
-    # Determine output directory
-    if output_dir is None:
-        output_dir = Path(".") / get_output_directory_name("wikidata")
-
-    if entity_type == "all":
-        types_to_query = ["metabolites", "genes", "proteins"]
+    # Determine which entity types to process
+    if entity_type:
+        entity_types = [entity_type]
     else:
-        types_to_query = [entity_type]
-    all_written = {}
-    all_mappings = []
-    click.echo(f"Will query Wikidata for {', '.join(types_to_query)}")
-    for etype in types_to_query:
-        click.echo(f"Querying Wikidata for {etype}...{' (test subset)' if test_subset else ''}")
-        mapping_set = parse_wikidata(
+        entity_types = ["metabolites", "genes", "proteins"]
+
+    subset_msg = " (test subset)" if test_subset else ""
+
+    for etype in entity_types:
+        if input_file is None:
+            click.echo(f"Querying Wikidata for {etype}{subset_msg}...")
+        else:
+            click.echo(f"Parsing {input_file} for {etype}...")
+
+        result = parse_wikidata(
+            input_file,
             entity_type=etype,
-            version=source_version,
             test_subset=test_subset,
         )
-        written = write_outputs(
-            mapping_set,
-            f"{output_dir}_{etype}",
-            output_types=outputs,
-            datasource_name="wikidata",
-            mapping_date=mapping_date,
-        )
-        all_written.update({f"{etype}_{k}": v for k, v in written.items()})
-        all_mappings.append(mapping_set)
-    click.echo(f"Generated {len(all_written)} output file(s) in {output_dir}:")
-    for output_type, path in all_written.items():
-        click.echo(f"  {output_type}: {path.name}")
-    total = sum(len(ms) for ms in all_mappings)
-    click.echo(f"Total mappings: {total}")
+
+        version = getattr(result, "mapping_set_version", None)
+        v_suffix = f"_{version}" if version else ""
+        out_prefix = f"wikidata_{etype}"
+
+        if output_format == "all":
+            out_dir = _resolve_all_format_dir(output, "wikidata", version)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            sssom_f = out_dir / f"{out_prefix}{v_suffix}_sssom.tsv"
+            sec2pri_f = out_dir / f"{out_prefix}{v_suffix}_sec2pri.tsv"
+            pri_ids_f = out_dir / f"{out_prefix}{v_suffix}_pri_ids.tsv"
+            write_sssom(result, sssom_f)
+            write_sec2pri(result, sec2pri_f)
+            write_pri_ids(result, pri_ids_f)
+            n = len(result.mappings or [])
+            click.echo(f"  Wrote {n} {etype} mappings to {out_dir}/")
+        else:
+            # Determine output path
+            if output is None:
+                out_path = _get_output_filename(out_prefix, output_format, version)
+            elif output.suffix == ".tsv":
+                # User provided a specific file - use parent as dir
+                out_dir = output.parent
+                out_dir.mkdir(parents=True, exist_ok=True)
+                fname = f"{out_prefix}{v_suffix}_{output_format}.tsv"
+                out_path = out_dir / fname
+            else:
+                # User provided a directory
+                out_dir = output
+                out_dir.mkdir(parents=True, exist_ok=True)
+                fname = f"{out_prefix}{v_suffix}_{output_format}.tsv"
+                out_path = out_dir / fname
+
+            if output_format == "sssom":
+                write_sssom(result, out_path)
+            elif output_format == "sec2pri":
+                write_sec2pri(result, out_path)
+            elif output_format == "pri_ids":
+                write_pri_ids(result, out_path)
+            n = len(result.mappings or [])
+            click.echo(f"  Wrote {n} {etype} mappings to {out_path}")
 
 
-# =============================================================================
-# Download command
-# =============================================================================
+def _parse_datasource(ds: str) -> MappingSet | None:
+    """Download and parse a datasource, returning the MappingSet or None."""
+    from pysec2pri.api import (
+        parse_chebi,
+        parse_hgnc,
+        parse_hmdb,
+        parse_ncbi,
+        parse_uniprot,
+        parse_wikidata,
+    )
+    from pysec2pri.constants import ALL_DATASOURCES
+
+    config = ALL_DATASOURCES.get(ds.lower())
+    if config is None:
+        return None
+
+    # Wikidata uses SPARQL queries, no file download
+    if ds.lower() == "wikidata":
+        return parse_wikidata()
+
+    parsers: dict[str, Callable[..., MappingSet]] = {
+        "chebi": parse_chebi,
+        "hgnc": parse_hgnc,
+        "hmdb": parse_hmdb,
+        "ncbi": parse_ncbi,
+        "uniprot": parse_uniprot,
+    }
+
+    parser = parsers.get(ds.lower())
+    if parser is None:
+        return None
+
+    file_key = config.primary_file_key or next(iter(config.download_urls), "")
+    input_file = _download_if_needed(ds, None, file_key)
+    return parser(input_file)
 
 
-@main.command()
-@click.argument(
-    "datasource",
-    type=click.Choice(["chebi", "hmdb", "hgnc", "ncbi", "uniprot", "all"]),
-)
+def _get_formats_for_datasource(
+    ds: str,
+) -> list[tuple[str, Callable[[MappingSet, Path], None]]]:
+    """Get the list of export formats applicable to a datasource."""
+    from pysec2pri.exports import (
+        write_name2synonym,
+        write_pri_ids,
+        write_sec2pri,
+        write_sssom,
+        write_symbol2prev,
+    )
+
+    base_formats: list[tuple[str, Any]] = [
+        ("sssom", write_sssom),
+        ("sec2pri", write_sec2pri),
+        ("pri_ids", write_pri_ids),
+    ]
+
+    if ds == "chebi":
+        base_formats.append(("name2synonym", write_name2synonym))
+    elif ds in ("hgnc", "ncbi"):
+        base_formats.append(("symbol2prev", write_symbol2prev))
+
+    return base_formats
+
+
+@main.command(name="all")
 @click.option(
     "-o",
     "--output-dir",
     type=PathType,
-    default=".",
-    help="Directory to save downloaded files.",
+    default=Path("."),
+    help="Output directory",
 )
 @click.option(
-    "--no-decompress",
-    is_flag=True,
-    help="Don't decompress .gz files.",
+    "--datasources",
+    default="chebi,hgnc,hmdb,ncbi,uniprot,wikidata",
+    help="Comma-separated list of datasources",
 )
-def download(
-    datasource: str,
+def export_all(
     output_dir: Path,
-    no_decompress: bool,
+    datasources: str,
 ) -> None:
-    r"""Download source files for a datasource (no processing).
+    """Export all formats for specified datasources."""
+    ds_list = [d.strip().lower() for d in datasources.split(",")]
 
-    Downloads the required input files from the upstream database.
+    for ds in ds_list:
+        click.echo(f"\n=== Processing {ds.upper()} ===")
 
+        result = _parse_datasource(ds)
+        if result is None:
+            click.echo(f"Unknown datasource: {ds}")
+            continue
 
-    Examples:
-        # Download ChEBI files
-        pysec2pri download chebi -o ./data
+        # Get version from result if available
+        version = getattr(result, "mapping_set_version", None)
 
-        # Download all datasources
-        pysec2pri download all -o ./data
-    """
-    from pysec2pri.download import download_datasource
+        # Create output folder: datasource_version or just datasource
+        if version:
+            ds_dir = output_dir / f"{ds}_{version}"
+        else:
+            ds_dir = output_dir / ds
+        ds_dir.mkdir(parents=True, exist_ok=True)
 
-    datasources = (
-        ["chebi", "hmdb", "hgnc", "ncbi", "uniprot"] if datasource == "all" else [datasource]
-    )
-
-    for ds in datasources:
-        click.echo(f"Downloading {ds} files to {output_dir}...")
-        try:
-            files = download_datasource(
-                ds,
-                output_dir,
-                decompress=not no_decompress,
-            )
-            click.echo("Downloaded files:")
-            for key, path in files.items():
-                click.echo(f"  {key}: {path}")
-        except Exception as e:
-            click.echo(f"Error downloading {ds}: {e}", err=True)
-
-
-# =============================================================================
-# Check release command
-# =============================================================================
-
-
-@main.command("check-release")
-@click.argument(
-    "datasource",
-    type=click.Choice(["chebi", "hmdb", "hgnc", "ncbi", "uniprot", "all"]),
-)
-@click.option(
-    "--current-version",
-    help="Current version to compare against.",
-)
-def check_release_cmd(
-    datasource: str,
-    current_version: str | None,
-) -> None:
-    r"""Check if a new release is available for a datasource.
-
-    Examples:
-        # Check ChEBI for updates
-        pysec2pri check-release chebi
-
-        # Check all datasources
-        pysec2pri check-release all
-    """
-    from pysec2pri.download import get_latest_release_info
-
-    datasources = (
-        ["chebi", "hmdb", "hgnc", "ncbi", "uniprot"] if datasource == "all" else [datasource]
-    )
-
-    for ds in datasources:
-        click.echo(f"\n=== {ds.upper()} ===")
-        try:
-            info = get_latest_release_info(ds)
-            click.echo(f"Latest version: {info.version or 'unknown'}")
-            if info.release_date:
-                click.echo(f"Release date: {info.release_date.strftime('%Y-%m-%d')}")
-
-            if current_version:
-                if info.version and info.version != current_version:
-                    click.echo(f"New release available! ({current_version} -> {info.version})")
-                else:
-                    click.echo("No new release available.")
-        except Exception as e:
-            click.echo(f"Error checking {ds}: {e}", err=True)
-
-
-# =============================================================================
-# Diff command
-# =============================================================================
-
-
-@main.command()
-@click.argument("old_file", type=ExistingPathType)
-@click.argument("new_file", type=ExistingPathType)
-@click.option(
-    "-d",
-    "--datasource",
-    default="unknown",
-    help="Name of the datasource.",
-)
-@click.option(
-    "-o",
-    "--output",
-    type=PathType,
-    help="Output file for diff report.",
-)
-def diff(
-    old_file: Path,
-    new_file: Path,
-    datasource: str,
-    output: Path | None,
-) -> None:
-    r"""Compare two SSSOM files and show differences.
-
-    OLD_FILE: Path to the older SSSOM file.
-    NEW_FILE: Path to the newer SSSOM file.
-
-
-    Examples:
-        pysec2pri diff old_mappings.sssom.tsv new_mappings.sssom.tsv
-    """
-    from pysec2pri.diff import diff_sssom_files, summarize_diff
-
-    result = diff_sssom_files(old_file, new_file, datasource=datasource)
-    summary = summarize_diff(result)
-
-    click.echo(summary)
-
-    if output:
-        output.write_text(summary)
-        click.echo(f"\nDiff report saved to: {output}")
+        # Export all formats
+        for fmt, writer in _get_formats_for_datasource(ds):
+            out_file = ds_dir / _get_output_filename(ds, fmt, version)
+            writer(result, out_file)
+            click.echo(f"  Wrote {fmt}: {out_file}")
 
 
 if __name__ == "__main__":

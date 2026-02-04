@@ -13,21 +13,16 @@ from pathlib import Path
 import httpx
 from tqdm import tqdm
 
-from pysec2pri.constants import (
-    ALL_DATASOURCES,
-    CHEBI,
-    HGNC,
-    HMDB,
-    NCBI,
-    UNIPROT,
-)
+from pysec2pri.constants import ALL_DATASOURCES
 from pysec2pri.logging import logger
+from pysec2pri.parsers.base import DatasourceConfig
 
 __all__ = [
     "ReleaseInfo",
     "check_release",
     "download_datasource",
     "download_file",
+    "get_download_urls",
     "get_latest_release_info",
 ]
 
@@ -128,7 +123,7 @@ def check_chebi_release() -> ReleaseInfo:
     Returns:
         ReleaseInfo with the latest ChEBI release details.
     """
-    archive_url = CHEBI.archive_url
+    archive_url = ALL_DATASOURCES["chebi"].archive_url
     with httpx.Client(follow_redirects=True) as client:
         response = client.get(archive_url)
         response.raise_for_status()
@@ -161,7 +156,7 @@ def check_ncbi_release() -> ReleaseInfo:
     Returns:
         ReleaseInfo with the latest NCBI release details.
     """
-    history_url = NCBI.download_urls["gene_history"]
+    history_url = ALL_DATASOURCES["ncbi"].download_urls["gene_history"]
     last_modified = get_file_last_modified(history_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 
@@ -170,7 +165,7 @@ def check_ncbi_release() -> ReleaseInfo:
         version=version,
         release_date=last_modified,
         is_new=True,
-        files=dict(NCBI.download_urls),
+        files=dict(ALL_DATASOURCES["ncbi"].download_urls),
     )
 
 
@@ -180,7 +175,7 @@ def check_uniprot_release() -> ReleaseInfo:
     Returns:
         ReleaseInfo with the latest UniProt release details.
     """
-    sec_ac_url = UNIPROT.download_urls["secondary"]
+    sec_ac_url = ALL_DATASOURCES["uniprot"].download_urls["secondary"]
     last_modified = get_file_last_modified(sec_ac_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 
@@ -189,7 +184,7 @@ def check_uniprot_release() -> ReleaseInfo:
         version=version,
         release_date=last_modified,
         is_new=True,
-        files=dict(UNIPROT.download_urls),
+        files=dict(ALL_DATASOURCES["uniprot"].download_urls),
     )
 
 
@@ -200,7 +195,7 @@ def check_hmdb_release() -> ReleaseInfo:
         ReleaseInfo with the latest HMDB release details.
     """
     # HMDB requires downloading to check the version in XML
-    metabolites_url = HMDB.download_urls["metabolites"]
+    metabolites_url = ALL_DATASOURCES["hmdb"].download_urls["metabolites"]
     last_modified = get_file_last_modified(metabolites_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 
@@ -209,7 +204,7 @@ def check_hmdb_release() -> ReleaseInfo:
         version=version,
         release_date=last_modified,
         is_new=True,
-        files=dict(HMDB.download_urls),
+        files=dict(ALL_DATASOURCES["hmdb"].download_urls),
     )
 
 
@@ -247,14 +242,14 @@ def check_hgnc_release() -> ReleaseInfo:
     if not complete_dates:
         logger.warning("Could not find HGNC complete set files in GCS bucket")
         # Fall back to current release URLs
-        last_modified = get_file_last_modified(HGNC.download_urls["complete"])
+        last_modified = get_file_last_modified(ALL_DATASOURCES["hgnc"].download_urls["complete"])
         version = last_modified.strftime("%Y-%m-%d") if last_modified else None
         return ReleaseInfo(
             datasource="hgnc",
             version=version,
             release_date=last_modified,
             is_new=True,
-            files=dict(HGNC.download_urls),
+            files=dict(ALL_DATASOURCES["hgnc"].download_urls),
         )
 
     # Get the latest date
@@ -310,20 +305,162 @@ def get_latest_release_info(datasource: str) -> ReleaseInfo:
     return checkers[datasource.lower()]()
 
 
+def _get_hgnc_urls_for_version(version: str) -> dict[str, str]:
+    """Build HGNC URLs for a specific version date.
+
+    Args:
+        version: Version string in YYYY-MM-DD format.
+
+    Returns:
+        Dictionary with 'withdrawn' and 'complete' URLs.
+    """
+    base_url = (
+        "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv"
+    )
+    return {
+        "withdrawn": f"{base_url}/withdrawn_{version}.txt",
+        "complete": f"{base_url}/hgnc_complete_set_{version}.txt",
+    }
+
+
+def _get_chebi_urls_for_version(version: str) -> dict[str, str]:
+    """Build ChEBI URLs for a specific release version.
+
+    Args:
+        version: Release number (e.g., "232").
+
+    Returns:
+        Dictionary with 'sdf' URL.
+    """
+    return {
+        "sdf": (
+            f"http://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+            f"rel{version}/SDF/chebi_3_stars.sdf.gz"
+        ),
+    }
+
+
+def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
+    """Build UniProt URLs for a specific release version.
+
+    Args:
+        version: Release version (e.g., "2024_01").
+
+    Returns:
+        Dictionary with 'knowledgebase_docs' URL (tar.gz containing sec_ac.txt).
+    """
+    base = "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases"
+    return {
+        "knowledgebase_docs": (
+            f"{base}/release-{version}/knowledgebase/knowledgebase-docs-only{version}.tar.gz"
+        ),
+    }
+
+
+def get_download_urls(
+    datasource: str,
+    version: str | None = None,
+) -> dict[str, str]:
+    """Get download URLs for a datasource.
+
+    Args:
+        datasource: Name of the datasource.
+        version: Specific version to get URLs for.
+
+    Returns:
+        Dictionary mapping file keys to URLs.
+    """
+    datasource_lower = datasource.lower()
+    config = ALL_DATASOURCES.get(datasource_lower)
+    if not config:
+        raise ValueError(f"Unknown datasource: {datasource}")
+
+    if datasource_lower == "hgnc":
+        if version:
+            return _get_hgnc_urls_for_version(version)
+        return check_hgnc_release().files
+    elif datasource_lower == "chebi":
+        if version:
+            return _get_chebi_urls_for_version(version)
+        return check_chebi_release().files
+    elif datasource_lower == "uniprot":
+        if version:
+            return _get_uniprot_urls_for_version(version)
+        return dict(config.download_urls)
+    else:
+        return dict(config.download_urls)
+
+
+def _get_datasource_urls(
+    datasource_lower: str,
+    config: DatasourceConfig,
+    version: str | None = None,
+) -> dict[str, str]:
+    """Get download URLs for a datasource.
+
+    Args:
+        datasource_lower: Lowercase datasource name.
+        config: Datasource configuration.
+        version: Specific version to get URLs for.
+
+    Returns:
+        Dictionary mapping file keys to URLs.
+    """
+    if datasource_lower == "hgnc":
+        if version:
+            urls = _get_hgnc_urls_for_version(version)
+            logger.info(f"HGNC version {version}: {urls}")
+        else:
+            release_info = check_hgnc_release()
+            urls = release_info.files
+            logger.info(f"HGNC release {release_info.version}: {urls}")
+        return urls
+
+    if datasource_lower == "chebi":
+        if version:
+            urls = _get_chebi_urls_for_version(version)
+            logger.info(f"ChEBI version {version}: {urls}")
+        else:
+            release_info = check_chebi_release()
+            urls = release_info.files
+            logger.info(f"ChEBI release {release_info.version}: {urls}")
+        return urls
+
+    if datasource_lower == "uniprot":
+        if version:
+            urls = _get_uniprot_urls_for_version(version)
+            logger.info(f"UniProt version {version}: {urls}")
+            return urls
+        return dict(config.download_urls)
+
+    # NCBI, HMDB - no versioned archives available
+    if version:
+        logger.warning(
+            f"{datasource_lower} does not have versioned archives. "
+            f"Downloading latest version instead."
+        )
+    return dict(config.download_urls)
+
+
 def download_datasource(
     datasource: str,
     output_dir: Path,
     decompress: bool = True,
+    version: str | None = None,
 ) -> dict[str, Path]:
     """Download all files for a datasource.
 
     For datasources with dynamic URLs (like HGNC quarterly archive),
     this function first checks for the latest release and uses those URLs.
+    If a version is specified, it downloads that specific version.
 
     Args:
         datasource: Name of the datasource.
         output_dir: Directory to save files.
         decompress: Whether to decompress .gz files.
+        version: Specific version to download. Format depends on datasource:
+            - HGNC: date string "YYYY-MM-DD" (e.g., "2026-01-06")
+            - ChEBI: release number (e.g., "232")
 
     Returns:
         Dictionary mapping file keys to downloaded paths.
@@ -334,19 +471,41 @@ def download_datasource(
         raise ValueError(f"Unknown datasource: {datasource}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    urls = _get_datasource_urls(datasource_lower, config, version)
+
+    return _download_urls(urls, output_dir, decompress)
+
+
+def _download_urls(
+    urls: dict[str, str],
+    output_dir: Path,
+    decompress: bool = True,
+) -> dict[str, Path]:
+    """Download files from URLs to output directory.
+
+    Args:
+        urls: Dictionary mapping file keys to URLs.
+        output_dir: Directory to save files.
+        decompress: Whether to decompress .gz files.
+
+    Returns:
+        Dictionary mapping file keys to downloaded paths.
+    """
     downloaded = {}
 
-    # For HGNC, get dynamic URLs from the archive
-    if datasource_lower == "hgnc":
-        release_info = check_hgnc_release()
-        urls = release_info.files
-        logger.info(f"HGNC release {release_info.version}: {urls}")
-    else:
-        urls = config.download_urls
-
     for key, url in urls.items():
-        # Determine output filename
         filename = url.split("/")[-1]
+
+        # Handle tar.gz files (UniProt archive)
+        if filename.endswith(".tar.gz"):
+            output_path = output_dir / filename
+            logger.info(f"Downloading {key}: {url}")
+            download_file(url, output_path, decompress_gz=False)
+            extracted = _extract_uniprot_tar(output_path, output_dir)
+            downloaded.update(extracted)
+            logger.info(f"Extracted: {list(extracted.keys())}")
+            continue
+
         if decompress and filename.endswith(".gz"):
             filename = filename[:-3]
 
@@ -357,6 +516,30 @@ def download_datasource(
         logger.info(f"Saved to: {output_path}")
 
     return downloaded
+
+
+def _extract_uniprot_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
+    """Extract UniProt tar.gz and return paths to sec_ac.txt and delac_sp.txt.
+
+    Args:
+        tar_path: Path to the downloaded tar.gz file.
+        output_dir: Directory to extract to.
+
+    Returns:
+        Dictionary mapping file keys to extracted paths.
+    """
+    import tarfile
+
+    extracted = {}
+    with tarfile.open(tar_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            if member.name.endswith("sec_ac.txt"):
+                tar.extract(member, output_dir)
+                extracted["sec_ac"] = output_dir / member.name
+            elif member.name.endswith("delac_sp.txt"):
+                tar.extract(member, output_dir)
+                extracted["delac_sp"] = output_dir / member.name
+    return extracted
 
 
 def check_release(

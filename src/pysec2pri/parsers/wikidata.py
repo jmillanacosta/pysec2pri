@@ -1,4 +1,10 @@
-"""Wikidata parser for redirect mappings via SPARQL queries."""
+"""Wikidata parser for redirect mappings via SPARQL queries.
+
+This parser extracts ID-to-ID mappings for chemicals, genes, and proteins
+from Wikidata via SPARQL queries.
+
+Uses SSSOM-compliant IdMappingSet with cardinality computation.
+"""
 
 from __future__ import annotations
 
@@ -8,20 +14,25 @@ from pathlib import Path
 
 import httpx
 import polars as pl
-import regex as re
+from sssom_schema import Mapping
 
-from pysec2pri.constants import WIKIDATA
-from pysec2pri.models import (
-    IdMapping,
-    MappingCardinality,
-    MappingSet,
-    SymbolMapping,
+from pysec2pri.logging import logger
+from pysec2pri.parsers.base import (
+    BaseParser,
+    IdMappingSet,
+    Sec2PriMappingSet,
 )
-from pysec2pri.parsers.base import BaseParser
-from pysec2pri.queries import WIKIDATA_QUERIES, WIKIDATA_TEST_QUERIES, get_column_mapping
+from pysec2pri.queries import (
+    WIKIDATA_QUERIES,
+    WIKIDATA_TEST_QUERIES,
+    get_column_mapping,
+)
+from pysec2pri.version import VERSION
 
-# QLever endpoint for Wikidata (much faster than official endpoint)
-QLEVER_ENDPOINT = "https://qlever.dev/api/wikidata"
+# Default QLever endpoint (fallback if not in config)
+DEFAULT_QLEVER_ENDPOINT = "https://qlever.dev/api/wikidata"
+
+__all__ = ["WikidataParser", "query_wikidata"]
 
 
 def query_wikidata(
@@ -30,8 +41,6 @@ def query_wikidata(
     timeout: float = 100000.0,
 ) -> pl.DataFrame:
     """Execute a SPARQL query against Wikidata/QLever endpoint.
-
-    The QLever endpoint is used by default.
 
     Args:
         query: The SPARQL query to execute.
@@ -42,7 +51,7 @@ def query_wikidata(
         Polars DataFrame with query results.
     """
     if endpoint is None:
-        endpoint = QLEVER_ENDPOINT
+        endpoint = DEFAULT_QLEVER_ENDPOINT
 
     headers = {"Accept": "text/tab-separated-values"}
 
@@ -60,47 +69,40 @@ def query_wikidata(
     if not tsv_content.strip():
         return pl.DataFrame()
 
-    # Clean Literals
-    cleaned = re.sub(
-        r'"([^"\n]*)"@[a-zA-Z-]+',
-        r'"\1"',
-        tsv_content,
+    uri_pat = r"<http://www\.wikidata\.org/entity/([^>]+)>"
+    df = (
+        pl.scan_csv(
+            io.StringIO(tsv_content),
+            separator="\t",
+            has_header=True,
+            truncate_ragged_lines=True,
+            infer_schema_length=0,
+            quote_char=None,
+        )
+        .with_columns(pl.all().cast(pl.Utf8))
+        .with_columns(
+            pl.col(pl.Utf8)
+            .str.replace(uri_pat, "$1")
+            .str.replace(r'^"(.*)"@[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$', r"$1")
+            .str.strip_chars()
+        )
+        .rename(lambda c: c.lstrip("?"))
+        .collect()
     )
-
-    # Read TSV with Polars
-    df = pl.read_csv(
-        io.StringIO(cleaned),
-        separator="\t",
-        has_header=True,
-        truncate_ragged_lines=True,
-    )
-
-    # Clean up Wikidata URIs in all string columns
-    # Format: <http://www.wikidata.org/entity/Q12345> -> Q12345
-    for col in df.columns:
-        if df[col].dtype == pl.Utf8:
-            df = df.with_columns(
-                pl.col(col)
-                .str.replace(
-                    r"<http://www\.wikidata\.org/entity/([^>]+)>",
-                    "$1",
-                )
-                .str.replace(r"@en$", "")  # Remove language tags
-                .str.strip_chars()
-                .alias(col)
-            )
-
-    # Clean column names (remove ? prefix if present)
-    new_names = {col: col.lstrip("?") for col in df.columns}
-    df = df.rename(new_names)
 
     return df
 
 
 class WikidataParser(BaseParser):
-    """Parser for Wikidata redirect mappings via SPARQL."""
+    """Parser for Wikidata redirect mappings via SPARQL.
 
-    datasource_name = "Wikidata"
+    Queries the QLever Wikidata endpoint to find redirect mappings
+    for chemicals, genes, and proteins.
+
+    Returns IdMappingSet for all mappings.
+    """
+
+    datasource_name = "wikidata"
     default_source_url = "https://www.wikidata.org/"
 
     def __init__(
@@ -116,52 +118,49 @@ class WikidataParser(BaseParser):
         Args:
             version: Version/date string for the mappings.
             show_progress: Whether to show progress.
-            entity_type: Type of entities to query (metabolites/genes/proteins).
+            entity_type: Type of entities to query.
             endpoint: Optional custom SPARQL endpoint.
-            test_subset: Whether to use test queries (LIMIT 10)
+            test_subset: Whether to use test queries (LIMIT 10).
         """
         super().__init__(version=version, show_progress=show_progress)
         self.entity_type = entity_type
-        self.endpoint = endpoint
         self.test_subset = test_subset
 
-    def parse(
-        self,
-        input_path: Path | str | None = None,
-        entity_type: str = "metabolites",
-        version: str | None = None,
-        endpoint: str | None = None,
-        show_progress: bool = True,
-    ) -> MappingSet:
+        # Use provided endpoint, or fall back to config, or default
+        if endpoint:
+            self.endpoint = endpoint
+        elif self._config and self._config.sparql_endpoint:
+            self.endpoint = self._config.sparql_endpoint
+        else:
+            self.endpoint = DEFAULT_QLEVER_ENDPOINT
+
+    def parse(self, input_path: Path | str | None = None) -> Sec2PriMappingSet:
         """Query Wikidata and return a MappingSet.
 
-        If test_subset is True, use the test query for the entity type.
-
         Args:
-            entity_type: Type of entities (metabolites, genes, proteins).
-            input_path: None, from endpoint.
-            entity_type: Query to be selected.
-            version: Version string for the mappings.
-            endpoint: Optional custom SPARQL endpoint.
-            show_progress: Whether to show progress bars.
-            test_subset: Whether to use the test queries (LIMIT 10).
+            input_path: Ignored for Wikidata (queries endpoint directly).
 
         Returns:
-            MappingSet containing Wikidata redirect mappings.
+            IdMappingSet containing Wikidata redirect mappings.
         """
+        # Select query based on test_subset flag
         if self.test_subset:
             query_str = WIKIDATA_TEST_QUERIES.get(self.entity_type)
             if query_str is None:
                 available = list(WIKIDATA_TEST_QUERIES.keys())
-                raise ValueError(
-                    f"Unknown entity type for test subset: {self.entity_type}. "
-                    f"Available: {available}"
-                )
+                raise ValueError(f"Unknown entity type: {self.entity_type}. Available: {available}")
         else:
             query_str = WIKIDATA_QUERIES.get(self.entity_type)
             if query_str is None:
                 available = list(WIKIDATA_QUERIES.keys())
                 raise ValueError(f"Unknown entity type: {self.entity_type}. Available: {available}")
+
+        logger.info(
+            "Querying Wikidata for %s redirects%s...",
+            self.entity_type,
+            " (test subset)" if self.test_subset else "",
+        )
+
         df = query_wikidata(query_str, endpoint=self.endpoint)
 
         if df.is_empty():
@@ -171,132 +170,287 @@ class WikidataParser(BaseParser):
         mappings = self._build_mappings(df)
         version = self.version or date.today().isoformat()
 
-        return MappingSet(
-            datasource_name=self.datasource_name,
-            version=version,
-            mappings=mappings,
-            curie_map={WIKIDATA.prefix: WIKIDATA.curie_base_url},
-            comment=self._build_comment(f"Wikidata mappings for entity type: {self.entity_type}"),
-        )
+        return self._create_mapping_set(mappings, version)
 
-    def _empty_mappingset(self) -> MappingSet:
+    def parse_all(self) -> Sec2PriMappingSet:
+        """Query all entity types from config and return combined MappingSet.
+
+        Runs all SPARQL queries defined in the config file's 'queries' section
+        (e.g., chemical_redirects, gene_redirects, protein_redirects) and
+        combines the results into a single MappingSet.
+
+        Returns:
+            IdMappingSet containing all Wikidata redirect mappings.
+        """
+        all_mappings: list[Mapping] = []
+
+        # Get query types from config or use defaults
+        if self._config and self._config.queries:
+            query_types = list(self._config.queries.keys())
+        else:
+            query_types = [
+                "chemical_redirects",
+                "gene_redirects",
+                "protein_redirects",
+            ]
+
+        # Map config query names to entity types
+        query_to_entity = {
+            "chemical_redirects": "metabolites",
+            "gene_redirects": "genes",
+            "protein_redirects": "proteins",
+        }
+
+        for query_name in query_types:
+            entity_type = query_to_entity.get(query_name)
+            if not entity_type:
+                logger.warning("Unknown query type: %s, skipping", query_name)
+                continue
+
+            # Select appropriate query
+            if self.test_subset:
+                query_str = WIKIDATA_TEST_QUERIES.get(entity_type)
+            else:
+                query_str = WIKIDATA_QUERIES.get(entity_type)
+
+            if not query_str:
+                logger.warning("No query found for %s, skipping", entity_type)
+                continue
+
+            logger.info(
+                "Querying Wikidata for %s%s...",
+                entity_type,
+                " (test subset)" if self.test_subset else "",
+            )
+
+            try:
+                df = query_wikidata(query_str, endpoint=self.endpoint)
+
+                if df.is_empty():
+                    logger.info("No results for %s", entity_type)
+                    continue
+
+                # Temporarily set entity_type for normalization
+                original_entity = self.entity_type
+                self.entity_type = entity_type
+
+                df = self._normalize_ids(df)
+                mappings = self._build_mappings(df)
+                all_mappings.extend(mappings)
+
+                self.entity_type = original_entity
+
+            except Exception as e:
+                logger.warning("Failed to query %s: %s", entity_type, e)
+                continue
+
         version = self.version or date.today().isoformat()
-        return MappingSet(
-            datasource_name=self.datasource_name,
-            version=version,
+        return self._create_mapping_set(all_mappings, version)
+
+    def parse_from_file(self, input_path: Path | str) -> Sec2PriMappingSet:
+        """Parse Wikidata redirects from a pre-downloaded TSV file.
+
+        Args:
+            input_path: Path to TSV file with SPARQL results.
+
+        Returns:
+            IdMappingSet with computed cardinalities.
+        """
+        input_path = Path(input_path)
+
+        df = pl.read_csv(input_path, separator="\t", has_header=True)
+        df = self._normalize_ids(df)
+        mappings = self._build_mappings(df)
+        version = self.version or date.today().isoformat()
+
+        return self._create_mapping_set(mappings, version)
+
+    def _empty_mappingset(self) -> Sec2PriMappingSet:
+        """Create an empty mapping set."""
+        version = self.version or date.today().isoformat()
+        ms_meta = self.get_mappingset_metadata()
+
+        curie_map = ms_meta.get("curie_map", {})
+        curie_map_str: dict[str, str] = {}
+        for k, v in curie_map.items():
+            if hasattr(v, "prefix_reference"):
+                curie_map_str[str(k)] = str(v.prefix_reference)
+            else:
+                curie_map_str[str(k)] = str(v)
+
+        mapping_set = IdMappingSet(
+            mapping_set_id=ms_meta.get("mapping_set_id", ""),
+            mapping_set_version=version,
+            curie_map=curie_map_str,
+            license=ms_meta.get("license"),
+            mapping_tool=ms_meta.get("mapping_tool"),
+            mapping_tool_version=VERSION,
+            mapping_date=date.today().isoformat(),
+            subject_source=ms_meta.get("subject_source"),
+            object_source=ms_meta.get("object_source"),
+            subject_source_version=version,
+            object_source_version=version,
             mappings=[],
-            curie_map={WIKIDATA.prefix: WIKIDATA.curie_base_url},
-            comment=self._build_comment("No mappings found for this entity type."),
         )
+        mapping_set.compute_cardinalities()
+        return mapping_set
 
     def _normalize_ids(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Normalize IDs to WD:Qxxx format."""
         col_map = get_column_mapping(self.entity_type)
-        return df.with_columns(
-            [
-                pl.col(col_map["subject_id"])
-                .map_elements(self.normalize_subject_id)
-                .alias("subject_id_norm"),
-                pl.col(col_map["object_id"])
-                .map_elements(self.normalize_subject_id)
-                .alias("object_id_norm"),
-            ]
+        subject_col = col_map["subject_id"]
+        object_col = col_map["object_id"]
+
+        if subject_col not in df.columns:
+            logger.warning("Column %s not found in results", subject_col)
+            return df
+
+        result = df.with_columns(
+            pl.col(subject_col)
+            .map_elements(self._normalize_qid, return_dtype=pl.Utf8)
+            .alias("subject_id_norm"),
         )
 
-    def _build_mappings(self, df: pl.DataFrame) -> list[IdMapping | SymbolMapping]:
+        if object_col in df.columns:
+            result = result.with_columns(
+                pl.col(object_col)
+                .map_elements(self._normalize_qid, return_dtype=pl.Utf8)
+                .alias("object_id_norm"),
+            )
+        else:
+            result = result.with_columns(
+                pl.lit(None).alias("object_id_norm"),
+            )
+
+        return result
+
+    @staticmethod
+    def _normalize_qid(qid: str | None) -> str | None:
+        """Normalize a QID to WD:Qxxx format."""
+        if not qid or qid == "":
+            return None
+        qid = qid.strip()
+        if qid.startswith("WD:"):
+            return qid
+        if qid.startswith("Q"):
+            return f"WD:{qid}"
+        if "wikidata.org/entity/" in qid:
+            qid = qid.split("/")[-1]
+            return f"WD:{qid}"
+        return f"WD:{qid}"
+
+    def _build_mappings(self, df: pl.DataFrame) -> list[Mapping]:
         col_map = get_column_mapping(self.entity_type)
         primary_label_col = col_map.get("primary_label")
         secondary_label_col = col_map.get("secondary_label")
+        m_meta = self.get_mapping_metadata()
 
-        # Redirect mappings - filter for valid id pairs
-        redirect_mask = (
-            (pl.col("object_id_norm").is_not_null())
-            & (pl.col("subject_id_norm").is_not_null())
-            & (pl.col("object_id_norm") != pl.col("subject_id_norm"))
+        # Precompute constants
+        predicate_id: str = m_meta.get("predicate_id", "oboInOwl:consider")
+        mapping_justification: str = m_meta.get(
+            "mapping_justification",
+            "semapv:BackgroundKnowledgeBasedMatching",
         )
-        redirects_df = df.filter(redirect_mask)
-        id_pairs = list(
-            zip(
-                redirects_df["object_id_norm"].to_list(),
-                redirects_df["subject_id_norm"].to_list(),
-                strict=False,
+        subject_source: str = self.default_source_url
+        object_source: str = self.default_source_url
+        mapping_tool = m_meta.get("mapping_tool")
+        license_ = m_meta.get("license")
+        comment: str = self._build_comment(f"Wikidata {self.entity_type} redirect.")
+
+        # Build the minimal Polars projection
+        cols: list[str] = ["subject_id_norm", "object_id_norm"]
+        if primary_label_col and primary_label_col in df.columns:
+            cols.append(primary_label_col)
+        if secondary_label_col and secondary_label_col in df.columns:
+            cols.append(secondary_label_col)
+
+        redirects_df = (
+            df.lazy()
+            .filter(
+                pl.col("object_id_norm").is_not_null()
+                & pl.col("subject_id_norm").is_not_null()
+                & (pl.col("object_id_norm") != pl.col("subject_id_norm"))
             )
+            .select(cols)
+            .collect()
         )
-        cardinality_map = self.compute_cardinality(id_pairs)
 
-        mappings: list[IdMapping | SymbolMapping] = []
-        for row in redirects_df.iter_rows(named=True):
-            # Get labels if columns exist
-            subj_label = row.get(primary_label_col) if primary_label_col else None
-            obj_label = row.get(secondary_label_col) if secondary_label_col else None
+        # Column index mapping for row extraction
+        col_idx: dict[str, int] = {c: i for i, c in enumerate(redirects_df.columns)}
+        subj_i = col_idx["subject_id_norm"]
+        obj_i = col_idx["object_id_norm"]
+        subj_label_i = col_idx.get(primary_label_col) if primary_label_col else None
+        obj_label_i = col_idx.get(secondary_label_col) if secondary_label_col else None
+
+        total = redirects_df.height
+        mappings: list[Mapping] = []
+
+        # iter_rows() (tuple) is faster than iter_rows(named=True) (dict)
+        for row in self._progress(
+            redirects_df.iter_rows(),
+            desc=f"Building {self.entity_type} mappings",
+            total=total,
+        ):
+            subject_id = row[subj_i]
+            object_id = row[obj_i]
+
+            # Labels are optional
+            subject_label = row[subj_label_i] if subj_label_i is not None else None
+            object_label = row[obj_label_i] if obj_label_i is not None else None
+
             mappings.append(
-                IdMapping(
-                    subject_id=row["subject_id_norm"],
-                    object_id=row["object_id_norm"],
-                    subject_label=subj_label,
-                    object_label=obj_label,
-                    mapping_cardinality=cardinality_map.get(
-                        (row["object_id_norm"], row["subject_id_norm"]),
-                        MappingCardinality.ONE_TO_ONE,
-                    ),
-                    predicate_id="oboInOwl:consider",
-                    source_url=self.default_source_url,
-                    comment=self._build_comment("Wikidata redirect mapping."),
+                Mapping(
+                    subject_id=subject_id,
+                    object_id=object_id,
+                    subject_label=subject_label,
+                    object_label=object_label,
+                    predicate_id=predicate_id,
+                    mapping_justification=mapping_justification,
+                    subject_source=subject_source,
+                    object_source=object_source,
+                    mapping_tool=mapping_tool,
+                    license=license_,
+                    comment=comment,
                 )
             )
-
-        # Synonym mappings (symbols without ID redirects)
-        if primary_label_col and secondary_label_col:
-            synonym_mask = (
-                (pl.col("subject_id_norm").is_not_null())
-                & (pl.col(primary_label_col).is_not_null())
-                & (pl.col(secondary_label_col).is_not_null())
-                & (pl.col(primary_label_col) != pl.col(secondary_label_col))
-            )
-            synonyms_df = df.filter(synonym_mask)
-            for row in synonyms_df.iter_rows(named=True):
-                mappings.append(
-                    SymbolMapping(
-                        subject_id=row["subject_id_norm"],
-                        object_id=row.get("object_id_norm"),
-                        subject_label=row[primary_label_col],
-                        object_label=row[secondary_label_col],
-                        predicate_id="oboInOwl:consider",
-                        source_url=self.default_source_url,
-                        comment=self._build_comment("Wikidata symbol/synonym mapping."),
-                    )
-                )
 
         return mappings
 
+    def _create_mapping_set(
+        self,
+        mappings: list[Mapping],
+        version: str,
+    ) -> Sec2PriMappingSet:
+        """Create the final MappingSet with metadata."""
+        ms_meta = self.get_mappingset_metadata()
 
-def parse_wikidata(
-    entity_type: str = "metabolites",
-    version: str | None = None,
-    endpoint: str | None = None,
-    show_progress: bool = True,
-    test_subset: bool = False,
-) -> MappingSet:
-    """Parse Wikidata redirects for a specific entity type.
+        curie_map = ms_meta.get("curie_map", {})
+        curie_map_str: dict[str, str] = {}
+        for k, v in curie_map.items():
+            if hasattr(v, "prefix_reference"):
+                curie_map_str[str(k)] = str(v.prefix_reference)
+            else:
+                curie_map_str[str(k)] = str(v)
 
-    Args:
-        entity_type: Type of entities (metabolites, genes, proteins).
-        version: Version string for the mappings.
-        endpoint: Optional custom SPARQL endpoint.
-        show_progress: Whether to show progress bars.
-        test_subset: whether to use test queries (LIMIT 10)
-
-    Returns:
-        MappingSet containing Wikidata redirect mappings.
-
-    Example:
-        >>> from pysec2pri.parsers.wikidata import parse_wikidata
-        >>> mappings = parse_wikidata("metabolites")
-        >>> print(f"Found {len(mappings)} redirects")
-    """
-    return WikidataParser(
-        version=version,
-        show_progress=show_progress,
-        entity_type=entity_type,
-        endpoint=endpoint,
-        test_subset=test_subset,
-    ).parse()
+        mapping_set = IdMappingSet(
+            mapping_set_id=ms_meta.get("mapping_set_id", ""),
+            mapping_set_version=version,
+            mapping_set_title=ms_meta.get("mapping_set_title"),
+            mapping_set_description=ms_meta.get("mapping_set_description"),
+            curie_map=curie_map_str,
+            license=ms_meta.get("license"),
+            creator_id=ms_meta.get("creator_id"),
+            creator_label=ms_meta.get("creator_label"),
+            mapping_provider=ms_meta.get("mapping_provider"),
+            mapping_tool=ms_meta.get("mapping_tool"),
+            mapping_tool_version=VERSION,
+            mapping_date=date.today().isoformat(),
+            subject_source=ms_meta.get("subject_source"),
+            object_source=ms_meta.get("object_source"),
+            subject_source_version=version,
+            object_source_version=version,
+            comment=self._build_comment(f"Wikidata mappings for {self.entity_type}."),
+            mappings=mappings,
+        )
+        mapping_set.compute_cardinalities()
+        return mapping_set

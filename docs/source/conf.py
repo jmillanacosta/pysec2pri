@@ -254,6 +254,9 @@ autoclass_content = "both"
 # https://stackoverflow.com/questions/37209921/python-how-not-to-sort-sphinx-output-in-alphabetical-order
 autodoc_member_order = "bysource"
 
+# Suppress duplicate object warnings for re-exported symbols
+suppress_warnings = ["ref.python"]
+
 todo_include_todos = True
 todo_emit_warnings = True
 

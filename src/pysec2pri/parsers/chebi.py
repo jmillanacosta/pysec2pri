@@ -1,29 +1,22 @@
-"""ChEBI SDF file parser for secondary-to-primary identifier mappings."""
+"""ChEBI SDF file parser for secondary-to-primary identifier mappings.
+
+This parser extracts:
+1. ID-to-ID mappings: secondary ChEBI IDs -> primary ChEBI IDs
+2. Label-to-label mappings: synonyms -> primary names
+
+Uses SSSOM-compliant MappingSet classes with cardinality computation.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from pysec2pri.models import ChEBIMapping, MappingCardinality, MappingSet
-from pysec2pri.parsers.base import BaseParser
+from sssom_schema import Mapping
 
-
-# Utility for progress bar
-class _Progressor:  # TODO move to base
-    """Class for tqdm progress bar."""
-
-    def __init__(self, show_progress: bool):
-        """Init."""
-        self.show_progress = show_progress
-
-    def progress(self, iterable: Any, desc: Any = None, total: Any = None) -> Any:
-        """Wrap tqdm."""
-        if self.show_progress:
-            from tqdm import tqdm
-
-            return tqdm(iterable, desc=desc, total=total)
-        return iterable
+from pysec2pri.parsers.base import (
+    BaseParser,
+    Sec2PriMappingSet,
+)
 
 
 class ChEBIParser(BaseParser):
@@ -31,10 +24,12 @@ class ChEBIParser(BaseParser):
 
     Extracts secondary-to-primary ChEBI identifier mappings and
     name-to-synonym relationships from ChEBI SDF format files.
+
+    Returns an IdMappingSet for ID mappings (cardinality computed on IDs)
+    and can optionally include synonym mappings via LabelMappingSet.
     """
 
-    datasource_name = "ChEBI"
-    default_source_url = "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/ChEBI_complete_3star.sdf"
+    datasource_name = "chebi"
 
     def __init__(self, version: str | None = None, show_progress: bool = True) -> None:
         """Initialize the ChEBI parser.
@@ -45,38 +40,134 @@ class ChEBIParser(BaseParser):
         """
         super().__init__(version=version, show_progress=show_progress)
 
-    def parse(self, input_path: Path | str | None) -> MappingSet:
-        """Parse a ChEBI SDF file into a MappingSet."""
+    @property
+    def source_url(self) -> str:
+        """Get the default SDF download URL from config."""
+        return self.get_download_url("sdf") or ""
+
+    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+        """Parse a ChEBI SDF file into an IdMappingSet.
+
+        Args:
+            input_path: Path to the ChEBI SDF file.
+
+        Returns:
+            IdMappingSet with computed cardinalities based on subject_id/object_id.
+        """
         if input_path is None:
             raise ValueError("input_path must not be None")
         input_path = Path(str(input_path))
-        lines = read_sdf_lines(input_path)
-        raw_id_mappings, raw_name_mappings = parse_chebi_sdf(
-            lines, show_progress=self.show_progress
-        )
-        mappings = []
-        mappings.extend(
-            build_id_mappings(
-                raw_id_mappings,
-                source_url=self.default_source_url,
-                show_progress=self.show_progress,
+        lines = _read_sdf_lines(input_path)
+        raw_id_mappings, _ = _parse_chebi_sdf(lines, show_progress=self.show_progress)
+
+        # Build SSSOM Mapping objects for ID mappings
+        mappings = self._build_id_mappings(raw_id_mappings)
+
+        # Create IdMappingSet and compute cardinalities
+        mapping_set = self._create_mapping_set(mappings, mapping_type="id")
+        return mapping_set
+
+    def parse_synonyms(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+        """Parse a ChEBI SDF file into a LabelMappingSet for synonyms.
+
+        Args:
+            input_path: Path to the ChEBI SDF file.
+
+        Returns:
+            LabelMappingSet with computed cardinalities based on labels.
+        """
+        if input_path is None:
+            raise ValueError("input_path must not be None")
+        input_path = Path(str(input_path))
+        lines = _read_sdf_lines(input_path)
+        _, raw_name_mappings = _parse_chebi_sdf(lines, show_progress=self.show_progress)
+
+        # Build SSSOM Mapping objects for label mappings
+        mappings = self._build_label_mappings(raw_name_mappings)
+
+        # Create LabelMappingSet and compute cardinalities
+        mapping_set = self._create_mapping_set(mappings, mapping_type="label")
+        return mapping_set
+
+    def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
+        """Build SSSOM Mapping objects for ID-to-ID mappings.
+
+        Args:
+            raw_id_mappings: List of (primary_id, secondary_id) tuples.
+
+        Returns:
+            List of sssom_schema.Mapping objects.
+        """
+        m_meta = self.get_mapping_metadata()
+        mappings: list[Mapping] = []
+
+        for primary_id, secondary_id in self._progress(
+            raw_id_mappings, desc="Creating ID mappings"
+        ):
+            # SSSOM: subject_id = primary (current), object_id = secondary (old)
+            mapping = Mapping(
+                subject_id=primary_id,
+                object_id=secondary_id,
+                predicate_id=m_meta["predicate_id"],
+                mapping_justification=m_meta["mapping_justification"],
+                subject_source=m_meta.get("subject_source"),
+                object_source=m_meta.get("object_source"),
+                mapping_tool=m_meta.get("mapping_tool"),
+                confidence=m_meta.get("confidence"),
+                license=m_meta.get("license"),
             )
-        )
-        mappings.extend(
-            build_synonym_mappings(
-                raw_name_mappings,
-                source_url=self.default_source_url,
-                show_progress=self.show_progress,
+            mappings.append(mapping)
+
+        return mappings
+
+    def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
+        """Build SSSOM Mapping objects for label-to-label (synonym) mappings.
+
+        Args:
+            raw_name_mappings: List of (subject_id, primary_name, synonym) tuples.
+
+        Returns:
+            List of sssom_schema.Mapping objects.
+        """
+        m_meta = self.get_mapping_metadata()
+        mappings: list[Mapping] = []
+
+        for subject_id, primary_name, synonym in self._progress(
+            raw_name_mappings, desc="Creating synonym mappings"
+        ):
+            # For synonyms: subject_label = primary name, object_label = synonym
+            mapping = Mapping(
+                subject_id=subject_id,
+                subject_label=primary_name,
+                object_id=subject_id,  # Same entity
+                object_label=synonym,
+                predicate_id="oboInOwl:hasRelatedSynonym",
+                mapping_justification=m_meta["mapping_justification"],
+                subject_source=m_meta.get("subject_source"),
+                object_source=m_meta.get("object_source"),
+                mapping_tool=m_meta.get("mapping_tool"),
+                license=m_meta.get("license"),
             )
-        )
-        return build_mapping_set(
-            mappings=mappings,
-            datasource_name=self.datasource_name,
-            version=self.version if self.version is not None else "",
-        )
+            mappings.append(mapping)
+
+        return mappings
+
+    def _create_mapping_set(
+        self, mappings: list[Mapping], mapping_type: str = "id"
+    ) -> Sec2PriMappingSet:
+        """Create an IdMappingSet or LabelMappingSet with metadata from config.
+
+        Delegates to BaseParser.create_mapping_set().
+        """
+        return self.create_mapping_set(mappings, mapping_type)
 
 
-def read_sdf_lines(input_path: Path) -> list[str]:
+# =============================================================================
+# Private helper functions for SDF parsing
+# =============================================================================
+
+
+def _read_sdf_lines(input_path: Path) -> list[str]:
     """Read an SDF file into a list of lines.
 
     Args:
@@ -89,34 +180,30 @@ def read_sdf_lines(input_path: Path) -> list[str]:
         return f.readlines()
 
 
-def extract_subject_id(
-    lines: list[str], i: int, total_lines: int, pbar: object = None
-) -> tuple[str | None, int]:
-    """Extract the primary ID from the lines.
+def _extract_value(lines: list[str], i: int, total_lines: int) -> tuple[str | None, int]:
+    """Extract a value from the next line after a tag.
 
     Args:
         lines: Lines from the SDF file.
         i: Current index in the lines.
         total_lines: Total number of lines.
-        pbar: Progress bar instance.
 
     Returns:
-        Tuple of the primary ID (or None) and the updated index.
+        Tuple of the extracted value (or None) and the updated index.
     """
     i += 1
     if i < total_lines:
-        subject_id = lines[i].strip()
-        return subject_id, i
+        value = lines[i].strip()
+        return value, i
     return None, i
 
 
-def extract_object_ids(
+def _extract_secondary_ids(
     lines: list[str],
     i: int,
     total_lines: int,
     current_subject_id: str | None,
     raw_id_mappings: list[tuple[str, str]],
-    pbar: object = None,
 ) -> int:
     """Extract secondary IDs from the lines.
 
@@ -126,7 +213,6 @@ def extract_object_ids(
         total_lines: Total number of lines.
         current_subject_id: Current primary ID.
         raw_id_mappings: List to store raw ID mappings.
-        pbar: Progress bar instance.
 
     Returns:
         Updated index.
@@ -136,21 +222,21 @@ def extract_object_ids(
         sec_line = lines[i].strip()
         if sec_line.startswith("CHEBI:"):
             if current_subject_id:
-                raw_id_mappings.append((current_subject_id, sec_line))
+                for sec_id in sec_line.split(";"):
+                    raw_id_mappings.append((current_subject_id, sec_id))
             i += 1
         else:
             break
     return i
 
 
-def extract_synonyms(
+def _extract_synonyms(
     lines: list[str],
     i: int,
     total_lines: int,
     current_subject_id: str | None,
     current_name: str | None,
     raw_name_mappings: list[tuple[str, str, str]],
-    pbar: object = None,
 ) -> int:
     """Extract synonyms from the lines.
 
@@ -161,7 +247,6 @@ def extract_synonyms(
         current_subject_id: Current primary ID.
         current_name: Current name.
         raw_name_mappings: List to store raw name mappings.
-        pbar: Progress bar instance.
 
     Returns:
         Updated index.
@@ -178,14 +263,66 @@ def extract_synonyms(
     return i
 
 
-def parse_chebi_sdf(
+def _process_sdf_line(
+    lines: list[str],
+    i: int,
+    total_lines: int,
+    current_subject_id: str | None,
+    current_name: str | None,
+    raw_id_mappings: list[tuple[str, str]],
+    raw_name_mappings: list[tuple[str, str, str]],
+) -> tuple[int, str | None, str | None, bool]:
+    """Process a single SDF line and return updated state.
+
+    Args:
+        lines: Lines from the SDF file.
+        i: Current index in the lines.
+        total_lines: Total number of lines.
+        current_subject_id: Current primary ID.
+        current_name: Current name.
+        raw_id_mappings: List to store raw ID mappings.
+        raw_name_mappings: List to store raw name mappings.
+
+    Returns:
+        Tuple of (new index, subject_id, name, skip_increment).
+    """
+    line = lines[i].strip()
+
+    if "<chebi id>" in line.lower():
+        value, i = _extract_value(lines, i, total_lines)
+        return i, value, current_name, False
+
+    if "<chebi name>" in line.lower():
+        value, i = _extract_value(lines, i, total_lines)
+        return i, current_subject_id, value, False
+
+    if "<secondary" in line.lower():
+        i = _extract_secondary_ids(lines, i, total_lines, current_subject_id, raw_id_mappings)
+        return i, current_subject_id, current_name, True
+
+    if "<synonym" in line.lower():
+        i = _extract_synonyms(
+            lines,
+            i,
+            total_lines,
+            current_subject_id,
+            current_name,
+            raw_name_mappings,
+        )
+        return i, current_subject_id, current_name, True
+
+    if line.startswith("$$$$"):
+        return i, None, None, False
+
+    return i, current_subject_id, current_name, False
+
+
+def _parse_chebi_sdf(
     lines: list[str],
     *,
     show_progress: bool,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
     """Parse ChEBI SDF lines into raw ID and synonym mappings.
-
-    Deprecated, now trying out polars (parse()).
 
     Args:
         lines: Lines from the SDF file.
@@ -193,9 +330,11 @@ def parse_chebi_sdf(
 
     Returns:
         Tuple of:
-            - list of (subject_id, object_id)
-            - list of (subject_id, primary_name, synonym)
+            - list of (primary_id, secondary_id) for ID mappings
+            - list of (subject_id, primary_name, synonym) for label mappings
     """
+    from tqdm import tqdm
+
     raw_id_mappings: list[tuple[str, str]] = []
     raw_name_mappings: list[tuple[str, str, str]] = []
 
@@ -204,168 +343,28 @@ def parse_chebi_sdf(
 
     i = 0
     total_lines = len(lines)
-    progressor = _Progressor(show_progress)
-    pbar = (
-        progressor.progress(range(total_lines), desc="Parsing ChEBI SDF", total=total_lines)
-        if show_progress
-        else None
-    )
+
+    pbar = tqdm(total=total_lines, desc="Parsing ChEBI SDF") if show_progress else None
 
     while i < total_lines:
-        line = lines[i].strip()
+        i, current_subject_id, current_name, skip = _process_sdf_line(
+            lines,
+            i,
+            total_lines,
+            current_subject_id,
+            current_name,
+            raw_id_mappings,
+            raw_name_mappings,
+        )
+        if not skip:
+            i += 1
+        if pbar:
+            pbar.update(1)
 
-        # ...existing code...
-
-        if "<chebi id>" in line.lower():
-            current_subject_id, i = extract_subject_id(lines, i, total_lines, pbar)
-
-        elif "<chebi name>" in line.lower():
-            current_name, i = extract_subject_id(lines, i, total_lines, pbar)
-
-        elif "<secondary" in line.lower():
-            i = extract_object_ids(lines, i, total_lines, current_subject_id, raw_id_mappings, pbar)
-            continue
-
-        elif "<synonym" in line.lower():
-            i = extract_synonyms(
-                lines,
-                i,
-                total_lines,
-                current_subject_id,
-                current_name,
-                raw_name_mappings,
-                pbar,
-            )
-            continue
-
-        elif line.startswith("$$$$"):
-            current_subject_id = None
-            current_name = None
-
-        i += 1
-
-    # ...existing code...
+    if pbar:
+        pbar.close()
 
     return raw_id_mappings, raw_name_mappings
-
-
-def build_id_mappings(
-    raw_id_mappings: list[tuple[str, str]],
-    *,
-    source_url: str,
-    show_progress: bool,
-) -> list[ChEBIMapping]:
-    """Create ChEBIMapping objects for ID mappings.
-
-    Args:
-        raw_id_mappings: List of (subject_id, object_id).
-        source_url: Source URL to attach to mappings.
-        show_progress: Whether to show progress.
-
-    Returns:
-        List of ChEBIMapping objects with cardinality populated.
-    """
-    cardinality_map = BaseParser.compute_cardinality(raw_id_mappings)
-    progressor = _Progressor(show_progress)
-    iterator = progressor.progress(raw_id_mappings, desc="Creating ID mappings")
-
-    mappings: list[ChEBIMapping] = []
-
-    for subject_id, object_id in iterator:
-        cardinality = cardinality_map.get(
-            (subject_id, object_id),
-            MappingCardinality.ONE_TO_ONE,
-        )
-        # Use IAO:0100001 (term replaced by) for clear replacements
-        predicate = "IAO:0100001"
-        if cardinality in (
-            MappingCardinality.ONE_TO_MANY,
-            MappingCardinality.MANY_TO_MANY,
-            MappingCardinality.ONE_TO_ZERO,
-        ):
-            predicate = "oboInOwl:consider"
-        mappings.append(
-            ChEBIMapping(
-                subject_id=subject_id,
-                predicate_id=predicate,
-                object_id=object_id,
-                mapping_cardinality=cardinality,
-                source_url=source_url,
-            )
-        )
-
-    return mappings
-
-
-def build_synonym_mappings(
-    raw_name_mappings: list[tuple[str, str, str]],
-    *,
-    source_url: str,
-    show_progress: bool,
-) -> list[ChEBIMapping]:
-    """Create ChEBIMapping objects for name/synonym mappings.
-
-    Args:
-        raw_name_mappings: List of (subject_id, name, synonym).
-        source_url: Source URL to attach to mappings.
-        show_progress: Whether to show progress.
-
-    Returns:
-        List of ChEBIMapping objects without cardinality.
-    """
-    progressor = _Progressor(show_progress)
-    iterator = progressor.progress(
-        raw_name_mappings,
-        desc="Creating synonym mappings",
-    )
-
-    return [
-        ChEBIMapping(
-            subject_id=subject_id,
-            predicate_id="oboInOwl:hasRelatedSynonym",
-            object_id=synonym,
-            subject_label=name,
-            object_label=synonym,
-            source_url=source_url,
-        )
-        for subject_id, name, synonym in iterator
-    ]
-
-
-def build_mapping_set(
-    *,
-    mappings: list[ChEBIMapping],
-    datasource_name: str,
-    version: str,
-) -> MappingSet:
-    """Assemble a MappingSet for ChEBI mappings.
-
-    Args:
-        mappings: All mapping objects.
-        datasource_name: Datasource name.
-        version: Datasource version.
-
-    Returns:
-        Fully populated MappingSet.
-    """
-    return MappingSet(
-        mappings=mappings,
-        datasource_name=datasource_name,
-        version=version,
-        mapping_set_id="omicsfixid_chebi_01",
-        mapping_set_description=(
-            "Secondary to primary ID mappings for ChEBI database, "
-            "generated for the omicsFixID project."
-        ),
-        comment=(
-            "object_label represents a synonym name by which the subject_label is also known."
-        ),
-        curie_map={
-            "CHEBI:": "http://purl.obolibrary.org/obo/CHEBI_",
-            "IAO:": "http://purl.obolibrary.org/obo/IAO_",
-            "oboInOwl:": "http://www.geneontology.org/formats/oboInOwl#",
-        },
-    )
 
 
 __all__ = ["ChEBIParser"]

@@ -1,8 +1,9 @@
-#########
- Download
-#########
+########
+Download
+########
 
-Download functions.
+Utilities for downloading database source files and detecting releases.
 
-.. automodapi:: pysec2pri.download
-    :no-heading:
+.. automodule:: pysec2pri.download
+    :members:
+    :show-inheritance:
