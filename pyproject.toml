@@ -62,6 +62,7 @@ dependencies = [
     "polars>=0.20.0", # Fast dataframe operations for diffs
     "regex==2026.1.15",
     "lxml", # XML parsing for HMDB
+    "defusedxml", # Secure XML parsing
     "pandas", # DataFrame support for some workflows
     "numpy", # Required by pandas and polars
     "rdkit", # Chemistry toolkit for SDF parsing
@@ -98,6 +99,8 @@ typing = [
     "mypy",
     "pydantic",
     "types-click",
+    "types-PyYAML",
+    "types-requests",
     # You will probably have to add additional type stubs here, especially if you're using tox-uv
 ]
 docs-lint = [

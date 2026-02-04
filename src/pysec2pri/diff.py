@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 if TYPE_CHECKING:
-    from pysec2pri.models import MappingSet
+    from sssom_schema import MappingSet
 
 __all__ = [
     "MappingDiff",
@@ -67,13 +67,14 @@ def mapping_set_to_dataframe(mapping_set: MappingSet) -> pl.DataFrame:
     """Convert a MappingSet to a Polars DataFrame for comparison.
 
     Args:
-        mapping_set: The MappingSet to convert.
+        mapping_set: The MappingSet to convert (sssom_schema.MappingSet).
 
     Returns:
         Polars DataFrame with columns: subject_id, object_id.
     """
     rows = []
-    for mapping in mapping_set.iter_mappings():
+    mappings = mapping_set.mappings or []
+    for mapping in mappings:
         rows.append(
             {
                 "subject_id": mapping.subject_id,
@@ -90,12 +91,14 @@ def mapping_set_to_dataframe(mapping_set: MappingSet) -> pl.DataFrame:
 def diff_mapping_sets(
     old_set: MappingSet,
     new_set: MappingSet,
+    datasource: str = "unknown",
 ) -> MappingDiff:
     """Compare two MappingSets and find differences.
 
     Args:
-        old_set: The older/previous MappingSet.
-        new_set: The newer/current MappingSet.
+        old_set: The older/previous MappingSet (sssom_schema.MappingSet).
+        new_set: The newer/current MappingSet (sssom_schema.MappingSet).
+        datasource: Name of the datasource for the diff.
 
     Returns:
         MappingDiff with added, removed, and changed mappings.
@@ -106,9 +109,9 @@ def diff_mapping_sets(
     return _diff_dataframes(
         old_df=old_df,
         new_df=new_df,
-        old_version=old_set.version,
-        new_version=new_set.version,
-        datasource=old_set.datasource_name or new_set.datasource_name or "unknown",
+        old_version=old_set.mapping_set_version,
+        new_version=new_set.mapping_set_version,
+        datasource=datasource,
     )
 
 

@@ -2,74 +2,82 @@
  pySec2Pri |release| Documentation
 ###################################
 
-**pysec2pri** converts secondary (retired/withdrawn) biological database identifiers
-to primary (current) identifiers. It generates mappings in SSSOM format for use with
-BridgeDb and other identifier mapping tools.
+**pysec2pri** maps secondary (retired/withdrawn) biological database identifiers
+to primary (current) identifiers using the `SSSOM <https://mapping-commons.github.io/sssom/>`_ standard.
 
-Supported databases:
+SSSOM Interoperability
+======================
 
-- **ChEBI** - Chemical Entities of Biological Interest
-- **HMDB** - Human Metabolome Database
-- **HGNC** - HUGO Gene Nomenclature Committee
-- **NCBI Gene** - Entrez Gene
-- **UniProt** - Protein sequence database
-- **Wikidata** - Redirect mappings from Wikidata knowledge graph
+SSSOM outputs use **sssom-schema**:
+
+- Mappings use ``sssom_schema.Mapping`` objects
+- Mapping sets extend ``sssom_schema.MappingSet``
+- Exports to SSSOM TSV via the ``sssom`` Python library
+
+Supported Databases
+===================
+
++--------------+------------------------------------------+
+| Database     | Mapping Types                            |
++==============+==========================================+
+| **ChEBI**    | Secondary→Primary IDs, Name→Synonyms     |
++--------------+------------------------------------------+
+| **HMDB**     | Secondary→Primary IDs                    |
++--------------+------------------------------------------+
+| **HGNC**     | Withdrawn→Current IDs, Symbol→Previous   |
++--------------+------------------------------------------+
+| **NCBI Gene**| Discontinued→Current IDs, Symbol→Aliases |
++--------------+------------------------------------------+
+| **UniProt**  | Secondary→Primary accessions             |
++--------------+------------------------------------------+
+| **Wikidata** | Redirect mappings (SPARQL)               |
++--------------+------------------------------------------+
 
 Quick Start
 ===========
 
-
-
-.. code-block:: bash
-
-    pysec2pri chebi
-
-This will automatically download and process the latest ChEBI release, generating a default SSSOM mapping file in the current directory.
-
-You can also process a local file:
+**CLI:**
 
 .. code-block:: bash
 
-    pysec2pri chebi ChEBI_complete_3star.sdf
+    # Parse ChEBI and output SSSOM
+    pysec2pri chebi chebi_3star.sdf -o chebi.sssom.tsv
 
-This will generate a default SSSOM mapping file from your local SDF file.
+    # Parse HGNC with custom format
+    pysec2pri hgnc hgnc_withdrawn.tsv --format sec2pri
 
-Other possibilities:
+**Python API:**
 
-- **Specify output file:**
+.. code-block:: python
 
-    .. code-block:: bash
+    from pysec2pri.api import parse_chebi, write_sssom
 
-            pysec2pri chebi ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
+    mapping_set = parse_chebi("chebi_3star.sdf")
+    write_sssom(mapping_set, "chebi.sssom.tsv")
 
-    Use this to choose a custom output filename.
-
-- **Specifying outputs:**
-
-    .. code-block:: bash
+    # Access sssom_schema.Mapping objects directly
+    for mapping in mapping_set.mappings:
+        print(f"{mapping.object_id} → {mapping.subject_id}")
 
 .. toctree::
     :maxdepth: 2
     :caption: Getting Started
-    :name: start
 
     installation
     cli
 
 .. toctree::
     :maxdepth: 2
-    :caption: Helpers
-    :name: features
+    :caption: Features
 
     download
     diff
+    exports
 
 .. toctree::
     :maxdepth: 2
     :caption: API Reference
-    :name: api
 
     api
-    models
-    constants
     parsers
+    models

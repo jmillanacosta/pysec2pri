@@ -1,8 +1,8 @@
-#####
- Diff
-#####
+####
+Diff
+####
 
-Calculate change between SSSOM documents.
+Compare SSSOM MappingSets to detect changes between versions.
 
-.. automodapi:: pysec2pri.diff
-    :no-heading:
+.. automodule:: pysec2pri.diff
+    :members:

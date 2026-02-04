@@ -1,8 +1,7 @@
 """Main API functions for pysec2pri.
 
 This module provides high-level functions for parsing biological database
-secondary-to-primary mapping files files and generating SSSOM output.
-These functions can be imported directly from pysec2pri.
+secondary-to-primary mapping files and generating output.
 """
 
 from __future__ import annotations
@@ -10,190 +9,117 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# Re-export legacy output functions from exports module
 from pysec2pri.exports import (
     write_name2synonym,
-    write_outputs,
     write_sec2pri,
     write_sssom,
-    write_subject_ids,
     write_symbol2prev,
 )
-from pysec2pri.models import MappingSet
 
 if TYPE_CHECKING:
-    from sssom import MappingSetDocument
-    from sssom.util import MappingSetDataFrame
-    from sssom_schema import MappingSet as SSSOMMapingSet
+    from pysec2pri.parsers.base import Sec2PriMappingSet
 
 __all__ = [
-    # ChEBI
     "parse_chebi",
-    # HGNC
+    "parse_chebi_synonyms",
     "parse_hgnc",
-    # HMDB
+    "parse_hgnc_symbols",
     "parse_hmdb",
-    # NCBI
     "parse_ncbi",
-    # UniProt
+    "parse_ncbi_symbols",
     "parse_uniprot",
-    "to_sssom_dataframe",
-    "to_sssom_document",
-    # SSSOM conversion
-    "to_sssom_mapping_set",
+    "parse_wikidata",
     "write_name2synonym",
-    "write_outputs",
     "write_sec2pri",
-    # Legacy output formats (re-exported from exports module)
     "write_sssom",
-    "write_subject_ids",
     "write_symbol2prev",
 ]
-
-
-# =============================================================================
-# ChEBI Functions
-# =============================================================================
 
 
 def parse_chebi(
     input_file: Path | str,
     version: str | None = None,
     show_progress: bool = True,
-) -> MappingSet:
-    """Parse a ChEBI SDF file and extract mappings.
-
-    Args:
-        input_file: Path to ChEBI SDF file (e.g., ChEBI_complete_3star.sdf).
-        version: Version/release of the source database.
-        show_progress: Whether to show progress bars during parsing.
-
-    Returns:
-        MappingSet containing ChEBI identifier and synonym mappings.
-
-    Example:
-        >>> from pysec2pri import parse_chebi  # doctest: +SKIP
-        >>> mapping_set = parse_chebi("ChEBI_complete_3star.sdf")  # doctest: +SKIP
-        >>> print(f"Found {len(mapping_set)} mappings")  # doctest: +SKIP
-    """
+) -> Sec2PriMappingSet:
+    """Parse a ChEBI SDF file and extract ID mappings."""
     from pysec2pri.parsers import ChEBIParser
 
     parser = ChEBIParser(version=version, show_progress=show_progress)
     return parser.parse(Path(input_file))
 
 
-# =============================================================================
-# HMDB Functions
-# =============================================================================
+def parse_chebi_synonyms(
+    input_file: Path | str,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Parse a ChEBI SDF file and extract synonym mappings."""
+    from pysec2pri.parsers import ChEBIParser
+
+    parser = ChEBIParser(version=version, show_progress=show_progress)
+    return parser.parse_synonyms(Path(input_file))
 
 
 def parse_hmdb(
     input_file: Path | str,
     version: str | None = None,
     show_progress: bool = True,
-) -> MappingSet:
-    """Parse HMDB XML files and extract mappings.
-
-    Args:
-        input_file: Path to HMDB ZIP file or directory with XML files.
-        version: Version/release of the source database.
-        show_progress: Whether to show progress bars during parsing.
-
-    Returns:
-        MappingSet containing HMDB identifier and synonym mappings.
-
-    Example:
-        >>> from pysec2pri import parse_hmdb  # doctest: +SKIP
-        >>> mapping_set = parse_hmdb("hmdb_metabolites.zip")  # doctest: +SKIP
-    """
+) -> Sec2PriMappingSet:
+    """Parse HMDB XML files and extract ID mappings."""
     from pysec2pri.parsers import HMDBParser
 
     parser = HMDBParser(version=version, show_progress=show_progress)
     return parser.parse(Path(input_file))
 
 
-# =============================================================================
-# HGNC Functions
-# =============================================================================
-
-
 def parse_hgnc(
     withdrawn_file: Path | str,
-    complete_set_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-    include_unmapped_genes: bool = False,
-) -> MappingSet:
-    """Parse HGNC files and extract mappings.
-
-    Args:
-        withdrawn_file: Path to HGNC withdrawn IDs file.
-        complete_set_file: Path to HGNC complete set file (optional).
-        version: Version/release of the source database.
-        show_progress: Whether to show progress bars during parsing.
-        include_unmapped_genes: If True, include entries for priID only genes.
-
-    Returns:
-        MappingSet containing HGNC identifier and symbol mappings.
-    """
+) -> Sec2PriMappingSet:
+    """Parse HGNC withdrawn file and extract ID mappings."""
     from pysec2pri.parsers import HGNCParser
 
-    parser = HGNCParser(
-        version=version,
-        show_progress=show_progress,
-        include_unmapped_genes=include_unmapped_genes,
-    )
-    return parser.parse(
-        Path(withdrawn_file),
-        complete_set_path=Path(complete_set_file) if complete_set_file else None,
-    )
+    parser = HGNCParser(version=version, show_progress=show_progress)
+    return parser.parse(Path(withdrawn_file))
 
 
-# =============================================================================
-# NCBI Functions
-# =============================================================================
+def parse_hgnc_symbols(
+    complete_set_file: Path | str,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Parse HGNC complete set file and extract symbol mappings."""
+    from pysec2pri.parsers import HGNCParser
+
+    parser = HGNCParser(version=version, show_progress=show_progress)
+    return parser.parse_symbols(Path(complete_set_file))
 
 
 def parse_ncbi(
     history_file: Path | str,
-    gene_info_file: Path | str | None = None,
     tax_id: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
-) -> MappingSet:
-    """Parse NCBI Gene files and extract mappings.
-
-    Args:
-        history_file: Path to gene_history file (can be .gz compressed).
-        gene_info_file: Path to gene_info file for symbol information.
-        tax_id: Taxonomy ID to filter (default: "9606" for human).
-        version: Version/release of the source database.
-        show_progress: Whether to show progress bars during parsing.
-
-    Returns:
-        MappingSet containing NCBI Gene identifier and symbol mappings.
-
-    Example:
-        >>> from pysec2pri import parse_ncbi  # doctest: +SKIP
-        >>> mapping_set = parse_ncbi(
-        ...     "gene_history.gz",
-        ...     gene_info_file="gene_info.gz",
-        ...     tax_id="9606",  # doctest: +SKIP
-        ... )
-    """
+) -> Sec2PriMappingSet:
+    """Parse NCBI Gene history file and extract ID mappings."""
     from pysec2pri.parsers import NCBIParser
 
     parser = NCBIParser(version=version, show_progress=show_progress)
-    return parser.parse(
-        Path(history_file),
-        gene_info_path=Path(gene_info_file) if gene_info_file else None,
-        tax_id=tax_id,
-    )
+    return parser.parse(Path(history_file), tax_id=tax_id)
 
 
-# =============================================================================
-# UniProt Functions
-# =============================================================================
+def parse_ncbi_symbols(
+    gene_info_file: Path | str,
+    tax_id: str = "9606",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Parse NCBI Gene info file and extract symbol mappings."""
+    from pysec2pri.parsers import NCBIParser
+
+    parser = NCBIParser(version=version, show_progress=show_progress)
+    return parser.parse_symbols(Path(gene_info_file), tax_id=tax_id)
 
 
 def parse_uniprot(
@@ -201,22 +127,8 @@ def parse_uniprot(
     delac_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> MappingSet:
-    """Parse UniProt files and extract mappings.
-
-    Args:
-        sec_ac_file: Path to sec_ac.txt (secondary accessions file).
-        delac_file: Path to delac_sp.txt (deleted accessions file).
-        version: Version/release of the source database.
-        show_progress: Whether to show progress bars during parsing.
-
-    Returns:
-        MappingSet containing UniProt identifier mappings.
-
-    Example:
-        >>> from pysec2pri import parse_uniprot  # doctest: +SKIP
-        >>> mapping_set = parse_uniprot("sec_ac.txt", delac_file="delac_sp.txt")  # doctest: +SKIP
-    """
+) -> Sec2PriMappingSet:
+    """Parse UniProt secondary accession files and extract ID mappings."""
     from pysec2pri.parsers import UniProtParser
 
     parser = UniProtParser(version=version, show_progress=show_progress)
@@ -226,82 +138,58 @@ def parse_uniprot(
     )
 
 
-# =============================================================================
-# Wikidata Functions
-# =============================================================================
-
-
 def parse_wikidata(
-    entity_type: str = "metabolites",
+    input_file: Path | str | None = None,
+    entity_type: str | None = None,
     version: str | None = None,
     endpoint: str | None = None,
     show_progress: bool = True,
     test_subset: bool = False,
-) -> MappingSet:
-    """Parse Wikidata redirects for a specific entity type, with test subset support."""
+) -> Sec2PriMappingSet:
+    """Parse Wikidata redirects via SPARQL or from a pre-downloaded file.
+
+    Queries the QLever Wikidata endpoint (faster than official endpoint)
+    for redirect mappings.
+
+    If entity_type is None (default), queries ALL entity types defined
+    in the config (metabolites, genes, proteins) and combines results.
+
+    Args:
+        input_file: Optional path to pre-downloaded TSV file. If None,
+                   queries SPARQL endpoint directly.
+        entity_type: Type of entities to query. One of:
+                    'metabolites', 'chemicals', 'genes', 'proteins'.
+                    If None, queries all entity types.
+        version: Version string for the mappings (defaults to today's date).
+        endpoint: Optional custom SPARQL endpoint URL.
+        show_progress: Whether to show progress bars.
+        test_subset: Whether to use test queries (LIMIT 10 results).
+
+    Returns:
+        Sec2PriMappingSet with computed cardinalities.
+
+    Example:
+        >>> from pysec2pri.api import parse_wikidata
+        >>> # Query all entity types
+        >>> mappings = parse_wikidata()
+        >>> # Query only metabolites
+        >>> mappings = parse_wikidata(entity_type="metabolites")
+    """
     from pysec2pri.parsers import WikidataParser
 
     parser = WikidataParser(
         version=version,
         show_progress=show_progress,
-        entity_type=entity_type,
+        entity_type=entity_type or "metabolites",
         endpoint=endpoint,
         test_subset=test_subset,
     )
-    return parser.parse(None)
 
+    if input_file is not None:
+        return parser.parse_from_file(Path(input_file))
 
-# =============================================================================
-# SSSOM Conversion Functions
-# =============================================================================
+    # If no entity_type specified, query all types
+    if entity_type is None:
+        return parser.parse_all()
 
-
-def to_sssom_mapping_set(
-    mapping_set: MappingSet,
-    mapping_date: str | None = None,
-) -> SSSOMMapingSet:
-    """Convert a pysec2pri MappingSet to an sssom_schema MappingSet.
-
-    Args:
-        mapping_set: The pysec2pri MappingSet to convert.
-        mapping_date: Date string (YYYY-MM-DD). Defaults to today.
-
-    Returns:
-        An sssom_schema MappingSet object.
-    """
-    return mapping_set.to_sssom_mapping_set(mapping_date)
-
-
-def to_sssom_document(
-    mapping_set: MappingSet,
-    mapping_date: str | None = None,
-) -> MappingSetDocument:
-    """Convert a pysec2pri MappingSet to an SSSOM MappingSetDocument.
-
-    Args:
-        mapping_set: The pysec2pri MappingSet to convert.
-        mapping_date: Date string (YYYY-MM-DD). Defaults to today.
-
-    Returns:
-        An SSSOM MappingSetDocument with converter.
-    """
-    return mapping_set.to_sssom_document(mapping_date)
-
-
-def to_sssom_dataframe(
-    mapping_set: MappingSet,
-    mapping_date: str | None = None,
-) -> MappingSetDataFrame:
-    """Convert a pysec2pri MappingSet to an SSSOM MappingSetDataFrame.
-
-    Args:
-        mapping_set: The pysec2pri MappingSet to convert.
-        mapping_date: Date string (YYYY-MM-DD). Defaults to today.
-
-    Returns:
-        An SSSOM MappingSetDataFrame.
-
-    Raises:
-        ImportError: If pandas is not installed.
-    """
-    return mapping_set.to_sssom_dataframe(mapping_date)
+    return parser.parse()

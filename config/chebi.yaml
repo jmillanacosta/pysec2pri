@@ -1,0 +1,125 @@
+# Datasource metadata
+name: "ChEBI"
+prefix: "CHEBI"
+curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
+
+mappingset:
+  sssom_version: null
+  curie_map:
+    CHEBI: "http://purl.obolibrary.org/obo/CHEBI_"
+    IAO: "http://purl.obolibrary.org/obo/IAO_"
+    oboInOwl: "http://www.geneontology.org/formats/oboInOwl#"
+    semapv: "https://w3id.org/semapv/vocab/"
+    skos: "http://www.w3.org/2004/02/skos/core#"
+    sssom: "https://w3id.org/sssom/"
+    sec2pri: "https://github.com/sec2pri/sec2pri/vocab/"
+    orcid: "https://orcid.org/"
+  mappings: []
+  mapping_set_id: "https://w3id.org/sssom/chebi"
+  mapping_set_version: null
+  mapping_set_title: "ChEBI Secondary to Primary Mapping"
+  mapping_set_description: "Mappings from current to deprecated ChEBI IDs."
+  mapping_set_confidence: 1.0
+  creator_id:
+    - "orcid:0000-0002-4166-7093"
+  creator_label:
+    - "Javier Millán Acosta"
+  comment: "Generated with pysec2pri"
+  license: "https://creativecommons.org/publicdomain/zero/1.0/"
+  subject_type: "CHEBI:24431"
+  subject_source: "https://www.ebi.ac.uk/chebi/"
+  subject_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+  object_type: "CHEBI:24431"
+  object_source: "https://www.ebi.ac.uk/chebi/"
+  object_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+  predicate_type: null
+  mapping_provider: "http://github.com/sec2pri/pysec2pri"
+  cardinality_scope: null
+  mapping_tool: "https://pypi.org/project/pysec2pri"
+  mapping_tool_id: "pysec2pri"
+  mapping_tool_version: "0.0.1"
+  mapping_date: null
+  publication_date: null
+  subject_match_field: null
+  object_match_field: null
+  subject_preprocessing: "https://w3id.org/semapv/vocab/BackgroundKnowledgeBasedMatching"
+  object_preprocessing: "https://w3id.org/semapv/vocab/BackgroundKnowledgeBasedMatching"
+  similarity_measure: null
+  curation_rule: "https://w3id.org/semapv/vocab/BackgroundKnowledgeBasedMatching"
+  curation_rule_text: "These mappings were generated using pysec2pri, which identifies deprecated ChEBI IDs based on the information provided in the ChEBI 3-star SDF file."
+  see_also: "https://github.com/sec2pri/pysec2pri"
+  issue_tracker: "https://github.com/sec2pri/pysec2pri/issues"
+  other: null
+  extension_definitions: null
+
+mapping:
+  record_id: null
+  subject_id: null
+  subject_label: null
+  subject_category: null
+  predicate_id: "IAO:0100001"
+  predicate_label: null
+  predicate_modifier: null
+  object_id: null
+  object_label: null
+  object_category: null
+  mapping_justification: "semapv:BackgroundKnowledgeBasedMatching"
+  author_id: null
+  author_label: null
+  reviewer_id: null
+  reviewer_label: null
+  creator_id: null
+  creator_label: null
+  license: "https://creativecommons.org/publicdomain/zero/1.0/"
+  subject_type: null
+  subject_source: null
+  subject_source_version: null
+  object_type: null
+  object_source: null
+  object_source_version: null
+  predicate_type: null
+  mapping_provider: null
+  mapping_source: "ChEBI"
+  mapping_cardinality: null
+  cardinality_scope: null
+  mapping_tool: "pysec2pri"
+  mapping_tool_id: null
+  mapping_tool_version: null
+  mapping_date: null
+  publication_date: null
+  confidence: 1.0
+  curation_rule: null
+  curation_rule_text: null
+  subject_match_field: null
+  object_match_field: null
+  match_string: null
+  subject_preprocessing: "semapv:BackgroundKnowledgeBasedMatching"
+  object_preprocessing: "semapv:BackgroundKnowledgeBasedMatching"
+  similarity_score: null
+  similarity_measure: null
+  see_also: "https://github.com/sec2pri/pysec2pri"
+  issue_tracker: "https://github.com/sec2pri/pysec2pri/issues"
+  other: null
+  comment: "Generated with pysec2pri"
+
+download_urls:
+  sdf: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+
+primary_file_key: "sdf"
+archive_url: "http://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+id_pattern: "^\\d+$"
+default_output_filename: "chebi_sec2pri.sssom.tsv"
+
+available_outputs:
+  - sssom
+  - priIDs
+  - secID2priID
+  - name2synonym
+
+input_file_types:
+  - ChEBI_complete.sdf
+  - ChEBI_complete_3star.sdf
+
+source: "ChEBI database"
+homepage: "https://www.ebi.ac.uk/chebi/"
+data_license: "https://www.ebi.ac.uk/about/terms-of-use"
