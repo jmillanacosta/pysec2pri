@@ -110,10 +110,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError(
-                "Must provide either input_path (SDF) or "
-                "secondary_ids_path (TSV)"
-            )
+            raise ValueError("Must provide either input_path (SDF) or secondary_ids_path (TSV)")
 
         # Build SSSOM Mapping objects for ID mappings
         mappings = self._build_id_mappings(raw_mappings)
@@ -156,9 +153,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError(
-                "Must provide either input_path (SDF) or names_path (TSV)"
-            )
+            raise ValueError("Must provide either input_path (SDF) or names_path (TSV)")
 
         # Build SSSOM Mapping objects for label mappings
         mappings = self._build_label_mappings(raw_mappings)
@@ -166,9 +161,7 @@ class ChEBIParser(BaseParser):
         # Create LabelMappingSet and compute cardinalities
         return self._create_mapping_set(mappings, mapping_type="label")
 
-    def _build_id_mappings(
-        self, raw_id_mappings: list[tuple[str, str]]
-    ) -> list[Mapping]:
+    def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
         """Build SSSOM Mapping objects for ID-to-ID mappings.
 
         Args:
@@ -199,9 +192,7 @@ class ChEBIParser(BaseParser):
 
         return mappings
 
-    def _build_label_mappings(
-        self, raw_name_mappings: list[tuple[str, str, str]]
-    ) -> list[Mapping]:
+    def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
         """Build SSSOM Mapping objects for label-to-label (synonym) mappings.
 
         Args:
@@ -270,12 +261,10 @@ def _get_3star_compound_ids(
         compounds_path,
         separator="\t",
         columns=["id", "stars"],
-        dtypes={"id": pl.Int64, "stars": pl.Int64},
+        schema_overrides={"id": pl.Int64, "stars": pl.Int64},
     )
 
-    three_star_ids = set(
-        df.filter(pl.col("stars") == 3)["id"].to_list()
-    )
+    three_star_ids = set(df.filter(pl.col("stars") == 3)["id"].to_list())
 
     if show_progress:
         pass
@@ -310,7 +299,7 @@ def _parse_secondary_ids_tsv(
     df = pl.read_csv(
         secondary_ids_path,
         separator="\t",
-        dtypes={"compound_id": pl.Int64, "secondary_id": pl.Int64},
+        schema_overrides={"compound_id": pl.Int64, "secondary_id": pl.Int64},
     )
 
     # Filter to 3-star compounds if requested
@@ -362,7 +351,7 @@ def _parse_names_tsv(
         names_path,
         separator="\t",
         columns=["id", "compound_id", "name"],
-        dtypes={"id": pl.Int64, "compound_id": pl.Int64, "name": pl.Utf8},
+        schema_overrides={"id": pl.Int64, "compound_id": pl.Int64, "name": pl.Utf8},
     )
 
     # Filter to 3-star compounds if requested
@@ -372,20 +361,17 @@ def _parse_names_tsv(
 
     # For each compound, find the primary name (smallest id)
     # and all other names as synonyms
-    primary_names = (
-        df.group_by("compound_id")
-        .agg([
+    primary_names = df.group_by("compound_id").agg(
+        [
             pl.col("name").sort_by("id").first().alias("primary_name"),
-        ])
+        ]
     )
 
     # Join to get primary name for each row
     df_with_primary = df.join(primary_names, on="compound_id")
 
     # Filter to only synonym rows (where name != primary_name)
-    synonyms_df = df_with_primary.filter(
-        pl.col("name") != pl.col("primary_name")
-    )
+    synonyms_df = df_with_primary.filter(pl.col("name") != pl.col("primary_name"))
 
     # Build mapping tuples
     mappings: list[tuple[str, str, str]] = []
@@ -413,9 +399,7 @@ def _read_sdf_lines(input_path: Path) -> list[str]:
         return f.readlines()
 
 
-def _extract_value(
-    lines: list[str], i: int, total_lines: int
-) -> tuple[str | None, int]:
+def _extract_value(lines: list[str], i: int, total_lines: int) -> tuple[str | None, int]:
     """Extract a value from the next line after a tag."""
     i += 1
     if i < total_lines:
@@ -462,9 +446,7 @@ def _extract_synonyms(
         syn_line = lines[i].strip()
         if syn_line and not syn_line.startswith(">"):
             if current_subject_id and current_name:
-                raw_name_mappings.append(
-                    (current_subject_id, current_name, syn_line)
-                )
+                raw_name_mappings.append((current_subject_id, current_name, syn_line))
             i += 1
         else:
             break
@@ -498,9 +480,7 @@ def _process_sdf_line(
         return i, current_subject_id, value, False
 
     if "<secondary" in line.lower():
-        i = _extract_secondary_ids(
-            lines, i, total_lines, current_subject_id, raw_id_mappings
-        )
+        i = _extract_secondary_ids(lines, i, total_lines, current_subject_id, raw_id_mappings)
         return i, current_subject_id, current_name, True
 
     if "<synonym" in line.lower():
@@ -548,11 +528,7 @@ def _parse_chebi_sdf_fast(
     i = 0
     total_lines = len(lines)
 
-    pbar = (
-        tqdm(total=total_lines, desc="Parsing ChEBI SDF")
-        if show_progress
-        else None
-    )
+    pbar = tqdm(total=total_lines, desc="Parsing ChEBI SDF") if show_progress else None
 
     while i < total_lines:
         i, current_subject_id, current_name, skip = _process_sdf_line(

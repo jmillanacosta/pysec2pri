@@ -13,6 +13,9 @@ import click
 if TYPE_CHECKING:
     from sssom_schema import MappingSet
 
+    from pysec2pri.diff import MappingDiff
+    from pysec2pri.parsers.base import Sec2PriMappingSet
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="sssom")
 
 PathType: Any = click.Path(path_type=Path)  # type: ignore[type-var]
@@ -169,7 +172,8 @@ def main() -> None:
 @click.argument("file1", type=ExistingPathType)
 @click.argument("file2", type=ExistingPathType)
 @click.option(
-    "-o", "--output",
+    "-o",
+    "--output",
     type=PathType,
     help="Output file for diff results (TSV format)",
 )
@@ -198,6 +202,7 @@ def diff(
 
     Shows added, removed, and changed mappings between the two files.
     """
+    from pysec2pri.api import write_diff_output
     from pysec2pri.diff import diff_sssom_files, summarize_diff
 
     click.echo(f"Comparing {file1.name} vs {file2.name}...")
@@ -210,30 +215,7 @@ def diff(
 
     # Show detailed differences if requested or if counts are manageable
     if show_all or result.total_changes <= 50:
-        if result.added_count > 0:
-            click.echo("")
-            click.echo(f"=== Added mappings ({result.added_count}) ===")
-            click.echo("object_id\tsubject_id")
-            for row in result.added.iter_rows(named=True):
-                click.echo(f"{row['object_id']}\t{row['subject_id']}")
-
-        if result.removed_count > 0:
-            click.echo("")
-            click.echo(f"=== Removed mappings ({result.removed_count}) ===")
-            click.echo("object_id\tsubject_id")
-            for row in result.removed.iter_rows(named=True):
-                click.echo(f"{row['object_id']}\t{row['subject_id']}")
-
-        if result.changed_count > 0:
-            click.echo("")
-            click.echo(f"=== Changed mappings ({result.changed_count}) ===")
-            click.echo("object_id\told_subject_id\tnew_subject_id")
-            for row in result.changed.iter_rows(named=True):
-                click.echo(
-                    f"{row['object_id']}\t"
-                    f"{row['old_subject_id']}\t"
-                    f"{row['new_subject_id']}"
-                )
+        _show_diff_details(result)
     elif result.total_changes > 50:
         click.echo("")
         click.echo(
@@ -243,52 +225,35 @@ def diff(
 
     # Write to output file if specified
     if output:
-        import polars as pl
-
-        # Combine all differences into one output
-        dfs = []
-
-        if result.added_count > 0:
-            added_df = result.added.with_columns(
-                pl.lit("added").alias("change_type"),
-                pl.lit(None).alias("old_subject_id"),
-            ).select([
-                "change_type",
-                "object_id",
-                pl.col("subject_id").alias("new_subject_id"),
-                "old_subject_id",
-            ])
-            dfs.append(added_df)
-
-        if result.removed_count > 0:
-            removed_df = result.removed.with_columns(
-                pl.lit("removed").alias("change_type"),
-                pl.lit(None).alias("new_subject_id"),
-            ).select([
-                "change_type",
-                "object_id",
-                "new_subject_id",
-                pl.col("subject_id").alias("old_subject_id"),
-            ])
-            dfs.append(removed_df)
-
-        if result.changed_count > 0:
-            changed_df = result.changed.with_columns(
-                pl.lit("changed").alias("change_type"),
-            ).select([
-                "change_type",
-                "object_id",
-                "new_subject_id",
-                "old_subject_id",
-            ])
-            dfs.append(changed_df)
-
-        if dfs:
-            combined = pl.concat(dfs)
-            combined.write_csv(output, separator="\t")
+        if result.total_changes > 0:
+            write_diff_output(result, output)
             click.echo(f"\nWrote diff to {output}")
         else:
             click.echo("\nNo differences to write.")
+
+
+def _show_diff_details(result: MappingDiff) -> None:
+    """Show detailed diff output for added/removed/changed mappings."""
+    if result.added_count > 0:
+        click.echo("")
+        click.echo(f"=== Added mappings ({result.added_count}) ===")
+        click.echo("object_id\tsubject_id")
+        for row in result.added.iter_rows(named=True):
+            click.echo(f"{row['object_id']}\t{row['subject_id']}")
+
+    if result.removed_count > 0:
+        click.echo("")
+        click.echo(f"=== Removed mappings ({result.removed_count}) ===")
+        click.echo("object_id\tsubject_id")
+        for row in result.removed.iter_rows(named=True):
+            click.echo(f"{row['object_id']}\t{row['subject_id']}")
+
+    if result.changed_count > 0:
+        click.echo("")
+        click.echo(f"=== Changed mappings ({result.changed_count}) ===")
+        click.echo("object_id\told_subject_id\tnew_subject_id")
+        for row in result.changed.iter_rows(named=True):
+            click.echo(f"{row['object_id']}\t{row['old_subject_id']}\t{row['new_subject_id']}")
 
 
 @main.command()
@@ -346,18 +311,34 @@ def chebi(
     - synonyms: Only name → synonym mappings
     - all: Both mapping sets combined (default)
     """
-    from pysec2pri.api import parse_chebi, parse_chebi_synonyms
-    from pysec2pri.exports import (
-        write_name2synonym,
-        write_pri_ids,
-        write_sec2pri,
-        write_sssom,
-    )
-
-    # Determine the format based on version
+    # Download files and determine format
     files = _download_chebi_files(input_file, data_version, subset, use_sdf)
 
-    # Parse requested mapping sets
+    # Parse requested mapping sets using API functions
+    id_mappings, synonym_mappings = _parse_chebi_mapping_sets(
+        files, data_version, subset, mapping_sets
+    )
+
+    # Combine mapping sets if needed
+    result = _combine_chebi_results(id_mappings, synonym_mappings, mapping_sets)
+
+    # Get version for output naming
+    version = getattr(result, "mapping_set_version", None) or data_version
+    base_name = _get_chebi_base_name(subset, version)
+
+    # Write output in requested format
+    _write_chebi_output(result, output, output_format, base_name, version)
+
+
+def _parse_chebi_mapping_sets(
+    files: dict[str, Any],
+    version: str | None,
+    subset: str,
+    mapping_sets: str,
+) -> tuple[Sec2PriMappingSet | None, Sec2PriMappingSet | None]:
+    """Parse ChEBI mapping sets based on format and mapping_sets option."""
+    from pysec2pri.api import parse_chebi, parse_chebi_synonyms
+
     id_mappings = None
     synonym_mappings = None
 
@@ -365,14 +346,14 @@ def chebi(
         # New TSV format (>= 245)
         if mapping_sets in ("ids", "all"):
             id_mappings = parse_chebi(
-                version=data_version,
+                version=version,
                 subset=subset,
                 secondary_ids_path=files["secondary_ids"],
                 compounds_path=files.get("compounds"),
             )
         if mapping_sets in ("synonyms", "all"):
             synonym_mappings = parse_chebi_synonyms(
-                version=data_version,
+                version=version,
                 subset=subset,
                 names_path=files["names"],
                 compounds_path=files.get("compounds"),
@@ -380,58 +361,68 @@ def chebi(
     else:
         # Legacy SDF format (< 245)
         if mapping_sets in ("ids", "all"):
-            id_mappings = parse_chebi(
-                files["sdf"], version=data_version, subset=subset
-            )
+            id_mappings = parse_chebi(files["sdf"], version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
-            synonym_mappings = parse_chebi_synonyms(
-                files["sdf"], version=data_version, subset=subset
-            )
+            synonym_mappings = parse_chebi_synonyms(files["sdf"], version=version, subset=subset)
 
-    # Combine mapping sets if both are requested
+    return id_mappings, synonym_mappings
+
+
+def _combine_chebi_results(
+    id_mappings: Sec2PriMappingSet | None,
+    synonym_mappings: Sec2PriMappingSet | None,
+    mapping_sets: str,
+) -> Sec2PriMappingSet:
+    """Combine mapping sets and report counts."""
+    from pysec2pri.api import combine_mapping_sets
+
     if mapping_sets == "all" and id_mappings and synonym_mappings:
-        # Store counts before combining
         id_count = len(id_mappings.mappings or [])
         syn_count = len(synonym_mappings.mappings or [])
-        # Merge mappings from both sets
-        combined_mappings = list(id_mappings.mappings or [])
-        combined_mappings.extend(synonym_mappings.mappings or [])
-        # Use id_mappings as base and update with combined
-        result = id_mappings
-        result.mappings = combined_mappings  # type: ignore[assignment]
+        result = combine_mapping_sets(id_mappings, synonym_mappings)
+        total = len(result.mappings or [])
         click.echo(
-            f"Combined {id_count} ID mappings + "
-            f"{syn_count} synonym mappings = {len(combined_mappings)} total"
+            f"Combined {id_count} ID mappings + {syn_count} synonym mappings = {total} total"
         )
+        return result
     elif id_mappings:
-        result = id_mappings
+        return id_mappings
     elif synonym_mappings:
-        result = synonym_mappings
+        return synonym_mappings
     else:
         raise click.ClickException("No mapping sets generated")
 
-    # Get version from result for output naming
-    version = getattr(result, "mapping_set_version", None) or data_version
-    v_suffix = f"_{version}" if version else ""
+
+def _get_chebi_base_name(subset: str, version: str | None) -> str:
+    """Generate base name for ChEBI output files."""
     subset_sfx = "_3star" if subset == "3star" else ""
-    out_base = f"chebi{subset_sfx}"
+    v_suffix = f"_{version}" if version else ""
+    return f"chebi{subset_sfx}{v_suffix}"
+
+
+def _write_chebi_output(
+    result: Sec2PriMappingSet,
+    output: Path | None,
+    output_format: str,
+    base_name: str,
+    version: str | None,
+) -> None:
+    """Write ChEBI output in requested format."""
+    from pysec2pri.api import write_all_formats
+    from pysec2pri.exports import (
+        write_name2synonym,
+        write_pri_ids,
+        write_sec2pri,
+        write_sssom,
+    )
 
     if output_format == "all":
-        out_dir = _resolve_all_format_dir(output, out_base, version)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        sssom_f = out_dir / f"{out_base}{v_suffix}_sssom.tsv"
-        sec2pri_f = out_dir / f"{out_base}{v_suffix}_sec2pri.tsv"
-        pri_ids_f = out_dir / f"{out_base}{v_suffix}_pri_ids.tsv"
-        name2syn_f = out_dir / f"{out_base}{v_suffix}_name2synonym.tsv"
-        write_sssom(result, sssom_f)
-        write_sec2pri(result, sec2pri_f)
-        write_pri_ids(result, pri_ids_f)
-        write_name2synonym(result, name2syn_f)
+        datasource = base_name.split("_")[0]
+        out_dir = _resolve_all_format_dir(output, datasource, version)
+        write_all_formats(result, out_dir, base_name)
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename(
-            out_base, output_format, version
-        )
+        out_path = output or Path(f"{base_name}_{output_format}.tsv")
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":
