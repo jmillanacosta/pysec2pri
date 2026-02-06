@@ -11,15 +11,18 @@ from typing import TYPE_CHECKING
 
 from pysec2pri.exports import (
     write_name2synonym,
+    write_pri_ids,
     write_sec2pri,
     write_sssom,
     write_symbol2prev,
 )
 
 if TYPE_CHECKING:
+    from pysec2pri.diff import MappingDiff
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
 __all__ = [
+    "combine_mapping_sets",
     "parse_chebi",
     "parse_chebi_synonyms",
     "parse_hgnc",
@@ -29,6 +32,8 @@ __all__ = [
     "parse_ncbi_symbols",
     "parse_uniprot",
     "parse_wikidata",
+    "write_all_formats",
+    "write_diff_output",
     "write_name2synonym",
     "write_sec2pri",
     "write_sssom",
@@ -37,27 +42,73 @@ __all__ = [
 
 
 def parse_chebi(
-    input_file: Path | str,
+    input_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
+    subset: str = "3star",
+    *,
+    secondary_ids_path: Path | str | None = None,
+    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse a ChEBI SDF file and extract ID mappings."""
+    """Parse ChEBI data files and extract ID mappings.
+
+    For releases >= 245: use secondary_ids_path and compounds_path (TSV).
+    For releases < 245: use input_file (SDF format).
+
+    Args:
+        input_file: Path to the ChEBI SDF file (legacy format < 245).
+        version: Version/release identifier for the datasource.
+        show_progress: Whether to show progress bars during parsing.
+        subset: "3star" or "complete" - which compounds to include.
+        secondary_ids_path: Path to secondary_ids.tsv (new format >= 245).
+        compounds_path: Path to compounds.tsv for 3-star filtering.
+
+    Returns:
+        Sec2PriMappingSet with computed cardinalities.
+    """
     from pysec2pri.parsers import ChEBIParser
 
-    parser = ChEBIParser(version=version, show_progress=show_progress)
-    return parser.parse(Path(input_file))
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    return parser.parse(
+        input_path=Path(input_file) if input_file else None,
+        secondary_ids_path=secondary_ids_path,
+        compounds_path=compounds_path,
+    )
 
 
 def parse_chebi_synonyms(
-    input_file: Path | str,
+    input_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
+    subset: str = "3star",
+    *,
+    names_path: Path | str | None = None,
+    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse a ChEBI SDF file and extract synonym mappings."""
+    """Parse ChEBI data files and extract synonym mappings.
+
+    For releases >= 245, use names_path and compounds_path (TSV format).
+    For releases < 245, use input_file (SDF format).
+
+    Args:
+        input_file: Path to the ChEBI SDF file (legacy format < 245).
+        version: Version/release identifier for the datasource.
+        show_progress: Whether to show progress bars during parsing.
+        subset: "3star" or "complete" - which compounds to include.
+        names_path: Path to names.tsv (new format >= 245).
+        compounds_path: Path to compounds.tsv for 3-star filtering.
+
+    Returns:
+        Sec2PriMappingSet with computed cardinalities based on labels.
+    """
     from pysec2pri.parsers import ChEBIParser
 
-    parser = ChEBIParser(version=version, show_progress=show_progress)
-    return parser.parse_synonyms(Path(input_file))
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    return parser.parse_synonyms(
+        input_path=Path(input_file) if input_file else None,
+        names_path=names_path,
+        compounds_path=compounds_path,
+    )
 
 
 def parse_hmdb(
@@ -193,3 +244,122 @@ def parse_wikidata(
         return parser.parse_all()
 
     return parser.parse()
+
+
+def combine_mapping_sets(
+    id_mappings: Sec2PriMappingSet | None,
+    synonym_mappings: Sec2PriMappingSet | None,
+) -> Sec2PriMappingSet:
+    """Combine ID and synonym mapping sets into one.
+
+    Args:
+        id_mappings: Mapping set with ID mappings.
+        synonym_mappings: Mapping set with synonym mappings.
+
+    Returns:
+        Combined mapping set with both ID and synonym mappings.
+
+    Raises:
+        ValueError: If both mapping sets are None.
+    """
+    if id_mappings is None and synonym_mappings is None:
+        msg = "At least one mapping set must be provided"
+        raise ValueError(msg)
+
+    if id_mappings is None:
+        return synonym_mappings  # type: ignore[return-value]
+    if synonym_mappings is None:
+        return id_mappings
+
+    # Merge mappings from both sets
+    combined_mappings = list(id_mappings.mappings or [])
+    combined_mappings.extend(synonym_mappings.mappings or [])
+
+    # Use id_mappings as base and update with combined
+    result = id_mappings
+    result.mappings = combined_mappings
+    return result
+
+
+def write_all_formats(
+    mapping_set: Sec2PriMappingSet,
+    output_dir: Path,
+    base_name: str,
+    include_name2synonym: bool = True,
+) -> None:
+    """Write mapping set in all output formats to a directory.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_dir: Directory to write files to.
+        base_name: Base name for output files (e.g., "chebi_3star_245").
+        include_name2synonym: Whether to include name2synonym format.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    write_sssom(mapping_set, output_dir / f"{base_name}_sssom.tsv")
+    write_sec2pri(mapping_set, output_dir / f"{base_name}_sec2pri.tsv")
+    write_pri_ids(mapping_set, output_dir / f"{base_name}_pri_ids.tsv")
+
+    if include_name2synonym:
+        write_name2synonym(mapping_set, output_dir / f"{base_name}_name2synonym.tsv")
+
+
+def write_diff_output(
+    result: MappingDiff,
+    output_path: Path,
+) -> None:
+    """Write diff results to a TSV file.
+
+    Args:
+        result: MappingDiff object with added/removed/changed mappings.
+        output_path: Path to write the TSV file.
+    """
+    import polars as pl
+
+    dfs = []
+
+    if result.added_count > 0:
+        added_df = result.added.with_columns(
+            pl.lit("added").alias("change_type"),
+            pl.lit(None).alias("old_subject_id"),
+        ).select(
+            [
+                "change_type",
+                "object_id",
+                pl.col("subject_id").alias("new_subject_id"),
+                "old_subject_id",
+            ]
+        )
+        dfs.append(added_df)
+
+    if result.removed_count > 0:
+        removed_df = result.removed.with_columns(
+            pl.lit("removed").alias("change_type"),
+            pl.lit(None).alias("new_subject_id"),
+        ).select(
+            [
+                "change_type",
+                "object_id",
+                "new_subject_id",
+                pl.col("subject_id").alias("old_subject_id"),
+            ]
+        )
+        dfs.append(removed_df)
+
+    if result.changed_count > 0:
+        changed_df = result.changed.with_columns(
+            pl.lit("changed").alias("change_type"),
+        ).select(
+            [
+                "change_type",
+                "object_id",
+                "new_subject_id",
+                "old_subject_id",
+            ]
+        )
+        dfs.append(changed_df)
+
+    if dfs:
+        combined = pl.concat(dfs)
+        combined.write_csv(output_path, separator="\t")

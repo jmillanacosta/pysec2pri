@@ -136,17 +136,18 @@ def check_chebi_release() -> ReleaseInfo:
     latest_release = max(int(m) for m in matches)
     version = str(latest_release)
 
-    sdf_url = (
-        f"http://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
-        f"rel{latest_release}/SDF/chebi_3_stars.sdf.gz"
-    )
+    # Return URLs based on release version
+    urls = _get_chebi_urls_for_version(version, subset="3star")
+    # Get release date from secondary_ids (new) or sdf (legacy)
+    check_url = urls.get("secondary_ids") or urls.get("sdf")
+    release_date = get_file_last_modified(check_url) if check_url else None
 
     return ReleaseInfo(
         datasource="chebi",
         version=version,
-        release_date=get_file_last_modified(sdf_url),
+        release_date=release_date,
         is_new=True,  # Caller determines if it's new
-        files={"sdf": sdf_url},
+        files=urls,
     )
 
 
@@ -323,21 +324,48 @@ def _get_hgnc_urls_for_version(version: str) -> dict[str, str]:
     }
 
 
-def _get_chebi_urls_for_version(version: str) -> dict[str, str]:
+def _get_chebi_urls_for_version(
+    version: str,
+    subset: str = "3star",
+) -> dict[str, str]:
     """Build ChEBI URLs for a specific release version.
 
+    For releases >= 245, returns TSV flat file URLs.
+    For releases < 245, returns SDF file URL.
+
+    URLs are loaded from chebi.yaml config file.
+
     Args:
-        version: Release number (e.g., "232").
+        version: Release number (e.g., "232", "245").
+        subset: Either "3star" or "complete". For new releases (>=245),
+            this determines which compounds are included via the compounds.tsv
+            filter. For legacy releases (<245), this determines the SDF file.
 
     Returns:
-        Dictionary with 'sdf' URL.
+        Dictionary with file URLs keyed by type (sdf, secondary_ids, etc.).
     """
-    return {
-        "sdf": (
-            f"http://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
-            f"rel{version}/SDF/chebi_3_stars.sdf.gz"
-        ),
-    }
+    config = ALL_DATASOURCES.get("chebi")
+    if not config:
+        raise ValueError("ChEBI config not loaded")
+
+    new_format_version = config.new_format_version or 245
+    download_urls = config.download_urls
+    release_num = int(version)
+
+    if release_num >= new_format_version:
+        # New TSV format (>= 245)
+        new_urls = download_urls.get("new", {})
+        return {
+            "secondary_ids": new_urls["secondary_ids"].format(version=version),
+            "names": new_urls["names"].format(version=version),
+            "compounds": new_urls["compounds"].format(version=version),
+        }
+    else:
+        # Legacy SDF format (< 245)
+        legacy_urls = download_urls.get("legacy", {})
+        sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
+        url = legacy_urls[sdf_key].format(version=version)
+        return {"sdf": url}
 
 
 def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
@@ -360,12 +388,14 @@ def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
 def get_download_urls(
     datasource: str,
     version: str | None = None,
+    subset: str = "3star",
 ) -> dict[str, str]:
     """Get download URLs for a datasource.
 
     Args:
         datasource: Name of the datasource.
         version: Specific version to get URLs for.
+        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
 
     Returns:
         Dictionary mapping file keys to URLs.
@@ -381,7 +411,7 @@ def get_download_urls(
         return check_hgnc_release().files
     elif datasource_lower == "chebi":
         if version:
-            return _get_chebi_urls_for_version(version)
+            return _get_chebi_urls_for_version(version, subset=subset)
         return check_chebi_release().files
     elif datasource_lower == "uniprot":
         if version:
@@ -395,6 +425,7 @@ def _get_datasource_urls(
     datasource_lower: str,
     config: DatasourceConfig,
     version: str | None = None,
+    subset: str = "3star",
 ) -> dict[str, str]:
     """Get download URLs for a datasource.
 
@@ -402,6 +433,7 @@ def _get_datasource_urls(
         datasource_lower: Lowercase datasource name.
         config: Datasource configuration.
         version: Specific version to get URLs for.
+        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
 
     Returns:
         Dictionary mapping file keys to URLs.
@@ -418,7 +450,7 @@ def _get_datasource_urls(
 
     if datasource_lower == "chebi":
         if version:
-            urls = _get_chebi_urls_for_version(version)
+            urls = _get_chebi_urls_for_version(version, subset=subset)
             logger.info(f"ChEBI version {version}: {urls}")
         else:
             release_info = check_chebi_release()
@@ -447,6 +479,7 @@ def download_datasource(
     output_dir: Path,
     decompress: bool = True,
     version: str | None = None,
+    subset: str = "3star",
 ) -> dict[str, Path]:
     """Download all files for a datasource.
 
@@ -461,6 +494,7 @@ def download_datasource(
         version: Specific version to download. Format depends on datasource:
             - HGNC: date string "YYYY-MM-DD" (e.g., "2026-01-06")
             - ChEBI: release number (e.g., "232")
+        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
 
     Returns:
         Dictionary mapping file keys to downloaded paths.
@@ -471,7 +505,7 @@ def download_datasource(
         raise ValueError(f"Unknown datasource: {datasource}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    urls = _get_datasource_urls(datasource_lower, config, version)
+    urls = _get_datasource_urls(datasource_lower, config, version, subset)
 
     return _download_urls(urls, output_dir, decompress)
 

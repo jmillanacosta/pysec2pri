@@ -14,6 +14,7 @@ import yaml
 from sssom_schema import Mapping, MappingCardinalityEnum, MappingSet
 from tqdm import tqdm
 
+from pysec2pri.logging import logger
 from pysec2pri.version import VERSION
 
 # =============================================================================
@@ -39,7 +40,7 @@ class DatasourceConfig:
     curie_base_url: str
     default_output_filename: str = ""
     available_outputs: list[str] = field(default_factory=list)
-    download_urls: dict[str, str] = field(default_factory=dict)
+    download_urls: dict[str, Any] = field(default_factory=dict)
     primary_file_key: str = ""
     id_pattern: str = ""
     archive_url: str = ""
@@ -50,6 +51,9 @@ class DatasourceConfig:
     # SPARQL-based datasources (e.g., Wikidata)
     sparql_endpoint: str = ""
     queries: dict[str, str] = field(default_factory=dict)
+    # For now, only ChEBI: version threshold for new TSV format.
+    # Use if release files change location or serialization.
+    new_format_version: int | None = None
     # Full metadata from YAML
     mappingset_metadata: dict[str, Any] = field(default_factory=dict)
     mapping_metadata: dict[str, Any] = field(default_factory=dict)
@@ -121,9 +125,301 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         data_license=raw.get("data_license", ""),
         sparql_endpoint=raw.get("sparql_endpoint", ""),
         queries=raw.get("queries", {}),
+        new_format_version=raw.get("new_format_version"),
         mappingset_metadata=raw.get("mappingset", {}),
         mapping_metadata=raw.get("mapping", {}),
     )
+
+
+# =============================================================================
+# Base Downloader Class
+# =============================================================================
+
+
+class BaseDownloader(ABC):
+    """Abstract base class for datasource downloaders.
+
+    Provides shared download logic that can be inherited by datasource-specific
+    downloaders. Handles file downloads, URL construction, and version detection.
+    """
+
+    datasource_name: str = ""
+    _config: DatasourceConfig | None = None
+
+    def __init__(
+        self,
+        version: str | None = None,
+        show_progress: bool = True,
+    ) -> None:
+        """Initialize the downloader.
+
+        Args:
+            version: Version/release identifier for the datasource.
+            show_progress: Whether to show progress bars during downloads.
+        """
+        self.version = version
+        self.show_progress = show_progress
+
+        # Load config from YAML
+        if self.datasource_name:
+            try:
+                self._config = get_datasource_config(self.datasource_name.lower())
+            except FileNotFoundError:
+                self._config = None
+
+    @property
+    def config(self) -> DatasourceConfig | None:
+        """Get the loaded configuration."""
+        return self._config
+
+    @property
+    def new_format_version(self) -> int | None:
+        """Get the version threshold for new format (if any)."""
+        if self._config:
+            return self._config.new_format_version
+        return None
+
+    def is_new_format(self, version: str | None = None) -> bool:
+        """Check if a version uses the new format.
+
+        Args:
+            version: Version to check. If None, uses self.version.
+
+        Returns:
+            True if version >= new_format_version threshold.
+        """
+        v = version or self.version
+        threshold = self.new_format_version
+
+        if threshold is None:
+            return True  # No threshold means always "new" format
+
+        if v is None:
+            return True  # Default to new format for latest
+
+        try:
+            return int(v) >= threshold
+        except ValueError:
+            return True  # Default to new if version is not numeric
+
+    @abstractmethod
+    def get_download_urls(
+        self,
+        version: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        """Get download URLs for the datasource.
+
+        Args:
+            version: Specific version to get URLs for.
+            **kwargs: Additional options (e.g., subset, force_format).
+
+        Returns:
+            Dictionary mapping file keys to URLs.
+        """
+
+    @abstractmethod
+    def download(
+        self,
+        output_dir: Path,
+        version: str | None = None,
+        decompress: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Path]:
+        """Download files for the datasource.
+
+        Args:
+            output_dir: Directory to save downloaded files.
+            version: Specific version to download.
+            decompress: Whether to decompress .gz files.
+            **kwargs: Additional options.
+
+        Returns:
+            Dictionary mapping file keys to downloaded paths.
+        """
+
+    def _download_file(
+        self,
+        url: str,
+        output_path: Path,
+        decompress_gz: bool = True,
+        timeout: float | None = None,
+        description: str | None = None,
+    ) -> Path:
+        """Download a file from URL to the specified path.
+
+        Args:
+            url: URL to download from.
+            output_path: Where to save the file.
+            decompress_gz: Whether to decompress .gz files automatically.
+            timeout: Request timeout in seconds.
+            description: Description for the progress bar.
+
+        Returns:
+            Path to the downloaded file.
+        """
+        # Import here to avoid circular imports
+        from pysec2pri.download import download_file
+
+        return download_file(
+            url,
+            output_path,
+            decompress_gz=decompress_gz,
+            timeout=timeout,
+            show_progress=self.show_progress,
+            description=description,
+        )
+
+    def _download_urls(
+        self,
+        urls: dict[str, str],
+        output_dir: Path,
+        decompress: bool = True,
+    ) -> dict[str, Path]:
+        """Download files from URLs to output directory.
+
+        Args:
+            urls: Dictionary mapping file keys to URLs.
+            output_dir: Directory to save files.
+            decompress: Whether to decompress .gz files.
+
+        Returns:
+            Dictionary mapping file keys to downloaded paths.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        downloaded: dict[str, Path] = {}
+
+        for key, url in urls.items():
+            filename = url.split("/")[-1]
+
+            if decompress and filename.endswith(".gz"):
+                filename = filename[:-3]
+
+            output_path = output_dir / filename
+            logger.info("Downloading %s: %s", key, url)
+            self._download_file(url, output_path, decompress_gz=decompress)
+            downloaded[key] = output_path
+            logger.info("Saved to: %s", output_path)
+
+        return downloaded
+
+
+class ChEBIDownloader(BaseDownloader):
+    """Downloader for ChEBI data files.
+
+    Supports both TSV flat files (>= release 245) and legacy SDF files.
+    """
+
+    datasource_name = "chebi"
+
+    def __init__(
+        self,
+        version: str | None = None,
+        show_progress: bool = True,
+        subset: str = "3star",
+        use_sdf: bool = False,
+    ) -> None:
+        """Initialize the ChEBI downloader.
+
+        Args:
+            version: Version/release identifier.
+            show_progress: Whether to show progress bars.
+            subset: "3star" or "complete" - which compound subset to use.
+            use_sdf: Force SDF format even for releases >= 245.
+        """
+        super().__init__(version=version, show_progress=show_progress)
+        self.subset = subset
+        self.use_sdf = use_sdf
+
+    def get_download_urls(
+        self,
+        version: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        """Get ChEBI download URLs based on version.
+
+        For version >= 245 (and use_sdf=False): returns TSV flat file URLs
+        For version < 245 (or use_sdf=True): returns SDF file URL
+
+        URLs are loaded from chebi.yaml config file.
+
+        Args:
+            version: Specific release version.
+            **kwargs: Optional 'subset' and 'use_sdf' overrides.
+
+        Returns:
+            Dictionary with file URLs keyed by type.
+        """
+        v = version or self.version
+        subset = kwargs.get("subset", self.subset)
+        use_sdf = kwargs.get("use_sdf", self.use_sdf)
+
+        if not self._config:
+            raise ValueError("ChEBI config not loaded")
+
+        download_urls = self._config.download_urls
+
+        # Determine format: use new TSV if >= threshold AND not forcing SDF
+        use_tsv = self.is_new_format(v) and not use_sdf
+
+        if use_tsv:
+            # New TSV format (>= 245)
+            new_urls = download_urls.get("new", {})
+            return {
+                "secondary_ids": new_urls["secondary_ids"].format(version=v),
+                "names": new_urls["names"].format(version=v),
+                "compounds": new_urls["compounds"].format(version=v),
+            }
+        else:
+            # SDF format (< 245 legacy OR >= 245 with --use-sdf)
+            sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
+
+            if not self.is_new_format(v):
+                # Legacy releases (< 245): use legacy URLs
+                legacy_urls = download_urls.get("legacy", {})
+                url = legacy_urls[sdf_key].format(version=v)
+            else:
+                # New releases (>= 245) with --use-sdf: use new SDF URLs
+                new_urls = download_urls.get("new", {})
+                url = new_urls[sdf_key].format(version=v)
+
+            return {"sdf": url}
+
+    def download(
+        self,
+        output_dir: Path,
+        version: str | None = None,
+        decompress: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Path]:
+        """Download ChEBI files.
+
+        Args:
+            output_dir: Directory to save files.
+            version: Specific version to download.
+            decompress: Whether to decompress .gz files.
+            **kwargs: Optional 'subset' and 'use_sdf' overrides.
+
+        Returns:
+            Dictionary mapping file keys to downloaded paths.
+        """
+        v = version or self.version
+        urls = self.get_download_urls(v, **kwargs)
+
+        return self._download_urls(urls, output_dir, decompress)
+
+    def get_format(self, version: str | None = None) -> str:
+        """Get the format that will be used for a given version.
+
+        Args:
+            version: Version to check. If None, uses self.version.
+
+        Returns:
+            "tsv" or "sdf"
+        """
+        v = version or self.version
+        use_tsv = self.is_new_format(v) and not self.use_sdf
+        return "tsv" if use_tsv else "sdf"
 
 
 def _determine_cardinality(p_count: int, s_count: int) -> str:
@@ -524,7 +820,9 @@ class BaseParser(ABC):
 __all__ = [
     "WITHDRAWN_ENTRY",
     "WITHDRAWN_ENTRY_LABEL",
+    "BaseDownloader",
     "BaseParser",
+    "ChEBIDownloader",
     "DatasourceConfig",
     "IdMappingSet",
     "LabelMappingSet",

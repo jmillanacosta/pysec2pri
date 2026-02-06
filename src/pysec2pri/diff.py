@@ -30,12 +30,14 @@ class MappingDiff:
     new_version: str | None
     datasource: str
 
-    # Added mappings (object_id, subject_id)
+    # Added mappings (object_id, subject_id) - in new but not in old
     added: pl.DataFrame = field(default_factory=pl.DataFrame)
-    # Removed mappings (object_id, subject_id)
+    # Removed mappings (object_id, subject_id) - in old but not in new
     removed: pl.DataFrame = field(default_factory=pl.DataFrame)
     # Changed mappings (same object_id, different subject_id)
     changed: pl.DataFrame = field(default_factory=pl.DataFrame)
+    # Intersection mappings (in both old and new)
+    intersection: pl.DataFrame = field(default_factory=pl.DataFrame)
 
     @property
     def added_count(self) -> int:
@@ -51,6 +53,11 @@ class MappingDiff:
     def changed_count(self) -> int:
         """Number of changed mappings."""
         return len(self.changed)
+
+    @property
+    def intersection_count(self) -> int:
+        """Number of mappings in both sets."""
+        return len(self.intersection)
 
     @property
     def total_changes(self) -> int:
@@ -276,6 +283,13 @@ def _diff_dataframes(
         pl.col("old_subject_id") != pl.col("new_subject_id")
     )
 
+    # Intersection: in both old and new (same subject_id, object_id pair)
+    intersection = old_pairs.join(
+        new_pairs,
+        on=["subject_id", "object_id"],
+        how="inner",
+    )
+
     return MappingDiff(
         old_version=old_version,
         new_version=new_version,
@@ -283,6 +297,7 @@ def _diff_dataframes(
         added=added,
         removed=removed,
         changed=changed,
+        intersection=intersection,
     )
 
 
@@ -300,6 +315,7 @@ def summarize_diff(diff: MappingDiff) -> str:
         f"  Old version: {diff.old_version or 'unknown'}",
         f"  New version: {diff.new_version or 'unknown'}",
         "",
+        f"  Intersection:     {diff.intersection_count:>8}",
         f"  Added mappings:   {diff.added_count:>8}",
         f"  Removed mappings: {diff.removed_count:>8}",
         f"  Changed mappings: {diff.changed_count:>8}",
