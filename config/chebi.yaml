@@ -102,12 +102,30 @@ mapping:
   other: null
   comment: "Generated with pysec2pri"
 
-download_urls:
-  sdf: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+# Threshold version where new TSV data products were introduced
+new_format_version: 245
 
-primary_file_key: "sdf"
-archive_url: "http://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
-id_pattern: "^\\d+$"
+# Archive URL for finding latest release
+archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+
+# Download URLs for different ChEBI releases
+# Use {version} as placeholder for release number
+download_urls:
+  # Legacy releases (< 245) - SDF format only
+  # These are in a different archive path
+  legacy:
+    sdf_3star: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete_3star.sdf.gz"
+    sdf_complete: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete.sdf.gz"
+  # New releases (>= 245) - TSV flat files (default) or SDF
+  new:
+    # TSV flat files (default for >= 245)
+    secondary_ids: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/secondary_ids.tsv.gz"
+    names: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/names.tsv.gz"
+    compounds: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/compounds.tsv.gz"
+    # SDF files (for --use-sdf flag with >= 245)
+    sdf_3star: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/SDF/chebi_3_stars.sdf.gz"
+    sdf_complete: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/SDF/chebi.sdf.gz"
+
 default_output_filename: "chebi_sec2pri.sssom.tsv"
 
 available_outputs:

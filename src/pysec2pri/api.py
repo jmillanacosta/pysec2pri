@@ -37,27 +37,77 @@ __all__ = [
 
 
 def parse_chebi(
-    input_file: Path | str,
+    input_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
+    subset: str = "3star",
+    *,
+    secondary_ids_path: Path | str | None = None,
+    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse a ChEBI SDF file and extract ID mappings."""
+    """Parse ChEBI data files and extract ID mappings.
+
+    For releases >= 245: use secondary_ids_path and compounds_path (TSV).
+    For releases < 245: use input_file (SDF format).
+
+    Args:
+        input_file: Path to the ChEBI SDF file (legacy format < 245).
+        version: Version/release identifier for the datasource.
+        show_progress: Whether to show progress bars during parsing.
+        subset: "3star" or "complete" - which compounds to include.
+        secondary_ids_path: Path to secondary_ids.tsv (new format >= 245).
+        compounds_path: Path to compounds.tsv for 3-star filtering.
+
+    Returns:
+        Sec2PriMappingSet with computed cardinalities.
+    """
     from pysec2pri.parsers import ChEBIParser
 
-    parser = ChEBIParser(version=version, show_progress=show_progress)
-    return parser.parse(Path(input_file))
+    parser = ChEBIParser(
+        version=version, show_progress=show_progress, subset=subset
+    )
+    return parser.parse(
+        input_path=Path(input_file) if input_file else None,
+        secondary_ids_path=secondary_ids_path,
+        compounds_path=compounds_path,
+    )
 
 
 def parse_chebi_synonyms(
-    input_file: Path | str,
+    input_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
+    subset: str = "3star",
+    *,
+    names_path: Path | str | None = None,
+    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse a ChEBI SDF file and extract synonym mappings."""
+    """Parse ChEBI data files and extract synonym mappings.
+
+    For releases >= 245, use names_path and compounds_path (TSV format).
+    For releases < 245, use input_file (SDF format).
+
+    Args:
+        input_file: Path to the ChEBI SDF file (legacy format < 245).
+        version: Version/release identifier for the datasource.
+        show_progress: Whether to show progress bars during parsing.
+        subset: "3star" or "complete" - which compounds to include.
+        names_path: Path to names.tsv (new format >= 245).
+        compounds_path: Path to compounds.tsv for 3-star filtering.
+
+    Returns:
+        Sec2PriMappingSet with computed cardinalities based on labels.
+    """
     from pysec2pri.parsers import ChEBIParser
 
-    parser = ChEBIParser(version=version, show_progress=show_progress)
-    return parser.parse_synonyms(Path(input_file))
+    parser = ChEBIParser(
+        version=version, show_progress=show_progress, subset=subset
+    )
+    return parser.parse_synonyms(
+        input_path=Path(input_file) if input_file else None,
+        names_path=names_path,
+        compounds_path=compounds_path,
+    )
 
 
 def parse_hmdb(
