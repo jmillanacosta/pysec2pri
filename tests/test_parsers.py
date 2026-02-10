@@ -157,3 +157,27 @@ class TestParserIntegration:
                 assert isinstance(m, Mapping)
                 assert m.subject_id is not None
                 assert m.predicate_id is not None
+
+    def test_predicate_label_on_sec2pri_mappings(
+        self,
+        chebi_sdf_path: Path,
+        hmdb_xml_path: Path,
+        hgnc_withdrawn_path: Path,
+        ncbi_history_path: Path,
+        uniprot_sec_ac_path: Path,
+    ) -> None:
+        """Sec2pri mappings use IAO:0100001 with label 'term replaced by'."""
+        results = [
+            ChEBIParser(show_progress=False).parse(chebi_sdf_path),
+            HMDBParser(show_progress=False).parse(hmdb_xml_path),
+            HGNCParser(show_progress=False).parse(hgnc_withdrawn_path),
+            NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606"),
+            UniProtParser(show_progress=False).parse(uniprot_sec_ac_path),
+        ]
+        for result in results:
+            for m in result.mappings:
+                if m.predicate_id == "IAO:0100001":
+                    assert m.predicate_label == "term replaced by", (
+                        f"predicate_label should be 'term replaced by' "
+                        f"for IAO:0100001, got {m.predicate_label!r}"
+                    )

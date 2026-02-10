@@ -347,6 +347,7 @@ class WikidataParser(BaseParser):
 
         # Precompute constants
         predicate_id: str = m_meta.get("predicate_id", "oboInOwl:consider")
+        predicate_label = m_meta.get("predicate_label")
         mapping_justification: str = m_meta.get(
             "mapping_justification",
             "semapv:BackgroundKnowledgeBasedMatching",
@@ -405,6 +406,7 @@ class WikidataParser(BaseParser):
                     subject_label=subject_label,
                     object_label=object_label,
                     predicate_id=predicate_id,
+                    predicate_label=predicate_label,
                     mapping_justification=mapping_justification,
                     subject_source=subject_source,
                     object_source=object_source,

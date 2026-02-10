@@ -58,7 +58,7 @@ mapping:
   subject_label: null
   subject_category: null
   predicate_id: "IAO:0100001"
-  predicate_label: null
+  predicate_label: "term replaced by"
   predicate_modifier: null
   object_id: null
   object_label: null
