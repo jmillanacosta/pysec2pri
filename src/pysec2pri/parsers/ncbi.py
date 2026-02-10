@@ -181,6 +181,7 @@ class NCBIParser(BaseParser):
                     object_id=f"NCBIGene:{object_id}",
                     object_label=str(sec_symbol) if sec_symbol else "",
                     predicate_id=m_meta["predicate_id"],
+                    predicate_label=m_meta.get("predicate_label"),
                     mapping_justification=m_meta["mapping_justification"],
                     subject_source=m_meta.get("subject_source"),
                     object_source=m_meta.get("object_source"),

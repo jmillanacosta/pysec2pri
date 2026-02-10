@@ -181,6 +181,7 @@ class ChEBIParser(BaseParser):
                 subject_id=primary_id,
                 object_id=secondary_id,
                 predicate_id=m_meta["predicate_id"],
+                predicate_label=m_meta.get("predicate_label"),
                 mapping_justification=m_meta["mapping_justification"],
                 subject_source=m_meta.get("subject_source"),
                 object_source=m_meta.get("object_source"),
