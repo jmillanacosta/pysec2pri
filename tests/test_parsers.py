@@ -114,10 +114,7 @@ class TestHMDBParser:
         """Records with empty secondary_accessions produce no mappings."""
         parser = HMDBParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
-        subjects = {
-            m.subject_id 
-            for m in (result.mappings or [])
-        }
+        subjects = {m.subject_id for m in (result.mappings or [])}
         # HMDB0000003 has no secondary accessions
         assert "HMDB:HMDB0000003" not in subjects
 
@@ -137,10 +134,7 @@ class TestHMDBParser:
         """Bare numeric secondary accessions are normalised to HMDBP prefix."""
         parser = HMDBParser(show_progress=False)
         result = parser.parse_proteins(hmdb_proteins_xml_path)
-        objects = {
-            m.object_id 
-            for m in (result.mappings or [])
-        }
+        objects = {m.object_id for m in (result.mappings or [])}
         # "5229" should become "HMDB:HMDBP05229"
         assert "HMDB:HMDBP05229" in objects
         # full HMDBP accession unchanged
@@ -150,10 +144,7 @@ class TestHMDBParser:
         """Protein records with empty secondary_accessions produce no mappings."""
         parser = HMDBParser(show_progress=False)
         result = parser.parse_proteins(hmdb_proteins_xml_path)
-        subjects = {
-            m.subject_id 
-            for m in (result.mappings or [])
-        }
+        subjects = {m.subject_id for m in (result.mappings or [])}
         # HMDBP00003 has no secondary accessions
         assert "HMDB:HMDBP00003" not in subjects
 

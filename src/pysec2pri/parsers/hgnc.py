@@ -248,9 +248,7 @@ class HGNCParser(BaseParser):
 
         # Optionally filter by status
         if statuses is not None and status_col:
-            df_approved = df.filter(
-                pl.col(status_col).is_in(statuses)
-            )
+            df_approved = df.filter(pl.col(status_col).is_in(statuses))
         else:
             df_approved = df
 
