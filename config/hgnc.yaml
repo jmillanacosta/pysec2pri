@@ -116,7 +116,7 @@ available_outputs:
   - priIDs
   - secID2priID
   - symbol2prev
-
+  - secIDs
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

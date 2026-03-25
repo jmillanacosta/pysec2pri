@@ -52,12 +52,24 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - name: Process HMDB
+      - name: Download HMDB
+        id: download_hmdb
+        continue-on-error: true
         run: |
-          mkdir -p output
+          mkdir -p data/hmdb output
           pysec2pri download hmdb -o data/hmdb/
+      - name: Warn if HMDB download was blocked
+        if: steps.download_hmdb.outcome == 'failure'
+        run: |
+          echo "::warning::HMDB download was blocked (likely Cloudflare protection). \
+          Please download hmdb_metabolites.zip manually from https://hmdb.ca/system/downloads \
+          and re-run this workflow with the file as input."
+      - name: Process HMDB
+        if: steps.download_hmdb.outcome == 'success'
+        run: |
           pysec2pri hmdb data/hmdb/hmdb_metabolites.zip -o output/hmdb_sec2pri.sssom.tsv
       - uses: actions/upload-artifact@v4
+        if: steps.download_hmdb.outcome == 'success'
         with:
           name: hmdb-mappings
           path: output/

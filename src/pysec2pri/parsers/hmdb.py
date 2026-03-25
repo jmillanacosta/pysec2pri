@@ -1,7 +1,8 @@
 """HMDB XML file parser for secondary-to-primary identifier mappings.
 
-This parser extracts ID-to-ID mappings:
-- Secondary accessions -> primary accessions (from hmdb_metabolites.xml)
+This parser extracts ID-to-ID mappings from:
+- hmdb_metabolites.xml  → HMDB0... accessions
+- hmdb_proteins.xml     → HMDBP... accessions
 
 Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
@@ -9,6 +10,7 @@ Uses SSSOM-compliant IdMappingSet with cardinality computation.
 from __future__ import annotations
 
 import gzip
+import re
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,14 +30,15 @@ if TYPE_CHECKING:
 # HMDB XML namespace
 HMDB_NS = {"hmdb": "http://www.hmdb.ca"}
 
+# Pattern for bare numeric legacy protein IDs (e.g. "5229")
+_BARE_NUM_RE = re.compile(r"^\d+$")
+
 
 class HMDBParser(BaseParser):
-    """Parser for HMDB XML files.
+    """Parser for HMDB XML files (metabolites and proteins).
 
     Extracts secondary-to-primary HMDB accession mappings from
-    the hmdb_metabolites.xml file.
-
-    Returns IdMappingSet for all mappings (HMDB only has ID mappings).
+    ``hmdb_metabolites.xml`` and/or ``hmdb_proteins.xml``.
     """
 
     datasource_name = "hmdb"
@@ -46,173 +49,199 @@ class HMDBParser(BaseParser):
         return self.get_download_url("metabolites") or ""
 
     def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
-        """Parse HMDB metabolites XML file into an IdMappingSet.
+        """Parse HMDB metabolites XML file.
 
         Args:
-            input_path: Path to hmdb_metabolites.xml (or .zip/.gz).
+            input_path: Path to ``hmdb_metabolites.xml`` (or ``.zip``/``.gz``).
 
         Returns:
-            IdMappingSet with computed cardinalities based on IDs.
+            IdMappingSet for metabolite accessions.
         """
         if input_path is None:
             raise ValueError("input_path must not be None")
-        input_path = Path(input_path)
+        return self._parse_xml(
+            Path(input_path),
+            element_tag="metabolite",
+            prefix="HMDB",
+            desc="Parsing HMDB metabolites XML",
+        )
 
-        # Parse XML file for ID mappings
-        mappings = self._parse_metabolites_xml(input_path)
+    def parse_proteins(self, input_path: Path | str) -> Sec2PriMappingSet:
+        """Parse HMDB proteins XML file.
 
-        # Create IdMappingSet and compute cardinalities
-        mapping_set = self._create_mapping_set(mappings)
-        return mapping_set
-
-    def _parse_metabolites_xml(self, file_path: Path) -> list[Mapping]:
-        """Parse HMDB metabolites XML for secondary -> primary mappings.
+        Primary accessions have the form ``HMDBP00001``.
+        Secondary accessions may be bare numbers (legacy format, e.g.
+        ``5229``) or full ``HMDBP`` accessions; both are normalised to
+        ``HMDBP:HMDBP<zero-padded>`` using the same prefix logic as
+        the metabolites parser.
 
         Args:
-            file_path: Path to the XML file (can be .zip or .gz).
+            input_path: Path to ``hmdb_proteins.xml`` (or ``.zip``/``.gz``).
 
         Returns:
-            List of SSSOM Mapping objects.
+            IdMappingSet for protein accessions.
         """
-        # Handle compressed files
+        return self._parse_xml(
+            Path(input_path),
+            element_tag="protein",
+            prefix="HMDB",
+            desc="Parsing HMDB proteins XML",
+            secondary_normaliser=self._normalise_protein_secondary,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalise_protein_secondary(raw: str) -> str:
+        """Return a CURIE-ready protein accession from a raw secondary value.
+
+        Bare numeric values (legacy IDs) are zero-padded to 5 digits and
+        prefixed with ``HMDBP`` so they match the primary ``HMDBP`` pattern.
+        Already-prefixed values are returned unchanged.
+        """
+        raw = raw.strip()
+        if _BARE_NUM_RE.match(raw):
+            return f"HMDBP{int(raw):05d}"
+        return raw
+
+    def _parse_xml(
+        self,
+        file_path: Path,
+        element_tag: str,
+        prefix: str,
+        desc: str,
+        secondary_normaliser: Any = None,
+    ) -> Sec2PriMappingSet:
+        """Generic HMDB XML parser for metabolites and proteins.
+
+        Args:
+            file_path: Path to the XML file (may be ``.zip`` or ``.gz``).
+            element_tag: Top-level record element name (``"metabolite"`` or
+                ``"protein"``).
+            prefix: CURIE prefix (``"HMDB"`` for both).
+            desc: Progress-bar description string.
+            secondary_normaliser: Optional callable ``(raw_str) -> str``
+                applied to each raw secondary accession before prefixing.
+
+        Returns:
+            Sec2PriMappingSet with computed cardinalities.
+        """
         xml_content = self._read_xml_content(file_path)
         if xml_content is None:
-            return []
+            return self._create_mapping_set([])
 
         m_meta = self.get_mapping_metadata()
         mappings: list[Mapping] = []
 
-        # Parse XML iteratively to handle large files
         try:
             context = DefusedET.iterparse(xml_content, events=("end",))
-            for _event, elem in self._progress(context, desc="Parsing HMDB XML"):
-                # Look for metabolite elements
+            for _event, elem in self._progress(context, desc=desc):
                 tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
-                if tag == "metabolite":
-                    metabolite_mappings = self._process_metabolite(elem, m_meta)
-                    mappings.extend(metabolite_mappings)
-                    elem.clear()  # Free memory
+                if tag == element_tag:
+                    mappings.extend(
+                        self._process_record(
+                            elem, prefix, m_meta, secondary_normaliser
+                        )
+                    )
+                    elem.clear()
         except DefusedET.ParseError:
-            # Fall back to simpler parsing for test files
-            mappings = self._parse_simple_xml(file_path, m_meta)
+            mappings = self._parse_simple_xml(
+                file_path, element_tag, prefix, m_meta, secondary_normaliser
+            )
 
-        return mappings
+        return self._create_mapping_set(mappings)
 
-    def _process_metabolite(self, elem: Element, m_meta: dict[str, Any]) -> list[Mapping]:
-        """Process a single metabolite element.
-
-        Args:
-            elem: The metabolite XML element.
-            m_meta: Mapping metadata from config.
-
-        Returns:
-            List of mappings for this metabolite.
-        """
-        mappings: list[Mapping] = []
-
-        # Get primary accession
+    def _process_record(
+        self,
+        elem: Element,
+        prefix: str,
+        m_meta: dict[str, Any],
+        secondary_normaliser: Any,
+    ) -> list[Mapping]:
+        """Extract mappings from a single record element."""
+        # Primary accession
         accession_elem = elem.find("hmdb:accession", HMDB_NS)
         if accession_elem is None:
             accession_elem = elem.find("accession")
         if accession_elem is None or not accession_elem.text:
             return []
+        primary_raw = accession_elem.text.strip()
+        primary_id = f"{prefix}:{primary_raw}"
 
-        primary_id = accession_elem.text.strip()
-
-        # Get name for label
+        # Label (name)
         name_elem = elem.find("hmdb:name", HMDB_NS)
         if name_elem is None:
             name_elem = elem.find("name")
-        primary_label = name_elem.text.strip() if name_elem is not None and name_elem.text else ""
+        primary_label = (
+            name_elem.text.strip()
+            if name_elem is not None and name_elem.text
+            else ""
+        )
 
-        # Get secondary accessions
-        sec_accessions = elem.find("hmdb:secondary_accessions", HMDB_NS)
-        if sec_accessions is None:
-            sec_accessions = elem.find("secondary_accessions")
+        # Secondary accessions
+        sec_block = elem.find("hmdb:secondary_accessions", HMDB_NS)
+        if sec_block is None:
+            sec_block = elem.find("secondary_accessions")
+        if sec_block is None:
+            return []
 
-        if sec_accessions is not None:
-            for sec_elem in sec_accessions:
-                if sec_elem.text:
-                    secondary_id = sec_elem.text.strip()
-                    # SSSOM: subject = primary (current), object = secondary (old)
-                    mapping = Mapping(
-                        subject_id=f"HMDB:{primary_id}",
-                        subject_label=primary_label,
-                        object_id=f"HMDB:{secondary_id}",
-                        predicate_id=m_meta["predicate_id"],
-                        predicate_label=m_meta.get("predicate_label"),
-                        mapping_justification=m_meta["mapping_justification"],
-                        subject_source=m_meta.get("subject_source"),
-                        object_source=m_meta.get("object_source"),
-                        mapping_tool=m_meta.get("mapping_tool"),
-                        license=m_meta.get("license"),
-                    )
-                    mappings.append(mapping)
-
+        mappings: list[Mapping] = []
+        for sec_elem in sec_block:
+            if not sec_elem.text:
+                continue
+            raw_sec = sec_elem.text.strip()
+            if secondary_normaliser is not None:
+                raw_sec = secondary_normaliser(raw_sec)
+            secondary_id = f"{prefix}:{raw_sec}"
+            mappings.append(
+                Mapping(
+                    subject_id=primary_id,
+                    subject_label=primary_label,
+                    object_id=secondary_id,
+                    predicate_id=m_meta["predicate_id"],
+                    predicate_label=m_meta.get("predicate_label"),
+                    mapping_justification=m_meta["mapping_justification"],
+                    subject_source=m_meta.get("subject_source"),
+                    object_source=m_meta.get("object_source"),
+                    mapping_tool=m_meta.get("mapping_tool"),
+                    license=m_meta.get("license"),
+                )
+            )
         return mappings
 
-    def _parse_simple_xml(self, file_path: Path, m_meta: dict[str, Any]) -> list[Mapping]:
-        """Parse XML for test files without namespace.
-
-        Args:
-            file_path: Path to the XML file.
-            m_meta: Mapping metadata from config.
-
-        Returns:
-            List of SSSOM Mapping objects.
-        """
+    def _parse_simple_xml(
+        self,
+        file_path: Path,
+        element_tag: str,
+        prefix: str,
+        m_meta: dict[str, Any],
+        secondary_normaliser: Any,
+    ) -> list[Mapping]:
+        """Fallback parser for test files without namespace."""
         mappings: list[Mapping] = []
-
         try:
             tree = DefusedET.parse(file_path)
             root = tree.getroot()
-
-            for metabolite in root.findall(".//metabolite"):
-                accession = metabolite.find("accession")
-                name = metabolite.find("name")
-                sec_accessions = metabolite.find("secondary_accessions")
-
-                if accession is None or not accession.text:
-                    continue
-
-                primary_id = accession.text.strip()
-                primary_label = name.text.strip() if name is not None and name.text else ""
-
-                if sec_accessions is not None:
-                    for sec_elem in sec_accessions:
-                        if sec_elem.text:
-                            secondary_id = sec_elem.text.strip()
-                            mapping = Mapping(
-                                subject_id=f"HMDB:{primary_id}",
-                                subject_label=primary_label,
-                                object_id=f"HMDB:{secondary_id}",
-                                predicate_id=m_meta["predicate_id"],
-                                predicate_label=m_meta.get("predicate_label"),
-                                mapping_justification=m_meta["mapping_justification"],
-                                subject_source=m_meta.get("subject_source"),
-                                object_source=m_meta.get("object_source"),
-                                mapping_tool=m_meta.get("mapping_tool"),
-                                license=m_meta.get("license"),
-                            )
-                            mappings.append(mapping)
+            for record in root.findall(f".//{element_tag}"):
+                mappings.extend(
+                    self._process_record(
+                        record, prefix, m_meta, secondary_normaliser
+                    )
+                )
         except Exception as e:
             logger.warning("Failed to parse HMDB XML: %s", e)
-
         return mappings
 
     def _read_xml_content(self, file_path: Path) -> Any:
-        """Read XML content, handling compressed files.
-
-        Args:
-            file_path: Path to the file.
-
-        Returns:
-            File-like object for parsing, or None if failed.
-        """
+        """Read XML content, handling compressed files."""
         if file_path.suffix == ".zip":
             try:
                 with zipfile.ZipFile(file_path, "r") as zf:
-                    xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
+                    xml_files = [
+                        n for n in zf.namelist() if n.endswith(".xml")
+                    ]
                     if xml_files:
                         return zf.open(xml_files[0])
             except Exception as e:

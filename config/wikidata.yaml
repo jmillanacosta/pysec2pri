@@ -112,7 +112,7 @@ available_outputs:
   - sssom
   - priIDs
   - secID2priID
-
+  - secIDs
 input_file_types:
   - sparql
 

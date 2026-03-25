@@ -92,11 +92,17 @@ class HGNCParser(BaseParser):
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
         return mapping_set
 
-    def parse_symbols(self, complete_set_path: Path | str | None) -> Sec2PriMappingSet:
+    def parse_symbols(
+        self,
+        complete_set_path: Path | str | None,
+        statuses: list[str] | None = None,
+    ) -> Sec2PriMappingSet:
         """Parse HGNC complete set for symbol (label) mappings.
 
         Args:
             complete_set_path: Path to the complete HGNC set TSV file.
+            statuses: Entry statuses to include (e.g. ``["Approved"]``).
+                If ``None`` (default), all entries are included.
 
         Returns:
             LabelMappingSet with computed cardinalities based on labels.
@@ -106,7 +112,9 @@ class HGNCParser(BaseParser):
         complete_set_path = Path(complete_set_path)
 
         # Parse complete set for symbol mappings
-        mappings = self._parse_complete_set(complete_set_path)
+        mappings = self._parse_complete_set(
+            complete_set_path, statuses=statuses
+        )
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
@@ -211,11 +219,15 @@ class HGNCParser(BaseParser):
 
         return mappings
 
-    def _parse_complete_set(self, file_path: Path) -> list[Mapping]:
+    def _parse_complete_set(
+        self, file_path: Path, statuses: list[str] | None = None
+    ) -> list[Mapping]:
         """Parse complete HGNC set for symbol (label) mappings.
 
         Args:
             file_path: Path to the complete HGNC set TSV file.
+            statuses: Entry statuses to include (e.g. ``["Approved"]``).
+                If ``None`` (default), all entries are included.
 
         Returns:
             List of SSSOM Mapping objects for symbol mappings.
@@ -236,11 +248,13 @@ class HGNCParser(BaseParser):
         if not all([status_col, hgnc_id_col, symbol_col]):
             raise ValueError(f"Missing required columns in {file_path}")
 
-        # Filter to approved entries only
-        df_approved = df.filter(
-            pl.col(status_col)  # type: ignore[arg-type]
-            == "Approved"
-        )
+        # Optionally filter by status
+        if statuses is not None and status_col:
+            df_approved = df.filter(
+                pl.col(status_col).is_in(statuses)  # type: ignore[arg-type]
+            )
+        else:
+            df_approved = df
 
         m_meta = self.get_mapping_metadata()
         mappings: list[Mapping] = []

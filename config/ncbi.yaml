@@ -116,6 +116,7 @@ available_outputs:
   - priIDs
   - secID2priID
   - symbol2prev
+  - secIDs
 
 input_file_types:
   - gene_info.gz

@@ -133,7 +133,7 @@ available_outputs:
   - priIDs
   - secID2priID
   - name2synonym
-
+  - secIDs
 input_file_types:
   - ChEBI_complete.sdf
   - ChEBI_complete_3star.sdf

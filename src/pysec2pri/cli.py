@@ -35,7 +35,7 @@ def _download_if_needed(
     if input_file is not None:
         return input_file
 
-    from pysec2pri.download import download_datasource, get_download_urls
+    from pysec2pri.download import CloudflareBlockedError, download_datasource, get_download_urls
 
     version_str = f" version {version}" if version else ""
     click.echo(f"No input file provided. Downloading {datasource}{version_str}...")
@@ -46,7 +46,10 @@ def _download_if_needed(
         click.echo(f"  {key}: {url}")
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_{datasource}_"))
-    downloaded = download_datasource(datasource, tmpdir, version=version)
+    try:
+        downloaded = download_datasource(datasource, tmpdir, version=version)
+    except CloudflareBlockedError as e:
+        raise click.ClickException(str(e)) from e
 
     if file_key in downloaded:
         return downloaded[file_key]
@@ -343,27 +346,25 @@ def _parse_chebi_mapping_sets(
     synonym_mappings = None
 
     if files["format"] == "tsv":
-        # New TSV format (>= 245)
+        # New TSV format (>= 245): secondary_ids.tsv, names.tsv, compounds.tsv
+        # are all in the same directory; pass the directory to the parser.
+        tsv_dir = files["secondary_ids"].parent
         if mapping_sets in ("ids", "all"):
-            id_mappings = parse_chebi(
-                version=version,
-                subset=subset,
-                secondary_ids_path=files["secondary_ids"],
-                compounds_path=files.get("compounds"),
-            )
+            id_mappings = parse_chebi(tsv_dir, version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
             synonym_mappings = parse_chebi_synonyms(
-                version=version,
-                subset=subset,
-                names_path=files["names"],
-                compounds_path=files.get("compounds"),
+                tsv_dir, version=version, subset=subset
             )
     else:
         # Legacy SDF format (< 245)
         if mapping_sets in ("ids", "all"):
-            id_mappings = parse_chebi(files["sdf"], version=version, subset=subset)
+            id_mappings = parse_chebi(
+                files["sdf"], version=version, subset=subset
+            )
         if mapping_sets in ("synonyms", "all"):
-            synonym_mappings = parse_chebi_synonyms(files["sdf"], version=version, subset=subset)
+            synonym_mappings = parse_chebi_synonyms(
+                files["sdf"], version=version, subset=subset
+            )
 
     return id_mappings, synonym_mappings
 
@@ -436,8 +437,26 @@ def _write_chebi_output(
 
 
 @main.command()
-@click.argument("input_file", type=ExistingPathType, required=False)
-@click.option("-o", "--output", type=PathType, help="Output file path")
+@click.argument("metabolites_file", type=ExistingPathType, required=False)
+@click.option(
+    "--proteins-file",
+    type=ExistingPathType,
+    default=None,
+    help="Path to hmdb_proteins.xml/.zip. Downloaded automatically if omitted.",
+)
+@click.option(
+    "--metabolites-only",
+    is_flag=True,
+    default=False,
+    help="Process only the metabolites file, skip proteins.",
+)
+@click.option(
+    "--proteins-only",
+    is_flag=True,
+    default=False,
+    help="Process only the proteins file, skip metabolites.",
+)
+@click.option("-o", "--output", type=PathType, help="Output directory or file path")
 @click.option(
     "--format",
     "output_format",
@@ -446,36 +465,83 @@ def _write_chebi_output(
     help="Output format",
 )
 def hmdb(
-    input_file: Path | None,
+    metabolites_file: Path | None,
+    proteins_file: Path | None,
+    metabolites_only: bool,
+    proteins_only: bool,
     output: Path | None,
     output_format: str,
 ) -> None:
-    """Parse HMDB XML file and generate mappings."""
-    from pysec2pri.api import parse_hmdb
+    """Parse HMDB XML files and generate secondary-to-primary mappings.
+
+    By default both the metabolites and the proteins files are processed
+    and written to separate output files.  Use ``--metabolites-only`` or
+    ``--proteins-only`` to restrict to one entity type.
+
+    METABOLITES_FILE is the path to ``hmdb_metabolites.xml`` (or ``.zip``).
+    If omitted, the file is downloaded automatically (subject to Cloudflare
+    blocking – see the warning above).
+    """
+    from pysec2pri.api import parse_hmdb, parse_hmdb_proteins
     from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
 
-    input_file = _download_if_needed("hmdb", input_file, "metabolites")
+    if metabolites_only and proteins_only:
+        raise click.UsageError(
+            "--metabolites-only and --proteins-only are mutually exclusive."
+        )
 
-    result = parse_hmdb(input_file)
-    version = getattr(result, "mapping_set_version", None)
-    v_suffix = f"_{version}" if version else ""
+    want_metabolites = not proteins_only
+    want_proteins = not metabolites_only
 
-    if output_format == "all":
-        out_dir = _resolve_all_format_dir(output, "hmdb", version)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        write_sssom(result, out_dir / f"hmdb{v_suffix}_sssom.tsv")
-        write_sec2pri(result, out_dir / f"hmdb{v_suffix}_sec2pri.tsv")
-        write_pri_ids(result, out_dir / f"hmdb{v_suffix}_pri_ids.tsv")
-        click.echo(f"Wrote all formats to {out_dir}/")
-    else:
-        out_path = output or _get_output_filename("hmdb", output_format, version)
-        if output_format == "sssom":
-            write_sssom(result, out_path)
-        elif output_format == "sec2pri":
-            write_sec2pri(result, out_path)
-        elif output_format == "pri_ids":
-            write_pri_ids(result, out_path)
-        click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
+    # ------------------------------------------------------------------ #
+    # Resolve output destination                                           #
+    # ------------------------------------------------------------------ #
+    def _write_result(result: Any, label: str) -> None:
+        version = getattr(result, "mapping_set_version", None)
+        v_suffix = f"_{version}" if version else ""
+        base = f"hmdb_{label}{v_suffix}"
+
+        if output_format == "all":
+            out_dir = _resolve_all_format_dir(output, "hmdb", version)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            write_sssom(result, out_dir / f"{base}_sssom.tsv")
+            write_sec2pri(result, out_dir / f"{base}_sec2pri.tsv")
+            write_pri_ids(result, out_dir / f"{base}_pri_ids.tsv")
+            click.echo(f"  Wrote {label} formats to {out_dir}/")
+        else:
+            single = not want_metabolites or not want_proteins
+            if output and output.is_dir():
+                out_path: Path = output / f"{base}_{output_format}.tsv"
+            elif output and single:
+                out_path = output
+            else:
+                out_path = Path(f"{base}_{output_format}.tsv")
+            if output_format == "sssom":
+                write_sssom(result, out_path)
+            elif output_format == "sec2pri":
+                write_sec2pri(result, out_path)
+            elif output_format == "pri_ids":
+                write_pri_ids(result, out_path)
+            n = len(result.mappings or [])
+            click.echo(f"  Wrote {n} {label} mappings to {out_path}")
+
+    # ------------------------------------------------------------------ #
+    # Metabolites                                                          #
+    # ------------------------------------------------------------------ #
+    if want_metabolites:
+        met_file = _download_if_needed("hmdb", metabolites_file, "metabolites")
+        click.echo("Parsing HMDB metabolites...")
+        result_met = parse_hmdb(met_file)
+        _write_result(result_met, "metabolites")
+
+    # ------------------------------------------------------------------ #
+    # Proteins                                                             #
+    # ------------------------------------------------------------------ #
+    if want_proteins:
+        prot_file = _download_if_needed("hmdb", proteins_file, "proteins")
+        click.echo("Parsing HMDB proteins...")
+        result_prot = parse_hmdb_proteins(prot_file)
+        _write_result(result_prot, "proteins")
 
 
 @main.command()
@@ -498,12 +564,25 @@ def hmdb(
     type=ExistingPathType,
     help="HGNC complete set file for symbol mappings",
 )
+@click.option(
+    "--status",
+    "statuses",
+    multiple=True,
+    default=["Approved"],
+    show_default=True,
+    help=(
+        "Entry status to include in symbol mappings. "
+        "Repeat to allow multiple values. "
+        "Use --status='' to include all statuses."
+    ),
+)
 def hgnc(
     input_file: Path | None,
     output: Path | None,
     data_version: str | None,
     output_format: str,
     symbols_file: Path | None,
+    statuses: tuple[str, ...],
 ) -> None:
     """Parse HGNC withdrawn file and generate mappings."""
     from pysec2pri.api import parse_hgnc, parse_hgnc_symbols
@@ -514,27 +593,62 @@ def hgnc(
         write_symbol2prev,
     )
 
+    # Convert Click's tuple to list; empty string means "all statuses"
+    status_filter: list[str] | None = (
+        None if not statuses or statuses == ("",) else list(statuses)
+    )
+
     if output_format == "symbol2prev":
         if symbols_file is None:
-            symbols_file = _download_if_needed("hgnc", None, "complete", version=data_version)
-        result = parse_hgnc_symbols(symbols_file, version=data_version)
+            symbols_file = _download_if_needed(
+                "hgnc", None, "complete", version=data_version
+            )
+        result = parse_hgnc_symbols(
+            symbols_file, version=data_version, statuses=status_filter
+        )
     else:
-        input_file = _download_if_needed("hgnc", input_file, "withdrawn", version=data_version)
+        input_file = _download_if_needed(
+            "hgnc", input_file, "withdrawn", version=data_version
+        )
         result = parse_hgnc(input_file, version=data_version)
 
     version = getattr(result, "mapping_set_version", None) or data_version
     v_suffix = f"_{version}" if version else ""
 
+    # Annotate status filter in filename suffix and SSSOM comment
+    if output_format == "symbol2prev":
+        if status_filter is None:
+            status_suffix = "_all_statuses"
+            status_note = "Includes all entry statuses."
+        elif status_filter != ["Approved"]:
+            joined = "-".join(
+                s.lower().replace(" ", "_") for s in status_filter
+            )
+            status_suffix = f"_{joined}"
+            status_note = f"Filtered to statuses: {', '.join(status_filter)}."
+        else:
+            status_suffix = ""
+            status_note = "Filtered to Approved entries only."
+        existing = getattr(result, "comment", None) or ""
+        result.comment = (
+            f"{existing} {status_note}".strip() if existing else status_note
+        )
+    else:
+        status_suffix = ""
+
     if output_format == "all":
         out_dir = _resolve_all_format_dir(output, "hgnc", version)
         out_dir.mkdir(parents=True, exist_ok=True)
-        write_sssom(result, out_dir / f"hgnc{v_suffix}_sssom.tsv")
-        write_sec2pri(result, out_dir / f"hgnc{v_suffix}_sec2pri.tsv")
-        write_pri_ids(result, out_dir / f"hgnc{v_suffix}_pri_ids.tsv")
-        write_symbol2prev(result, out_dir / f"hgnc{v_suffix}_symbol2prev.tsv")
+        base = f"hgnc{v_suffix}{status_suffix}"
+        write_sssom(result, out_dir / f"{base}_sssom.tsv")
+        write_sec2pri(result, out_dir / f"{base}_sec2pri.tsv")
+        write_pri_ids(result, out_dir / f"{base}_pri_ids.tsv")
+        write_symbol2prev(result, out_dir / f"{base}_symbol2prev.tsv")
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename("hgnc", output_format, version)
+        out_path = output or _get_output_filename(
+            f"hgnc{status_suffix}", output_format, version
+        )
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":
@@ -770,12 +884,17 @@ def wikidata(
             click.echo(f"  Wrote {n} {etype} mappings to {out_path}")
 
 
-def _parse_datasource(ds: str) -> MappingSet | None:
-    """Download and parse a datasource, returning the MappingSet or None."""
+def _parse_datasource(ds: str) -> MappingSet:
+    """Download and parse a single datasource.
+
+    Raises on any error — callers decide how to handle failures.
+    """
     from pysec2pri.api import (
+        combine_mapping_sets,
         parse_chebi,
         parse_hgnc,
         parse_hmdb,
+        parse_hmdb_proteins,
         parse_ncbi,
         parse_uniprot,
         parse_wikidata,
@@ -783,26 +902,33 @@ def _parse_datasource(ds: str) -> MappingSet | None:
     from pysec2pri.constants import ALL_DATASOURCES
 
     config = ALL_DATASOURCES.get(ds.lower())
-    if config is None:
-        return None
 
-    # Wikidata uses SPARQL queries, no file download
-    if ds.lower() == "wikidata":
-        return parse_wikidata()
-
-    parsers: dict[str, Callable[..., MappingSet]] = {
+    # Self-downloading parsers (no file needed)
+    no_file: dict[str, Callable[[], MappingSet]] = {
         "chebi": parse_chebi,
+        "wikidata": parse_wikidata,
+    }
+    if ds.lower() in no_file:
+        return no_file[ds.lower()]()
+
+    # HMDB: download metabolites + proteins and combine
+    if ds.lower() == "hmdb":
+        met_file = _download_if_needed("hmdb", None, "metabolites")
+        prot_file = _download_if_needed("hmdb", None, "proteins")
+        met_ms = parse_hmdb(met_file)
+        prot_ms = parse_hmdb_proteins(prot_file)
+        return combine_mapping_sets(met_ms, prot_ms)
+
+    # File-based parsers: download then parse
+    file_parsers: dict[str, Callable[..., MappingSet]] = {
         "hgnc": parse_hgnc,
-        "hmdb": parse_hmdb,
         "ncbi": parse_ncbi,
         "uniprot": parse_uniprot,
     }
-
-    parser = parsers.get(ds.lower())
-    if parser is None:
-        return None
-
-    file_key = config.primary_file_key or next(iter(config.download_urls), "")
+    parser = file_parsers[ds.lower()]
+    file_key = (config and config.primary_file_key) or next(
+        iter(config.download_urls if config else {}), ""
+    )
     input_file = _download_if_needed(ds, None, file_key)
     return parser(input_file)
 
@@ -851,27 +977,37 @@ def export_all(
     datasources: str,
 ) -> None:
     """Export all formats for specified datasources."""
+    from pysec2pri.download import CloudflareBlockedError
+
     ds_list = [d.strip().lower() for d in datasources.split(",")]
 
     for ds in ds_list:
         click.echo(f"\n=== Processing {ds.upper()} ===")
-
-        result = _parse_datasource(ds)
-        if result is None:
-            click.echo(f"Unknown datasource: {ds}")
+        try:
+            result = _parse_datasource(ds)
+        except CloudflareBlockedError as e:
+            click.echo(f"  WARNING: Skipping {ds.upper()} — {e}", err=True)
+            continue
+        except click.ClickException as e:
+            if isinstance(e.__cause__, CloudflareBlockedError):
+                click.echo(
+                    f"  WARNING: Skipping {ds.upper()} — {e.__cause__}",
+                    err=True,
+                )
+                continue
+            click.echo(
+                f"  WARNING: Skipping {ds.upper()} — {e.format_message()}",
+                err=True,
+            )
+            continue
+        except Exception as e:
+            click.echo(f"  WARNING: Skipping {ds.upper()} — {e}", err=True)
             continue
 
-        # Get version from result if available
         version = getattr(result, "mapping_set_version", None)
-
-        # Create output folder: datasource_version or just datasource
-        if version:
-            ds_dir = output_dir / f"{ds}_{version}"
-        else:
-            ds_dir = output_dir / ds
+        ds_dir = output_dir / (f"{ds}_{version}" if version else ds)
         ds_dir.mkdir(parents=True, exist_ok=True)
 
-        # Export all formats
         for fmt, writer in _get_formats_for_datasource(ds):
             out_file = ds_dir / _get_output_filename(ds, fmt, version)
             writer(result, out_file)

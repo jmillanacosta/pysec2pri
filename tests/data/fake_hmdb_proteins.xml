@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hmdb xmlns="http://www.hmdb.ca">
+  <protein>
+    <accession>HMDBP00001</accession>
+    <name>Alpha-1-antitrypsin</name>
+    <secondary_accessions>
+      <accession>HMDBP05261</accession>
+      <accession>5229</accession>
+    </secondary_accessions>
+  </protein>
+  <protein>
+    <accession>HMDBP00002</accession>
+    <name>Serum albumin</name>
+    <secondary_accessions>
+      <accession>HMDBP00099</accession>
+    </secondary_accessions>
+  </protein>
+  <protein>
+    <accession>HMDBP00003</accession>
+    <name>Hemoglobin subunit alpha</name>
+    <secondary_accessions>
+    </secondary_accessions>
+  </protein>
+</hmdb>
