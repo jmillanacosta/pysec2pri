@@ -114,7 +114,7 @@ class HMDBParser(BaseParser):
         desc: str,
         secondary_normaliser: Any = None,
     ) -> Sec2PriMappingSet:
-        """Generic HMDB XML parser for metabolites and proteins.
+        """Parse HMDB XML for metabolites and proteins.
 
         Args:
             file_path: Path to the XML file (may be ``.zip`` or ``.gz``).
@@ -141,9 +141,7 @@ class HMDBParser(BaseParser):
                 tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
                 if tag == element_tag:
                     mappings.extend(
-                        self._process_record(
-                            elem, prefix, m_meta, secondary_normaliser
-                        )
+                        self._process_record(elem, prefix, m_meta, secondary_normaliser)
                     )
                     elem.clear()
         except DefusedET.ParseError:
@@ -170,15 +168,11 @@ class HMDBParser(BaseParser):
         primary_raw = accession_elem.text.strip()
         primary_id = f"{prefix}:{primary_raw}"
 
-        # Label (name)
+        # Label name
         name_elem = elem.find("hmdb:name", HMDB_NS)
         if name_elem is None:
             name_elem = elem.find("name")
-        primary_label = (
-            name_elem.text.strip()
-            if name_elem is not None and name_elem.text
-            else ""
-        )
+        primary_label = name_elem.text.strip() if name_elem is not None and name_elem.text else ""
 
         # Secondary accessions
         sec_block = elem.find("hmdb:secondary_accessions", HMDB_NS)
@@ -225,11 +219,7 @@ class HMDBParser(BaseParser):
             tree = DefusedET.parse(file_path)
             root = tree.getroot()
             for record in root.findall(f".//{element_tag}"):
-                mappings.extend(
-                    self._process_record(
-                        record, prefix, m_meta, secondary_normaliser
-                    )
-                )
+                mappings.extend(self._process_record(record, prefix, m_meta, secondary_normaliser))
         except Exception as e:
             logger.warning("Failed to parse HMDB XML: %s", e)
         return mappings
@@ -239,9 +229,7 @@ class HMDBParser(BaseParser):
         if file_path.suffix == ".zip":
             try:
                 with zipfile.ZipFile(file_path, "r") as zf:
-                    xml_files = [
-                        n for n in zf.namelist() if n.endswith(".xml")
-                    ]
+                    xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
                     if xml_files:
                         return zf.open(xml_files[0])
             except Exception as e:

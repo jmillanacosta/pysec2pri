@@ -88,9 +88,7 @@ def parse_chebi(
     if input_path is None:
         input_path, version = _download_chebi(version, subset)
 
-    parser = ChEBIParser(
-        version=version, show_progress=show_progress, subset=subset
-    )
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
     id_ms = parser.parse(Path(input_path))
     syn_ms = parser.parse_synonyms(Path(input_path))
     return combine_mapping_sets(id_ms, syn_ms)
@@ -121,9 +119,7 @@ def parse_chebi_synonyms(
     if input_path is None:
         input_path, version = _download_chebi(version, subset)
 
-    parser = ChEBIParser(
-        version=version, show_progress=show_progress, subset=subset
-    )
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
     return parser.parse_synonyms(Path(input_path))
 
 

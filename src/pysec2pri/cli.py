@@ -352,19 +352,13 @@ def _parse_chebi_mapping_sets(
         if mapping_sets in ("ids", "all"):
             id_mappings = parse_chebi(tsv_dir, version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
-            synonym_mappings = parse_chebi_synonyms(
-                tsv_dir, version=version, subset=subset
-            )
+            synonym_mappings = parse_chebi_synonyms(tsv_dir, version=version, subset=subset)
     else:
         # Legacy SDF format (< 245)
         if mapping_sets in ("ids", "all"):
-            id_mappings = parse_chebi(
-                files["sdf"], version=version, subset=subset
-            )
+            id_mappings = parse_chebi(files["sdf"], version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
-            synonym_mappings = parse_chebi_synonyms(
-                files["sdf"], version=version, subset=subset
-            )
+            synonym_mappings = parse_chebi_synonyms(files["sdf"], version=version, subset=subset)
 
     return id_mappings, synonym_mappings
 
@@ -464,7 +458,7 @@ def _write_chebi_output(
     type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
     help="Output format",
 )
-def hmdb(
+def hmdb(  # noqa C901
     metabolites_file: Path | None,
     proteins_file: Path | None,
     metabolites_only: bool,
@@ -480,15 +474,13 @@ def hmdb(
 
     METABOLITES_FILE is the path to ``hmdb_metabolites.xml`` (or ``.zip``).
     If omitted, the file is downloaded automatically (subject to Cloudflare
-    blocking – see the warning above).
+    blocking, see the warning above).
     """
     from pysec2pri.api import parse_hmdb, parse_hmdb_proteins
     from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
 
     if metabolites_only and proteins_only:
-        raise click.UsageError(
-            "--metabolites-only and --proteins-only are mutually exclusive."
-        )
+        raise click.UsageError("--metabolites-only and --proteins-only are mutually exclusive.")
 
     want_metabolites = not proteins_only
     want_proteins = not metabolites_only
@@ -576,7 +568,7 @@ def hmdb(
         "Use --status='' to include all statuses."
     ),
 )
-def hgnc(
+def hgnc(  # noqa C901
     input_file: Path | None,
     output: Path | None,
     data_version: str | None,
@@ -594,22 +586,14 @@ def hgnc(
     )
 
     # Convert Click's tuple to list; empty string means "all statuses"
-    status_filter: list[str] | None = (
-        None if not statuses or statuses == ("",) else list(statuses)
-    )
+    status_filter: list[str] | None = None if not statuses or statuses == ("",) else list(statuses)
 
     if output_format == "symbol2prev":
         if symbols_file is None:
-            symbols_file = _download_if_needed(
-                "hgnc", None, "complete", version=data_version
-            )
-        result = parse_hgnc_symbols(
-            symbols_file, version=data_version, statuses=status_filter
-        )
+            symbols_file = _download_if_needed("hgnc", None, "complete", version=data_version)
+        result = parse_hgnc_symbols(symbols_file, version=data_version, statuses=status_filter)
     else:
-        input_file = _download_if_needed(
-            "hgnc", input_file, "withdrawn", version=data_version
-        )
+        input_file = _download_if_needed("hgnc", input_file, "withdrawn", version=data_version)
         result = parse_hgnc(input_file, version=data_version)
 
     version = getattr(result, "mapping_set_version", None) or data_version
@@ -621,18 +605,14 @@ def hgnc(
             status_suffix = "_all_statuses"
             status_note = "Includes all entry statuses."
         elif status_filter != ["Approved"]:
-            joined = "-".join(
-                s.lower().replace(" ", "_") for s in status_filter
-            )
+            joined = "-".join(s.lower().replace(" ", "_") for s in status_filter)
             status_suffix = f"_{joined}"
             status_note = f"Filtered to statuses: {', '.join(status_filter)}."
         else:
             status_suffix = ""
             status_note = "Filtered to Approved entries only."
         existing = getattr(result, "comment", None) or ""
-        result.comment = (
-            f"{existing} {status_note}".strip() if existing else status_note
-        )
+        result.comment = f"{existing} {status_note}".strip() if existing else status_note
     else:
         status_suffix = ""
 
@@ -646,9 +626,7 @@ def hgnc(
         write_symbol2prev(result, out_dir / f"{base}_symbol2prev.tsv")
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename(
-            f"hgnc{status_suffix}", output_format, version
-        )
+        out_path = output or _get_output_filename(f"hgnc{status_suffix}", output_format, version)
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":

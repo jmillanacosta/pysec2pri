@@ -44,6 +44,12 @@ class CloudflareBlockedError(Exception):
     """
 
     def __init__(self, url: str) -> None:
+        """
+        Docstring for __init__.
+
+        :param url: URL requested
+        :type url: str
+        """
         self.url = url
         super().__init__(
             f"Download of '{url}' was blocked by Cloudflare bot protection.\n"

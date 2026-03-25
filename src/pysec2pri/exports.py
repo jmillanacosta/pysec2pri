@@ -28,7 +28,7 @@ def write_sssom(
     """Write a MappingSet to an SSSOM TSV file."""
     import codecs
     import re
-    from typing import Any, cast
+    from typing import cast
 
     import curies
     from sssom.parsers import (  # type: ignore[attr-defined]

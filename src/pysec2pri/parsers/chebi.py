@@ -99,9 +99,7 @@ class ChEBIParser(BaseParser):
         Returns:
             IdMappingSet with computed cardinalities.
         """
-        sid_path, cpd_path = self._resolve_tsv_paths(
-            input_path, secondary_ids_path, compounds_path
-        )
+        sid_path, cpd_path = self._resolve_tsv_paths(input_path, secondary_ids_path, compounds_path)
         if sid_path is not None:
             raw_mappings = _parse_secondary_ids_tsv(
                 sid_path,
@@ -115,9 +113,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError(
-                "Must provide input_path (SDF or TSV dir) or secondary_ids_path"
-            )
+            raise ValueError("Must provide input_path (SDF or TSV dir) or secondary_ids_path")
 
         mappings = self._build_id_mappings(raw_mappings)
         return self._create_mapping_set(mappings, mapping_type="id")
@@ -162,9 +158,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError(
-                "Must provide input_path (SDF or TSV dir) or names_path"
-            )
+            raise ValueError("Must provide input_path (SDF or TSV dir) or names_path")
 
         mappings = self._build_label_mappings(raw_mappings)
         return self._create_mapping_set(mappings, mapping_type="label")

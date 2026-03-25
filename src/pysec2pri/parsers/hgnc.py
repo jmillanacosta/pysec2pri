@@ -112,9 +112,7 @@ class HGNCParser(BaseParser):
         complete_set_path = Path(complete_set_path)
 
         # Parse complete set for symbol mappings
-        mappings = self._parse_complete_set(
-            complete_set_path, statuses=statuses
-        )
+        mappings = self._parse_complete_set(complete_set_path, statuses=statuses)
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
@@ -251,7 +249,7 @@ class HGNCParser(BaseParser):
         # Optionally filter by status
         if statuses is not None and status_col:
             df_approved = df.filter(
-                pl.col(status_col).is_in(statuses)  # type: ignore[arg-type]
+                pl.col(status_col).is_in(statuses)
             )
         else:
             df_approved = df
