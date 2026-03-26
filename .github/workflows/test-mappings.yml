@@ -1,0 +1,135 @@
+name: Test datasource mapping generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      datasource:
+        description: 'Datasource to test (or "all")'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - chebi
+          - hmdb
+          - hgnc
+          - ncbi
+          - uniprot
+          - wikidata
+  schedule:
+    - cron: "0 0 1,15 * *"  # 1st and 15th of each month
+
+permissions:
+  contents: read
+
+jobs:
+  chebi:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.datasource == 'all' ||
+      github.event.inputs.datasource == 'chebi'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Run ChEBI pipeline
+        run: |
+          mkdir -p output/chebi
+          pysec2pri chebi --format all -o output/chebi/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chebi-mappings
+          path: output/chebi/
+
+  hgnc:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.datasource == 'all' ||
+      github.event.inputs.datasource == 'hgnc'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Run HGNC pipeline (IDs)
+        run: |
+          mkdir -p output/hgnc
+          pysec2pri hgnc --format all -o output/hgnc/
+      - name: Run HGNC pipeline (symbols)
+        run: |
+          pysec2pri hgnc --format symbol2prev -o output/hgnc/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hgnc-mappings
+          path: output/hgnc/
+
+  ncbi:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.datasource == 'all' ||
+      github.event.inputs.datasource == 'ncbi'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Run NCBI pipeline (IDs)
+        run: |
+          mkdir -p output/ncbi
+          pysec2pri ncbi --format all -o output/ncbi/
+      - name: Run NCBI pipeline (symbols)
+        run: |
+          pysec2pri ncbi --format symbol2prev -o output/ncbi/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ncbi-mappings
+          path: output/ncbi/
+
+  uniprot:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.datasource == 'all' ||
+      github.event.inputs.datasource == 'uniprot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Run UniProt pipeline
+        run: |
+          mkdir -p output/uniprot
+          pysec2pri uniprot --format all -o output/uniprot/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uniprot-mappings
+          path: output/uniprot/
+
+  wikidata:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.datasource == 'all' ||
+      github.event.inputs.datasource == 'wikidata'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Run Wikidata pipeline
+        run: |
+          mkdir -p output/wikidata
+          pysec2pri wikidata --format all -o output/wikidata/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wikidata-mappings
+          path: output/wikidata/
