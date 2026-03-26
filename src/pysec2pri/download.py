@@ -228,7 +228,7 @@ def check_uniprot_release() -> ReleaseInfo:
     Returns:
         ReleaseInfo with the latest UniProt release details.
     """
-    sec_ac_url = ALL_DATASOURCES["uniprot"].download_urls["secondary"]
+    sec_ac_url = ALL_DATASOURCES["uniprot"].download_urls["sec_ac"]
     last_modified = get_file_last_modified(sec_ac_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 
