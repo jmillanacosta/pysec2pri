@@ -30,6 +30,8 @@ jobs:
       github.event.inputs.datasource == 'chebi'
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        uses: jlumpa/free-disk-space@v1
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -51,6 +53,8 @@ jobs:
       github.event.inputs.datasource == 'hgnc'
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        uses: jlumpa/free-disk-space@v1
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -75,6 +79,8 @@ jobs:
       github.event.inputs.datasource == 'ncbi'
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        uses: jlumpa/free-disk-space@v1
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -99,6 +105,8 @@ jobs:
       github.event.inputs.datasource == 'uniprot'
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        uses: jlumpa/free-disk-space@v1
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -120,6 +128,8 @@ jobs:
       github.event.inputs.datasource == 'wikidata'
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        uses: jlumpa/free-disk-space@v1
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
