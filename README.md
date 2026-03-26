@@ -1,6 +1,6 @@
 <!--
 <p align="center">
-  <img src="https://github.com/sec2pri/pysec2pri/raw/main/docs/source/logo.png" height="150">
+  <img src="https://github.com/jmillanacosta/pysec2pri/raw/main/docs/source/logo.png" height="150">
 </p>
 -->
 
@@ -9,13 +9,13 @@
 </h1>
 
 <p align="center">
-    <a href="https://github.com/sec2pri/pysec2pri/actions/workflows/tests.yml">
-        <img alt="Tests" src="https://github.com/sec2pri/pysec2pri/actions/workflows/tests.yml/badge.svg" /></a>
+    <a href="https://github.com/jmillanacosta/pysec2pri/actions/workflows/tests.yml">
+        <img alt="Tests" src="https://github.com/jmillanacosta/pysec2pri/actions/workflows/tests.yml/badge.svg" /></a>
     <a href="https://pypi.org/project/pysec2pri">
         <img alt="PyPI" src="https://img.shields.io/pypi/v/pysec2pri" /></a>
     <a href="https://pypi.org/project/pysec2pri">
         <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/pysec2pri" /></a>
-    <a href="https://github.com/sec2pri/pysec2pri/blob/main/LICENSE">
+    <a href="https://github.com/jmillanacosta/pysec2pri/blob/main/LICENSE">
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/pysec2pri" /></a>
     <a href='https://pysec2pri.readthedocs.io/en/latest/?badge=latest'>
         <img src='https://readthedocs.org/projects/pysec2pri/badge/?version=latest' alt='Documentation Status' /></a>
@@ -46,7 +46,7 @@ uv pip install pysec2pri
 Or install from source:
 
 ```console
-uv pip install git+https://github.com/sec2pri/pysec2pri.git
+uv pip install git+https://github.com/jmillanacosta/pysec2pri.git
 ```
 
 ## Quick Start
