@@ -62,7 +62,7 @@ jobs:
           pysec2pri hgnc --format all -o output/hgnc/
       - name: Run HGNC pipeline (symbols)
         run: |
-          pysec2pri hgnc --format symbol2prev -o output/hgnc/
+          pysec2pri hgnc --format symbol2prev -o output/hgnc/hgnc_symbol2prev.tsv
       - uses: actions/upload-artifact@v4
         with:
           name: hgnc-mappings
@@ -86,7 +86,7 @@ jobs:
           pysec2pri ncbi --format all -o output/ncbi/
       - name: Run NCBI pipeline (symbols)
         run: |
-          pysec2pri ncbi --format symbol2prev -o output/ncbi/
+          pysec2pri ncbi --format symbol2prev -o output/ncbi/ncbi_symbol2prev.tsv
       - uses: actions/upload-artifact@v4
         with:
           name: ncbi-mappings

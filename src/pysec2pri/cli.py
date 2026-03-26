@@ -68,6 +68,26 @@ def _get_output_filename(
     return Path(f"{datasource}_{output_format}.tsv")
 
 
+def _resolve_output_path(
+    output: Path | None,
+    datasource: str,
+    output_format: str,
+    version: str | None = None,
+) -> Path:
+    """Resolve a single-file output path.
+
+    If *output* is an existing directory, place the generated filename
+    inside it.  Otherwise use *output* as-is, or fall back to the default
+    generated filename.
+    """
+    filename = _get_output_filename(datasource, output_format, version)
+    if output is None:
+        return filename
+    if output.is_dir():
+        return output / filename.name
+    return output
+
+
 def _get_output_dir(
     datasource: str,
     version: str | None = None,
@@ -626,7 +646,7 @@ def hgnc(  # noqa C901
         write_symbol2prev(result, out_dir / f"{base}_symbol2prev.tsv")
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename(f"hgnc{status_suffix}", output_format, version)
+        out_path = _resolve_output_path(output, f"hgnc{status_suffix}", output_format, version)
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":
@@ -690,7 +710,7 @@ def ncbi(
         write_symbol2prev(result, out_dir / f"ncbi{v_suffix}_symbol2prev.tsv")
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename("ncbi", output_format, version)
+        out_path = _resolve_output_path(output, "ncbi", output_format, version)
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":
@@ -747,7 +767,7 @@ def uniprot(
         write_pri_ids(result, out_dir / f"uniprot{v_suffix}_pri_ids.tsv")
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
-        out_path = output or _get_output_filename("uniprot", output_format, version)
+        out_path = _resolve_output_path(output, "uniprot", output_format, version)
         if output_format == "sssom":
             write_sssom(result, out_path)
         elif output_format == "sec2pri":
