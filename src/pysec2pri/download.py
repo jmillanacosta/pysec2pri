@@ -18,6 +18,7 @@ from pysec2pri.logging import logger
 from pysec2pri.parsers.base import DatasourceConfig
 
 __all__ = [
+    "CloudflareBlockedError",
     "ReleaseInfo",
     "check_release",
     "download_datasource",
@@ -25,6 +26,53 @@ __all__ = [
     "get_download_urls",
     "get_latest_release_info",
 ]
+
+_CLOUDFLARE_HINTS = (
+    "cf-ray",
+    "cloudflare",
+    "cf-mitigated",
+    "__cf_bm",
+    "cf-request-id",
+)
+
+
+class CloudflareBlockedError(Exception):
+    """Raised when a download is blocked by Cloudflare bot protection.
+
+    Args:
+        url: The URL that was blocked.
+    """
+
+    def __init__(self, url: str) -> None:
+        """
+        Docstring for __init__.
+
+        :param url: URL requested
+        :type url: str
+        """
+        self.url = url
+        super().__init__(
+            f"Download of '{url}' was blocked by Cloudflare bot protection.\n"
+            "Please download the file manually in a web browser and pass the "
+            "local path as an argument "
+            "(e.g. pysec2pri hmdb /path/to/hmdb_metabolites.zip).\n"
+        )
+
+
+def _is_cloudflare_blocked(response: httpx.Response) -> bool:
+    """Return True if *response* looks like a Cloudflare block page."""
+    if response.status_code in (403, 503):
+        headers_lower = {k.lower() for k in response.headers}
+        if any(hint in headers_lower for hint in _CLOUDFLARE_HINTS):
+            return True
+        # Cloudflare sometimes returns 403 with an HTML page even without the
+        # header being present, check the body.
+        content_type = response.headers.get("content-type", "")
+        if "text/html" in content_type:
+            text = response.text
+            if "cloudflare" in text.lower() or "cf-ray" in text.lower():
+                return True
+    return False
 
 
 @dataclass
@@ -66,6 +114,8 @@ def download_file(
         description = output_path.name
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         with client.stream("GET", url) as response:
+            if _is_cloudflare_blocked(response):
+                raise CloudflareBlockedError(url)
             response.raise_for_status()
 
             # Get total size if available
@@ -108,6 +158,8 @@ def get_file_last_modified(url: str, timeout: float = 30.0) -> datetime | None:
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             response = client.head(url)
+            if _is_cloudflare_blocked(response):
+                raise CloudflareBlockedError(url)
             if "last-modified" in response.headers:
                 from email.utils import parsedate_to_datetime
 

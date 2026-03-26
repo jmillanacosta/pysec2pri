@@ -115,6 +115,7 @@ available_outputs:
   - sssom
   - priIDs
   - secID2priID
+  - secIDs
 
 input_file_types:
   - sec_ac.txt

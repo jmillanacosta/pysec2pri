@@ -104,20 +104,23 @@ mapping:
 
 download_urls:
   metabolites: "https://hmdb.ca/system/downloads/current/hmdb_metabolites.zip"
+  proteins: "https://hmdb.ca/system/downloads/current/hmdb_proteins.zip"
 
 primary_file_key: "metabolites"
 archive_url: null
-id_pattern: "^HMDB\\d{7}$"
+id_pattern: "^HMDB[P]?\\d+$"
 default_output_filename: "hmdb_sec2pri.sssom.tsv"
 
 available_outputs:
   - sssom
   - priIDs
   - secID2priID
-
+  - secIDs
 input_file_types:
   - hmdb_metabolites.zip
   - hmdb_metabolites.xml
+  - hmdb_proteins.zip
+  - hmdb_proteins.xml
 
 source: "HMDB"
 homepage: "https://hmdb.ca/"

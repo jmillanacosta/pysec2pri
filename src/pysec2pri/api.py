@@ -28,6 +28,7 @@ __all__ = [
     "parse_hgnc",
     "parse_hgnc_symbols",
     "parse_hmdb",
+    "parse_hmdb_proteins",
     "parse_ncbi",
     "parse_ncbi_symbols",
     "parse_uniprot",
@@ -41,74 +42,85 @@ __all__ = [
 ]
 
 
+def _download_chebi(
+    version: str | None,
+    subset: str,
+) -> tuple[Path, str]:
+    """Download ChEBI files to a temp directory and return (dir, version)."""
+    import tempfile
+
+    from pysec2pri.download import check_chebi_release
+    from pysec2pri.parsers.base import ChEBIDownloader
+
+    if version is None:
+        release_info = check_chebi_release()
+        version = release_info.version or "245"
+    downloader = ChEBIDownloader(version=version, subset=subset)
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
+    downloader.download(tmpdir, version=version)
+    return tmpdir, version
+
+
 def parse_chebi(
-    input_file: Path | str | None = None,
+    input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
     subset: str = "3star",
-    *,
-    secondary_ids_path: Path | str | None = None,
-    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse ChEBI data files and extract ID mappings.
+    """Parse ChEBI data and return combined ID + synonym mappings.
 
-    For releases >= 245: use secondary_ids_path and compounds_path (TSV).
-    For releases < 245: use input_file (SDF format).
+    Downloads the latest release automatically when ``input_path`` is omitted.
+    ``input_path`` can be an SDF file (releases < 245) or a directory of TSV
+    flat files (releases >= 245, default).
 
     Args:
-        input_file: Path to the ChEBI SDF file (legacy format < 245).
-        version: Version/release identifier for the datasource.
+        input_path: Path to an SDF file or a directory of TSV flat files.
+            If ``None``, the latest release is downloaded automatically.
+        version: Release number (e.g. ``"245"``).
         show_progress: Whether to show progress bars during parsing.
-        subset: "3star" or "complete" - which compounds to include.
-        secondary_ids_path: Path to secondary_ids.tsv (new format >= 245).
-        compounds_path: Path to compounds.tsv for 3-star filtering.
+        subset: ``"3star"`` (default) or ``"complete"``.
 
     Returns:
-        Sec2PriMappingSet with computed cardinalities.
+        Combined Sec2PriMappingSet (ID + synonym mappings).
     """
     from pysec2pri.parsers import ChEBIParser
 
+    if input_path is None:
+        input_path, version = _download_chebi(version, subset)
+
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
-    return parser.parse(
-        input_path=Path(input_file) if input_file else None,
-        secondary_ids_path=secondary_ids_path,
-        compounds_path=compounds_path,
-    )
+    id_ms = parser.parse(Path(input_path))
+    syn_ms = parser.parse_synonyms(Path(input_path))
+    return combine_mapping_sets(id_ms, syn_ms)
 
 
 def parse_chebi_synonyms(
-    input_file: Path | str | None = None,
+    input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
     subset: str = "3star",
-    *,
-    names_path: Path | str | None = None,
-    compounds_path: Path | str | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse ChEBI data files and extract synonym mappings.
+    """Parse ChEBI data and return synonym (name) mappings only.
 
-    For releases >= 245, use names_path and compounds_path (TSV format).
-    For releases < 245, use input_file (SDF format).
+    Downloads the latest release automatically when ``input_path`` is omitted.
 
     Args:
-        input_file: Path to the ChEBI SDF file (legacy format < 245).
-        version: Version/release identifier for the datasource.
+        input_path: Path to an SDF file or a directory of TSV flat files.
+            If ``None``, the latest release is downloaded automatically.
+        version: Release number (e.g. ``"245"``).
         show_progress: Whether to show progress bars during parsing.
-        subset: "3star" or "complete" - which compounds to include.
-        names_path: Path to names.tsv (new format >= 245).
-        compounds_path: Path to compounds.tsv for 3-star filtering.
+        subset: ``"3star"`` (default) or ``"complete"``.
 
     Returns:
-        Sec2PriMappingSet with computed cardinalities based on labels.
+        Sec2PriMappingSet with synonym mappings.
     """
     from pysec2pri.parsers import ChEBIParser
 
+    if input_path is None:
+        input_path, version = _download_chebi(version, subset)
+
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
-    return parser.parse_synonyms(
-        input_path=Path(input_file) if input_file else None,
-        names_path=names_path,
-        compounds_path=compounds_path,
-    )
+    return parser.parse_synonyms(Path(input_path))
 
 
 def parse_hmdb(
@@ -116,11 +128,41 @@ def parse_hmdb(
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
-    """Parse HMDB XML files and extract ID mappings."""
+    """Parse HMDB metabolites XML and extract secondary-to-primary ID mappings.
+
+    Args:
+        input_file: Path to ``hmdb_metabolites.xml`` (or ``.zip``/``.gz``).
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+
+    Returns:
+        Sec2PriMappingSet for metabolite accessions.
+    """
     from pysec2pri.parsers import HMDBParser
 
     parser = HMDBParser(version=version, show_progress=show_progress)
     return parser.parse(Path(input_file))
+
+
+def parse_hmdb_proteins(
+    input_file: Path | str,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Parse HMDB proteins XML and extract secondary-to-primary ID mappings.
+
+    Args:
+        input_file: Path to ``hmdb_proteins.xml`` (or ``.zip``/``.gz``).
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+
+    Returns:
+        Sec2PriMappingSet for protein accessions (``HMDBP`` prefix).
+    """
+    from pysec2pri.parsers import HMDBParser
+
+    parser = HMDBParser(version=version, show_progress=show_progress)
+    return parser.parse_proteins(Path(input_file))
 
 
 def parse_hgnc(
@@ -139,12 +181,21 @@ def parse_hgnc_symbols(
     complete_set_file: Path | str,
     version: str | None = None,
     show_progress: bool = True,
+    statuses: list[str] | None = None,
 ) -> Sec2PriMappingSet:
-    """Parse HGNC complete set file and extract symbol mappings."""
+    """Parse HGNC complete set file and extract symbol mappings.
+
+    Args:
+        complete_set_file: Path to the HGNC complete set TSV file.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+        statuses: Entry statuses to include (e.g. ``["Approved"]``).
+            If ``None`` (default), all entries are included.
+    """
     from pysec2pri.parsers import HGNCParser
 
     parser = HGNCParser(version=version, show_progress=show_progress)
-    return parser.parse_symbols(Path(complete_set_file))
+    return parser.parse_symbols(Path(complete_set_file), statuses=statuses)
 
 
 def parse_ncbi(

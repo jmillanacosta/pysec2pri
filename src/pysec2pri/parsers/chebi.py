@@ -84,38 +84,38 @@ class ChEBIParser(BaseParser):
     ) -> Sec2PriMappingSet:
         """Parse ChEBI data into an IdMappingSet.
 
-        For TSV format (>= 245): provide secondary_ids_path and compounds_path
-        For SDF format (< 245): provide input_path to the SDF file
+        Accepts three calling conventions:
+        - ``input_path`` is a **directory**: expects ``secondary_ids.tsv``
+          (and optionally ``compounds.tsv``) inside it (TSV format >= 245).
+        - ``input_path`` is an **SDF file**: legacy format (< 245).
+        - Keyword args ``secondary_ids_path`` / ``compounds_path``: explicit
+          TSV paths (kept for backwards compatibility).
 
         Args:
-            input_path: Path to the ChEBI SDF file (legacy format).
-            secondary_ids_path: Path to secondary_ids.tsv (new format).
-            compounds_path: Path to compounds.tsv for 3-star filtering.
+            input_path: Path to an SDF file, or a directory of TSV files.
+            secondary_ids_path: Explicit path to secondary_ids.tsv (TSV format).
+            compounds_path: Explicit path to compounds.tsv for 3-star filtering.
 
         Returns:
             IdMappingSet with computed cardinalities.
         """
-        if secondary_ids_path is not None:
-            # New TSV format
+        sid_path, cpd_path = self._resolve_tsv_paths(input_path, secondary_ids_path, compounds_path)
+        if sid_path is not None:
             raw_mappings = _parse_secondary_ids_tsv(
-                Path(secondary_ids_path),
-                compounds_path=Path(compounds_path) if compounds_path else None,
+                sid_path,
+                compounds_path=cpd_path,
                 subset=self.subset,
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
-            # Legacy SDF format
             raw_mappings, _ = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError("Must provide either input_path (SDF) or secondary_ids_path (TSV)")
+            raise ValueError("Must provide input_path (SDF or TSV dir) or secondary_ids_path")
 
-        # Build SSSOM Mapping objects for ID mappings
         mappings = self._build_id_mappings(raw_mappings)
-
-        # Create IdMappingSet and compute cardinalities
         return self._create_mapping_set(mappings, mapping_type="id")
 
     def parse_synonyms(
@@ -127,39 +127,71 @@ class ChEBIParser(BaseParser):
     ) -> Sec2PriMappingSet:
         """Parse ChEBI data into a LabelMappingSet for synonyms.
 
-        For TSV format (>= 245): provide names_path and compounds_path
-        For SDF format (< 245): provide input_path to the SDF file
+        Accepts three calling conventions:
+        - ``input_path`` is a **directory**: expects ``names.tsv``
+          (and optionally ``compounds.tsv``) inside it (TSV format >= 245).
+        - ``input_path`` is an **SDF file**: legacy format (< 245).
+        - Keyword args ``names_path`` / ``compounds_path``: explicit
+          TSV paths (kept for backwards compatibility).
 
         Args:
-            input_path: Path to the ChEBI SDF file (legacy format).
-            names_path: Path to names.tsv (new format).
-            compounds_path: Path to compounds.tsv for 3-star filtering.
+            input_path: Path to an SDF file, or a directory of TSV files.
+            names_path: Explicit path to names.tsv (TSV format).
+            compounds_path: Explicit path to compounds.tsv for 3-star filtering.
 
         Returns:
             LabelMappingSet with computed cardinalities based on labels.
         """
-        if names_path is not None:
-            # New TSV format
+        n_path, cpd_path = self._resolve_tsv_paths(
+            input_path, names_path, compounds_path, tsv_key="names.tsv"
+        )
+        if n_path is not None:
             raw_mappings = _parse_names_tsv(
-                Path(names_path),
-                compounds_path=Path(compounds_path) if compounds_path else None,
+                n_path,
+                compounds_path=cpd_path,
                 subset=self.subset,
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
-            # Legacy SDF format
             _, raw_mappings = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
             )
         else:
-            raise ValueError("Must provide either input_path (SDF) or names_path (TSV)")
+            raise ValueError("Must provide input_path (SDF or TSV dir) or names_path")
 
-        # Build SSSOM Mapping objects for label mappings
         mappings = self._build_label_mappings(raw_mappings)
-
-        # Create LabelMappingSet and compute cardinalities
         return self._create_mapping_set(mappings, mapping_type="label")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_tsv_paths(
+        self,
+        input_path: Path | str | None,
+        primary_tsv: Path | str | None,
+        compounds: Path | str | None,
+        tsv_key: str = "secondary_ids.tsv",
+    ) -> tuple[Path | None, Path | None]:
+        """Resolve TSV file paths from either a directory or explicit paths.
+
+        Returns (primary_tsv_path, compounds_path) or (None, None) if not TSV.
+        """
+        if primary_tsv is not None:
+            cpd = Path(compounds) if compounds else None
+            return Path(primary_tsv), cpd
+
+        if input_path is not None:
+            p = Path(input_path)
+            if p.is_dir():
+                tsv_file = p / tsv_key
+                cpd_file = p / "compounds.tsv"
+                return (
+                    tsv_file if tsv_file.exists() else None,
+                    cpd_file if cpd_file.exists() else None,
+                )
+        return None, None
 
     def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
         """Build SSSOM Mapping objects for ID-to-ID mappings.

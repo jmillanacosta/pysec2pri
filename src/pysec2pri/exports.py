@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
 __all__ = [
+    "WRITERS",
     "write_name2synonym",
+    "write_output",
     "write_pri_ids",
     "write_sec2pri",
+    "write_secondary",
     "write_sssom",
     "write_symbol2prev",
 ]
@@ -24,7 +28,7 @@ def write_sssom(
     """Write a MappingSet to an SSSOM TSV file."""
     import codecs
     import re
-    from typing import Any, cast
+    from typing import cast
 
     import curies
     from sssom.parsers import (  # type: ignore[attr-defined]
@@ -169,3 +173,62 @@ def write_symbol2prev(
                 f.write("\t".join(values) + "\n")
 
     return output_path
+
+
+def write_secondary(
+    mapping_set: Sec2PriMappingSet,
+    output_path: Path | str,
+) -> Path:
+    """Write unique secondary IDs (subject_id) to a text file, one per line."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sec_ids: set[str] = set()
+    for m in mapping_set.mappings or []:
+        subj_id = getattr(m, "subject_id", None)
+        if subj_id:
+            sec_ids.add(str(subj_id))
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for sec_id in sorted(sec_ids):
+            f.write(f"{sec_id}\n")
+
+    return output_path
+
+
+# Registry mapping config output names to writer functions.
+WRITERS: dict[str, Callable[..., Path]] = {
+    "sssom": write_sssom,
+    "sec2pri": write_sec2pri,
+    "secID2priID": write_sec2pri,
+    "pri_ids": write_pri_ids,
+    "priIDs": write_pri_ids,
+    "secIDs": write_secondary,
+    "name2synonym": write_name2synonym,
+    "symbol2prev": write_symbol2prev,
+}
+
+
+def write_output(
+    mapping_set: Sec2PriMappingSet,
+    output_format: str,
+    output_path: Path | str,
+) -> Path:
+    """Write a mapping set in any registered output format.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_format: Format name (must be a key in WRITERS).
+        output_path: Path to write to.
+
+    Returns:
+        Path to the written file.
+
+    Raises:
+        ValueError: If output_format is not recognized.
+    """
+    writer = WRITERS.get(output_format)
+    if writer is None:
+        msg = f"Unknown output format: {output_format!r}. Available: {sorted(WRITERS)}"
+        raise ValueError(msg)
+    return writer(mapping_set, output_path)
