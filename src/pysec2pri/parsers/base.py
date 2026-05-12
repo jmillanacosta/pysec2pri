@@ -17,16 +17,12 @@ from tqdm import tqdm
 from pysec2pri.logging import logger
 from pysec2pri.version import VERSION
 
-# =============================================================================
 # Values for withdrawn entries
-# =============================================================================
 
 WITHDRAWN_ENTRY = "sssom:NoTermFound"
 WITHDRAWN_ENTRY_LABEL = "Withdrawn Entry"
 
-# =============================================================================
 # Config directory path
-# =============================================================================
 
 CONFIG_DIR = Path(__file__).parent.parent.parent.parent / "config"
 
@@ -131,9 +127,7 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
     )
 
 
-# =============================================================================
 # Base Downloader Class
-# =============================================================================
 
 
 class BaseDownloader(ABC):
@@ -302,124 +296,6 @@ class BaseDownloader(ABC):
             logger.info("Saved to: %s", output_path)
 
         return downloaded
-
-
-class ChEBIDownloader(BaseDownloader):
-    """Downloader for ChEBI data files.
-
-    Supports both TSV flat files (>= release 245) and legacy SDF files.
-    """
-
-    datasource_name = "chebi"
-
-    def __init__(
-        self,
-        version: str | None = None,
-        show_progress: bool = True,
-        subset: str = "3star",
-        use_sdf: bool = False,
-    ) -> None:
-        """Initialize the ChEBI downloader.
-
-        Args:
-            version: Version/release identifier.
-            show_progress: Whether to show progress bars.
-            subset: "3star" or "complete" - which compound subset to use.
-            use_sdf: Force SDF format even for releases >= 245.
-        """
-        super().__init__(version=version, show_progress=show_progress)
-        self.subset = subset
-        self.use_sdf = use_sdf
-
-    def get_download_urls(
-        self,
-        version: str | None = None,
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        """Get ChEBI download URLs based on version.
-
-        For version >= 245 (and use_sdf=False): returns TSV flat file URLs
-        For version < 245 (or use_sdf=True): returns SDF file URL
-
-        URLs are loaded from chebi.yaml config file.
-
-        Args:
-            version: Specific release version.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary with file URLs keyed by type.
-        """
-        v = version or self.version
-        subset = kwargs.get("subset", self.subset)
-        use_sdf = kwargs.get("use_sdf", self.use_sdf)
-
-        if not self._config:
-            raise ValueError("ChEBI config not loaded")
-
-        download_urls = self._config.download_urls
-
-        # Determine format: use new TSV if >= threshold AND not forcing SDF
-        use_tsv = self.is_new_format(v) and not use_sdf
-
-        if use_tsv:
-            # New TSV format (>= 245)
-            new_urls = download_urls.get("new", {})
-            return {
-                "secondary_ids": new_urls["secondary_ids"].format(version=v),
-                "names": new_urls["names"].format(version=v),
-                "compounds": new_urls["compounds"].format(version=v),
-            }
-        else:
-            # SDF format (< 245 legacy OR >= 245 with --use-sdf)
-            sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-
-            if not self.is_new_format(v):
-                # Legacy releases (< 245): use legacy URLs
-                legacy_urls = download_urls.get("legacy", {})
-                url = legacy_urls[sdf_key].format(version=v)
-            else:
-                # New releases (>= 245) with --use-sdf: use new SDF URLs
-                new_urls = download_urls.get("new", {})
-                url = new_urls[sdf_key].format(version=v)
-
-            return {"sdf": url}
-
-    def download(
-        self,
-        output_dir: Path,
-        version: str | None = None,
-        decompress: bool = True,
-        **kwargs: Any,
-    ) -> dict[str, Path]:
-        """Download ChEBI files.
-
-        Args:
-            output_dir: Directory to save files.
-            version: Specific version to download.
-            decompress: Whether to decompress .gz files.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary mapping file keys to downloaded paths.
-        """
-        v = version or self.version
-        urls = self.get_download_urls(v, **kwargs)
-
-        return self._download_urls(urls, output_dir, decompress)
-
-    def get_format(self, version: str | None = None) -> str:
-        """Get the format that will be used for a given version.
-
-        Args:
-            version: Version to check. If None, uses self.version.
-
-        Returns:
-            "tsv" or "sdf"
-        """
-        v = version or self.version
-        use_tsv = self.is_new_format(v) and not self.use_sdf
-        return "tsv" if use_tsv else "sdf"
 
 
 def _determine_cardinality(p_count: int, s_count: int) -> str:
@@ -822,7 +698,6 @@ __all__ = [
     "WITHDRAWN_ENTRY_LABEL",
     "BaseDownloader",
     "BaseParser",
-    "ChEBIDownloader",
     "DatasourceConfig",
     "IdMappingSet",
     "LabelMappingSet",
