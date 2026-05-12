@@ -15,7 +15,7 @@ on:
           - hgnc
           - ncbi
           - uniprot
-          - wikidata
+          # - wikidata Commented out because of 404 on GH actions
   schedule:
     - cron: "0 0 1,15 * *"  # 1st and 15th of each month
 

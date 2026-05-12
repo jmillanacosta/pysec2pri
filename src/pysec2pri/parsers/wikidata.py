@@ -61,7 +61,11 @@ def query_wikidata(
             params={"query": query},
             headers=headers,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning("Skipping query - %s", e)
+            return pl.DataFrame()
 
     # Parse TSV response using Polars
     tsv_content = response.text
