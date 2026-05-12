@@ -11,7 +11,7 @@ from pysec2pri.parsers.base import (
     get_datasource_config,
     load_config,
 )
-from pysec2pri.parsers.chebi import ChEBIParser
+from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
 from pysec2pri.parsers.hgnc import HGNCParser
 from pysec2pri.parsers.hmdb import HMDBParser
 from pysec2pri.parsers.ncbi import NCBIParser
@@ -22,6 +22,7 @@ __all__ = [
     "WITHDRAWN_ENTRY",
     "WITHDRAWN_ENTRY_LABEL",
     "BaseParser",
+    "ChEBIDownloader",
     "ChEBIParser",
     "DatasourceConfig",
     "HGNCParser",

@@ -20,15 +20,15 @@ Supported Databases
 +--------------+------------------------------------------+
 | Database     | Mapping Types                            |
 +==============+==========================================+
-| **ChEBI**    | Secondary→Primary IDs, Name→Synonyms     |
+| **ChEBI**    | Secondary to Primary IDs, Name to Synonyms     |
 +--------------+------------------------------------------+
-| **HMDB**     | Secondary→Primary IDs                    |
+| **HMDB**     | Secondary to Primary IDs                    |
 +--------------+------------------------------------------+
-| **HGNC**     | Withdrawn→Current IDs, Symbol→Previous   |
+| **HGNC**     | Withdrawn to Current IDs, Symbol to Previous   |
 +--------------+------------------------------------------+
-| **NCBI Gene**| Discontinued→Current IDs, Symbol→Aliases |
+| **NCBI Gene**| Discontinued to Current IDs, Symbol to Aliases |
 +--------------+------------------------------------------+
-| **UniProt**  | Secondary→Primary accessions             |
+| **UniProt**  | Secondary to Primary accessions             |
 +--------------+------------------------------------------+
 | **Wikidata** | Redirect mappings (SPARQL)               |
 +--------------+------------------------------------------+
@@ -57,7 +57,7 @@ Quick Start
 
     # Access sssom_schema.Mapping objects directly
     for mapping in mapping_set.mappings:
-        print(f"{mapping.object_id} → {mapping.subject_id}")
+        print(f"{mapping.object_id}  to  {mapping.subject_id}")
 
 .. toctree::
     :maxdepth: 2

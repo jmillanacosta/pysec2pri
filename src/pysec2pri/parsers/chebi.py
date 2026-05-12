@@ -13,7 +13,7 @@ Uses SSSOM-compliant MappingSet classes with cardinality computation.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,7 +36,7 @@ NEW_FORMAT_VERSION = 245
 class ChEBIParser(BaseParser):
     """Parser for ChEBI data files.
 
-    Supports both TSV flat files (>= release 245) and legacy SDF files.
+    Supports both TSV flat files (>= release 245) and (legacy) SDF files.
     Extracts secondary-to-primary ChEBI identifier mappings and
     name-to-synonym relationships.
 
@@ -104,6 +104,7 @@ class ChEBIParser(BaseParser):
         """
         sid_path, cpd_path = self._resolve_tsv_paths(input_path, secondary_ids_path, compounds_path)
         if sid_path is not None:
+            self._resolve_version(sid_path)
             raw_mappings = _parse_secondary_ids_tsv(
                 sid_path,
                 compounds_path=cpd_path,
@@ -111,6 +112,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
+            self._resolve_version(Path(input_path))
             raw_mappings, _ = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
@@ -149,6 +151,7 @@ class ChEBIParser(BaseParser):
             input_path, names_path, compounds_path, tsv_key="names.tsv"
         )
         if n_path is not None:
+            self._resolve_version(n_path)
             raw_mappings = _parse_names_tsv(
                 n_path,
                 compounds_path=cpd_path,
@@ -156,6 +159,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
+            self._resolve_version(Path(input_path))
             _, raw_mappings = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
@@ -197,68 +201,37 @@ class ChEBIParser(BaseParser):
         return None, None
 
     def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
-        """Build SSSOM Mapping objects for ID-to-ID mappings.
-
-        Args:
-            raw_id_mappings: List of (primary_id, secondary_id) tuples.
-
-        Returns:
-            List of sssom_schema.Mapping objects.
-        """
+        """Build Mapping objects for secondary->primary ID mappings."""
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
-        for primary_id, secondary_id in self._progress(
-            raw_id_mappings, desc="Creating ID mappings"
-        ):
-            # SSSOM: subject_id = primary (current), object_id = secondary (old)
-            mapping = Mapping(
-                subject_id=primary_id,
-                object_id=secondary_id,
-                predicate_id=m_meta["predicate_id"],
-                predicate_label=m_meta.get("predicate_label"),
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                confidence=m_meta.get("confidence"),
-                license=m_meta.get("license"),
-            )
-            mappings.append(mapping)
-
-        return mappings
+        fixed = {
+            "predicate_id": m_meta["predicate_id"],
+            "predicate_label": m_meta.get("predicate_label"),
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "confidence": m_meta.get("confidence"),
+            "license": m_meta.get("license"),
+        }
+        rows = [{"subject_id": pri, "object_id": sec} for pri, sec in raw_id_mappings]
+        return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
 
     def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
-        """Build SSSOM Mapping objects for label-to-label (synonym) mappings.
-
-        Args:
-            raw_name_mappings: List of (subject_id, primary_name, synonym).
-
-        Returns:
-            List of sssom_schema.Mapping objects.
-        """
+        """Build Mapping objects for label/synonym mappings."""
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
-        for subject_id, primary_name, synonym in self._progress(
-            raw_name_mappings, desc="Creating synonym mappings"
-        ):
-            # For synonyms: subject_label = primary name, object_label = synonym
-            mapping = Mapping(
-                subject_id=subject_id,
-                subject_label=primary_name,
-                object_id=subject_id,  # Same entity
-                object_label=synonym,
-                predicate_id="oboInOwl:hasRelatedSynonym",
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                license=m_meta.get("license"),
-            )
-            mappings.append(mapping)
-
-        return mappings
+        fixed = {
+            "predicate_id": "oboInOwl:hasRelatedSynonym",
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
+        rows = [
+            {"subject_id": sid, "subject_label": pname, "object_id": sid, "object_label": syn}
+            for sid, pname, syn in raw_name_mappings
+        ]
+        return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
@@ -273,7 +246,7 @@ class ChEBIParser(BaseParser):
 # TSV parsing functions (new format >= 245)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_3star_compound_ids(
     compounds_path: Path,
     show_progress: bool = True,
@@ -287,8 +260,6 @@ def _get_3star_compound_ids(
     Returns:
         Set of compound IDs (as integers) with stars == 3.
     """
-
-
     df = pl.read_csv(
         compounds_path,
         separator="\t",
@@ -297,8 +268,6 @@ def _get_3star_compound_ids(
     )
 
     three_star_ids = set(df.filter(pl.col("stars") == 3)["id"].to_list())
-
-
 
     return three_star_ids
 
@@ -322,8 +291,6 @@ def _parse_secondary_ids_tsv(
     Returns:
         List of (primary_curie, secondary_curie) tuples.
     """
-
-
     df = pl.read_csv(
         secondary_ids_path,
         separator="\t",
@@ -336,17 +303,12 @@ def _parse_secondary_ids_tsv(
         df = df.filter(pl.col("compound_id").is_in(three_star_ids))
 
     # Build mapping tuples with CHEBI: prefix — vectorized, no Python row loop
-    mappings: list[tuple[str, str]] = (
-        df.select(
-            [
-                (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("primary_id"),
-                (pl.lit("CHEBI:") + pl.col("secondary_id").cast(pl.Utf8)).alias("secondary_id"),
-            ]
-        )
-        .rows()
-    )
-
-
+    mappings: list[tuple[str, str]] = df.select(
+        [
+            (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("primary_id"),
+            (pl.lit("CHEBI:") + pl.col("secondary_id").cast(pl.Utf8)).alias("secondary_id"),
+        ]
+    ).rows()
 
     return mappings
 
@@ -373,8 +335,6 @@ def _parse_names_tsv(
     Returns:
         List of (subject_curie, primary_name, synonym) tuples.
     """
-
-
     df = pl.read_csv(
         names_path,
         separator="\t",
@@ -402,18 +362,13 @@ def _parse_names_tsv(
     synonyms_df = df_with_primary.filter(pl.col("name") != pl.col("primary_name"))
 
     # Build mapping tuples — vectorized, no Python row loop
-    mappings: list[tuple[str, str, str]] = (
-        synonyms_df.select(
-            [
-                (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("subject_id"),
-                pl.col("primary_name"),
-                pl.col("name"),
-            ]
-        )
-        .rows()
-    )
-
-
+    mappings: list[tuple[str, str, str]] = synonyms_df.select(
+        [
+            (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("subject_id"),
+            pl.col("primary_name"),
+            pl.col("name"),
+        ]
+    ).rows()
 
     return mappings
 
@@ -575,8 +530,6 @@ def _parse_chebi_sdf_fast(
 
     if pbar:
         pbar.close()
-
-
 
     return raw_id_mappings, raw_name_mappings
 

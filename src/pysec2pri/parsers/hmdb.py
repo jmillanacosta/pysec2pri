@@ -1,8 +1,8 @@
 """HMDB XML file parser for secondary-to-primary identifier mappings.
 
 This parser extracts ID-to-ID mappings from:
-- hmdb_metabolites.xml  → HMDB0... accessions
-- hmdb_proteins.xml     → HMDBP... accessions
+- hmdb_metabolites.xml  -> HMDB0... accessions
+- hmdb_proteins.xml     -> HMDBP... accessions
 
 Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
@@ -132,33 +132,41 @@ class HMDBParser(BaseParser):
         if xml_content is None:
             return self._create_mapping_set([])
 
+        self._resolve_version(file_path)
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
+        fixed = {
+            "predicate_id": m_meta["predicate_id"],
+            "predicate_label": m_meta.get("predicate_label"),
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
+        rows_data: list[dict[str, Any]] = []
 
         try:
             context = DefusedET.iterparse(xml_content, events=("end",))
             for _event, elem in self._progress(context, desc=desc):
                 tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
                 if tag == element_tag:
-                    mappings.extend(
-                        self._process_record(elem, prefix, m_meta, secondary_normaliser)
-                    )
+                    rows_data.extend(self._process_record(elem, prefix, secondary_normaliser))
                     elem.clear()
         except DefusedET.ParseError:
-            mappings = self._parse_simple_xml(
-                file_path, element_tag, prefix, m_meta, secondary_normaliser
-            )
+            rows_data = self._parse_simple_xml(file_path, element_tag, prefix, secondary_normaliser)
 
+        mappings = self._build_mappings(
+            rows_data, fixed, desc="Building HMDB mappings", total=len(rows_data)
+        )
         return self._create_mapping_set(mappings)
 
     def _process_record(
         self,
         elem: Element,
         prefix: str,
-        m_meta: dict[str, Any],
         secondary_normaliser: Any,
-    ) -> list[Mapping]:
-        """Extract mappings from a single record element."""
+    ) -> list[dict[str, Any]]:
+        """Extract row dicts from a single record element."""
         # Primary accession
         accession_elem = elem.find("hmdb:accession", HMDB_NS)
         if accession_elem is None:
@@ -181,7 +189,7 @@ class HMDBParser(BaseParser):
         if sec_block is None:
             return []
 
-        mappings: list[Mapping] = []
+        rows: list[dict[str, Any]] = []
         for sec_elem in sec_block:
             if not sec_elem.text:
                 continue
@@ -189,40 +197,32 @@ class HMDBParser(BaseParser):
             if secondary_normaliser is not None:
                 raw_sec = secondary_normaliser(raw_sec)
             secondary_id = f"{prefix}:{raw_sec}"
-            mappings.append(
-                Mapping(
-                    subject_id=primary_id,
-                    subject_label=primary_label,
-                    object_id=secondary_id,
-                    predicate_id=m_meta["predicate_id"],
-                    predicate_label=m_meta.get("predicate_label"),
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                )
+            rows.append(
+                {
+                    "subject_id": primary_id,
+                    "subject_label": primary_label,
+                    "object_id": secondary_id,
+                }
             )
-        return mappings
+        return rows
 
     def _parse_simple_xml(
         self,
         file_path: Path,
         element_tag: str,
         prefix: str,
-        m_meta: dict[str, Any],
         secondary_normaliser: Any,
-    ) -> list[Mapping]:
+    ) -> list[dict[str, Any]]:
         """Fallback parser for test files without namespace."""
-        mappings: list[Mapping] = []
+        rows_data: list[dict[str, Any]] = []
         try:
             tree = DefusedET.parse(file_path)
             root = tree.getroot()
             for record in root.findall(f".//{element_tag}"):
-                mappings.extend(self._process_record(record, prefix, m_meta, secondary_normaliser))
+                rows_data.extend(self._process_record(record, prefix, secondary_normaliser))
         except Exception as e:
             logger.warning("Failed to parse HMDB XML: %s", e)
-        return mappings
+        return rows_data
 
     def _read_xml_content(self, file_path: Path) -> Any:
         """Read XML content, handling compressed files."""

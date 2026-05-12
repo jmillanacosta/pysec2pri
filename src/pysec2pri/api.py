@@ -50,7 +50,7 @@ def _download_chebi(
     import tempfile
 
     from pysec2pri.download import check_chebi_release
-    from pysec2pri.parsers.base import ChEBIDownloader
+    from pysec2pri.parsers.chebi import ChEBIDownloader
 
     if version is None:
         release_info = check_chebi_release()
@@ -67,10 +67,10 @@ def parse_chebi(
     show_progress: bool = True,
     subset: str = "3star",
 ) -> Sec2PriMappingSet:
-    """Parse ChEBI data and return combined ID + synonym mappings.
+    """Parse ChEBI data and return ID mappings only.
 
     Downloads the latest release automatically when ``input_path`` is omitted.
-    ``input_path`` can be an SDF file (releases < 245) or a directory of TSV
+    The ``input_path`` can be an SDF file (releases < 245) or a directory of TSV
     flat files (releases >= 245, default).
 
     Args:
@@ -81,7 +81,7 @@ def parse_chebi(
         subset: ``"3star"`` (default) or ``"complete"``.
 
     Returns:
-        Combined Sec2PriMappingSet (ID + synonym mappings).
+        Sec2PriMappingSet with ID mappings only.
     """
     from pysec2pri.parsers import ChEBIParser
 
@@ -89,9 +89,7 @@ def parse_chebi(
         input_path, version = _download_chebi(version, subset)
 
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
-    id_ms = parser.parse(Path(input_path))
-    syn_ms = parser.parse_synonyms(Path(input_path))
-    return combine_mapping_sets(id_ms, syn_ms)
+    return parser.parse(Path(input_path))
 
 
 def parse_chebi_synonyms(
@@ -190,7 +188,7 @@ def parse_hgnc_symbols(
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
         statuses: Entry statuses to include (e.g. ``["Approved"]``).
-            If ``None`` (default), all entries are included.
+        If ``None`` (default), all entries are included.
     """
     from pysec2pri.parsers import HGNCParser
 
