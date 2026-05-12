@@ -1,10 +1,10 @@
-name: Test datasource mapping generation
+name: Test data source mapping generation
 
 on:
   workflow_dispatch:
     inputs:
       datasource:
-        description: 'Datasource to test (or "all")'
+        description: 'Data source to test (or "all")'
         required: true
         default: 'all'
         type: choice
