@@ -13,12 +13,15 @@ Uses SSSOM-compliant MappingSet classes with cardinality computation.
 
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import polars as pl
 from sssom_schema import Mapping
 
 from pysec2pri.parsers.base import (
+    BaseDownloader,
     BaseParser,
     Sec2PriMappingSet,
 )
@@ -33,7 +36,7 @@ NEW_FORMAT_VERSION = 245
 class ChEBIParser(BaseParser):
     """Parser for ChEBI data files.
 
-    Supports both TSV flat files (>= release 245) and legacy SDF files.
+    Supports both TSV flat files (>= release 245) and (legacy) SDF files.
     Extracts secondary-to-primary ChEBI identifier mappings and
     name-to-synonym relationships.
 
@@ -101,6 +104,7 @@ class ChEBIParser(BaseParser):
         """
         sid_path, cpd_path = self._resolve_tsv_paths(input_path, secondary_ids_path, compounds_path)
         if sid_path is not None:
+            self._resolve_version(sid_path)
             raw_mappings = _parse_secondary_ids_tsv(
                 sid_path,
                 compounds_path=cpd_path,
@@ -108,6 +112,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
+            self._resolve_version(Path(input_path))
             raw_mappings, _ = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
@@ -146,6 +151,7 @@ class ChEBIParser(BaseParser):
             input_path, names_path, compounds_path, tsv_key="names.tsv"
         )
         if n_path is not None:
+            self._resolve_version(n_path)
             raw_mappings = _parse_names_tsv(
                 n_path,
                 compounds_path=cpd_path,
@@ -153,6 +159,7 @@ class ChEBIParser(BaseParser):
                 show_progress=self.show_progress,
             )
         elif input_path is not None:
+            self._resolve_version(Path(input_path))
             _, raw_mappings = _parse_chebi_sdf_fast(
                 Path(input_path),
                 show_progress=self.show_progress,
@@ -194,68 +201,37 @@ class ChEBIParser(BaseParser):
         return None, None
 
     def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
-        """Build SSSOM Mapping objects for ID-to-ID mappings.
-
-        Args:
-            raw_id_mappings: List of (primary_id, secondary_id) tuples.
-
-        Returns:
-            List of sssom_schema.Mapping objects.
-        """
+        """Build Mapping objects for secondary->primary ID mappings."""
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
-        for primary_id, secondary_id in self._progress(
-            raw_id_mappings, desc="Creating ID mappings"
-        ):
-            # SSSOM: subject_id = primary (current), object_id = secondary (old)
-            mapping = Mapping(
-                subject_id=primary_id,
-                object_id=secondary_id,
-                predicate_id=m_meta["predicate_id"],
-                predicate_label=m_meta.get("predicate_label"),
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                confidence=m_meta.get("confidence"),
-                license=m_meta.get("license"),
-            )
-            mappings.append(mapping)
-
-        return mappings
+        fixed = {
+            "predicate_id": m_meta["predicate_id"],
+            "predicate_label": m_meta.get("predicate_label"),
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "confidence": m_meta.get("confidence"),
+            "license": m_meta.get("license"),
+        }
+        rows = [{"subject_id": pri, "object_id": sec} for pri, sec in raw_id_mappings]
+        return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
 
     def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
-        """Build SSSOM Mapping objects for label-to-label (synonym) mappings.
-
-        Args:
-            raw_name_mappings: List of (subject_id, primary_name, synonym).
-
-        Returns:
-            List of sssom_schema.Mapping objects.
-        """
+        """Build Mapping objects for label/synonym mappings."""
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
-        for subject_id, primary_name, synonym in self._progress(
-            raw_name_mappings, desc="Creating synonym mappings"
-        ):
-            # For synonyms: subject_label = primary name, object_label = synonym
-            mapping = Mapping(
-                subject_id=subject_id,
-                subject_label=primary_name,
-                object_id=subject_id,  # Same entity
-                object_label=synonym,
-                predicate_id="oboInOwl:hasRelatedSynonym",
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                license=m_meta.get("license"),
-            )
-            mappings.append(mapping)
-
-        return mappings
+        fixed = {
+            "predicate_id": "oboInOwl:hasRelatedSynonym",
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
+        rows = [
+            {"subject_id": sid, "subject_label": pname, "object_id": sid, "object_label": syn}
+            for sid, pname, syn in raw_name_mappings
+        ]
+        return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
@@ -267,11 +243,10 @@ class ChEBIParser(BaseParser):
         return self.create_mapping_set(mappings, mapping_type)
 
 
-# =============================================================================
 # TSV parsing functions (new format >= 245)
-# =============================================================================
 
 
+@cache
 def _get_3star_compound_ids(
     compounds_path: Path,
     show_progress: bool = True,
@@ -285,11 +260,6 @@ def _get_3star_compound_ids(
     Returns:
         Set of compound IDs (as integers) with stars == 3.
     """
-    import polars as pl
-
-    if show_progress:
-        pass
-
     df = pl.read_csv(
         compounds_path,
         separator="\t",
@@ -298,9 +268,6 @@ def _get_3star_compound_ids(
     )
 
     three_star_ids = set(df.filter(pl.col("stars") == 3)["id"].to_list())
-
-    if show_progress:
-        pass
 
     return three_star_ids
 
@@ -324,11 +291,6 @@ def _parse_secondary_ids_tsv(
     Returns:
         List of (primary_curie, secondary_curie) tuples.
     """
-    import polars as pl
-
-    if show_progress:
-        pass
-
     df = pl.read_csv(
         secondary_ids_path,
         separator="\t",
@@ -340,15 +302,13 @@ def _parse_secondary_ids_tsv(
         three_star_ids = _get_3star_compound_ids(compounds_path, show_progress)
         df = df.filter(pl.col("compound_id").is_in(three_star_ids))
 
-    # Build mapping tuples with CHEBI: prefix
-    mappings: list[tuple[str, str]] = []
-    for row in df.iter_rows():
-        primary_id = f"CHEBI:{row[0]}"
-        secondary_id = f"CHEBI:{row[1]}"
-        mappings.append((primary_id, secondary_id))
-
-    if show_progress:
-        pass
+    # Build mapping tuples with CHEBI: prefix — vectorized, no Python row loop
+    mappings: list[tuple[str, str]] = df.select(
+        [
+            (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("primary_id"),
+            (pl.lit("CHEBI:") + pl.col("secondary_id").cast(pl.Utf8)).alias("secondary_id"),
+        ]
+    ).rows()
 
     return mappings
 
@@ -375,11 +335,6 @@ def _parse_names_tsv(
     Returns:
         List of (subject_curie, primary_name, synonym) tuples.
     """
-    import polars as pl
-
-    if show_progress:
-        pass
-
     df = pl.read_csv(
         names_path,
         separator="\t",
@@ -406,24 +361,19 @@ def _parse_names_tsv(
     # Filter to only synonym rows (where name != primary_name)
     synonyms_df = df_with_primary.filter(pl.col("name") != pl.col("primary_name"))
 
-    # Build mapping tuples
-    mappings: list[tuple[str, str, str]] = []
-    for row in synonyms_df.iter_rows():
-        compound_id = row[1]
-        name = row[2]
-        primary_name = row[3]
-        subject_curie = f"CHEBI:{compound_id}"
-        mappings.append((subject_curie, primary_name, name))
-
-    if show_progress:
-        pass
+    # Build mapping tuples — vectorized, no Python row loop
+    mappings: list[tuple[str, str, str]] = synonyms_df.select(
+        [
+            (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("subject_id"),
+            pl.col("primary_name"),
+            pl.col("name"),
+        ]
+    ).rows()
 
     return mappings
 
 
-# =============================================================================
 # SDF parsing functions (legacy format < 245)
-# =============================================================================
 
 
 def _read_sdf_lines(input_path: Path) -> list[str]:
@@ -581,10 +531,125 @@ def _parse_chebi_sdf_fast(
     if pbar:
         pbar.close()
 
-    if show_progress:
-        pass
-
     return raw_id_mappings, raw_name_mappings
 
 
-__all__ = ["ChEBIParser"]
+class ChEBIDownloader(BaseDownloader):
+    """Downloader for ChEBI data files.
+
+    Supports both TSV flat files (>= release 245) and legacy SDF files.
+    """
+
+    datasource_name = "chebi"
+
+    def __init__(
+        self,
+        version: str | None = None,
+        show_progress: bool = True,
+        subset: str = "3star",
+        use_sdf: bool = False,
+    ) -> None:
+        """Initialize the ChEBI downloader.
+
+        Args:
+            version: Version/release identifier.
+            show_progress: Whether to show progress bars.
+            subset: "3star" or "complete" - which compound subset to use.
+            use_sdf: Force SDF format even for releases >= 245.
+        """
+        super().__init__(version=version, show_progress=show_progress)
+        self.subset = subset
+        self.use_sdf = use_sdf
+
+    def get_download_urls(
+        self,
+        version: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        """Get ChEBI download URLs based on version.
+
+        For version >= 245 (and use_sdf=False): returns TSV flat file URLs
+        For version < 245 (or use_sdf=True): returns SDF file URL
+
+        URLs are loaded from chebi.yaml config file.
+
+        Args:
+            version: Specific release version.
+            **kwargs: Optional 'subset' and 'use_sdf' overrides.
+
+        Returns:
+            Dictionary with file URLs keyed by type.
+        """
+        v = version or self.version
+        subset = kwargs.get("subset", self.subset)
+        use_sdf = kwargs.get("use_sdf", self.use_sdf)
+
+        if not self._config:
+            raise ValueError("ChEBI config not loaded")
+
+        download_urls = self._config.download_urls
+
+        # Determine format: use new TSV if >= threshold AND not forcing SDF
+        use_tsv = self.is_new_format(v) and not use_sdf
+
+        if use_tsv:
+            # New TSV format (>= 245)
+            new_urls = download_urls.get("new", {})
+            return {
+                "secondary_ids": new_urls["secondary_ids"].format(version=v),
+                "names": new_urls["names"].format(version=v),
+                "compounds": new_urls["compounds"].format(version=v),
+            }
+        else:
+            # SDF format (< 245 legacy OR >= 245 with --use-sdf)
+            sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
+
+            if not self.is_new_format(v):
+                # Legacy releases (< 245): use legacy URLs
+                legacy_urls = download_urls.get("legacy", {})
+                url = legacy_urls[sdf_key].format(version=v)
+            else:
+                # New releases (>= 245) with --use-sdf: use new SDF URLs
+                new_urls = download_urls.get("new", {})
+                url = new_urls[sdf_key].format(version=v)
+
+            return {"sdf": url}
+
+    def download(
+        self,
+        output_dir: Path,
+        version: str | None = None,
+        decompress: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Path]:
+        """Download ChEBI files.
+
+        Args:
+            output_dir: Directory to save files.
+            version: Specific version to download.
+            decompress: Whether to decompress .gz files.
+            **kwargs: Optional 'subset' and 'use_sdf' overrides.
+
+        Returns:
+            Dictionary mapping file keys to downloaded paths.
+        """
+        v = version or self.version
+        urls = self.get_download_urls(v, **kwargs)
+
+        return self._download_urls(urls, output_dir, decompress)
+
+    def get_format(self, version: str | None = None) -> str:
+        """Get the format that will be used for a given version.
+
+        Args:
+            version: Version to check. If None, uses self.version.
+
+        Returns:
+            "tsv" or "sdf"
+        """
+        v = version or self.version
+        use_tsv = self.is_new_format(v) and not self.use_sdf
+        return "tsv" if use_tsv else "sdf"
+
+
+__all__ = ["ChEBIDownloader", "ChEBIParser"]

@@ -1,12 +1,50 @@
-________________________________________________________________________
-        UniProt Knowledgebase        
-        Secondary Accession Numbers  
-________________________________________________________________________
 
-Secondary AC   Primary AC
-______________________________________________________________
+----------------------------------------------------------------------------
+        UniProt Protein Knowledgebase
+        SIB Swiss Institute of Bioinformatics; Geneva, Switzerland
+        European Bioinformatics Institute (EBI); Hinxton, United Kingdom
+        Protein Information Resource (PIR); Washington DC, USA
+----------------------------------------------------------------------------
 
-A0A001         P12345
-A0A002         P12345
-A0A003         P67890
-B0B001         Q11111
+Description: Secondary accession numbers: index
+Name:        SEC_AC.TXT
+Release:     28-Jan-2026
+
+----------------------------------------------------------------------------
+
+This file lists all secondary accession numbers in UniProtKB (Swiss-Prot and
+TrEMBL), together with their corresponding current primary accession number(s).
+Accession numbers become secondary when entries are merged or split. When two
+entries are merged into one, the accession numbers from both entries are stored
+for the new entry.
+
+If an existing entry is split into two or more entries (a rare occurrence),
+the original accession numbers are retained in all the derived entries and a
+new primary accession number is added to all the entries.
+
+An accession number is dropped only when the data to which it was assigned have
+been completely removed from the database. Accession numbers deleted from
+Swiss-Prot are listed in the document file delac_sp.txt and those deleted
+from TrEMBL are listed in delac_tr.txt.
+
+Secondary AC                  Primary AC
+____________                  __________
+A0A009QSN8                        A0ACD6B9T2
+A0A011PKA5                        C7RW80
+A0A011PPS3                        C7RW54
+A0A011Q4P3                        C7RWC7
+A0A011QYZ9                        C7RW92
+A0A016SR66                        A0A0D6L478
+A0A016UN64                        A0A0D6LAQ8
+A0A016VHK2                        A0A0D6LXT4
+A0A016W185                        A0A0D6L429
+A0A016W2N3                        A0A0D6M9P3
+A0A017SEE6                        P9WES5
+A0A017SEE6                        P9WES6
+A0A021WW06                        P40417
+A0A022PF25                        Q9XC60
+A0A023GPJ5                        P13060
+A0A023GQK0                        P25991
+A0A023GYH7                        E0ZQJ7
+A0A023HHE2                        S4W1C8
+A0A023HHK9                        Q8NFU7

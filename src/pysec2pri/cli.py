@@ -38,7 +38,7 @@ def _download_if_needed(
     from pysec2pri.download import CloudflareBlockedError, download_datasource, get_download_urls
 
     version_str = f" version {version}" if version else ""
-    click.echo(f"No input file provided. Downloading {datasource}{version_str}...")
+    click.echo(f"No input file provided. Downloading {datasource} ({file_key}){version_str}...")
 
     # Show URLs that will be downloaded
     urls = get_download_urls(datasource, version=version)
@@ -144,7 +144,7 @@ def _download_chebi_files(
             - For SDF: "sdf" path
     """
     from pysec2pri.download import check_chebi_release
-    from pysec2pri.parsers.base import ChEBIDownloader
+    from pysec2pri.parsers.chebi import ChEBIDownloader
 
     # If user provided a file, assume it's SDF (legacy behavior)
     if input_file is not None:
@@ -177,12 +177,13 @@ def _download_chebi_files(
     if data_format == "tsv":
         return {
             "format": "tsv",
+            "version": version,
             "secondary_ids": downloaded.get("secondary_ids"),
             "names": downloaded.get("names"),
             "compounds": downloaded.get("compounds"),
         }
     else:
-        return {"format": "sdf", "sdf": downloaded.get("sdf")}
+        return {"format": "sdf", "version": version, "sdf": downloaded.get("sdf")}
 
 
 @click.group()
@@ -330,27 +331,29 @@ def chebi(
     Use --use-sdf to force SDF format even for releases >= 245.
 
     Use --mapping-sets to control which mappings are included:
-    - ids: Only secondary ID → primary ID mappings
-    - synonyms: Only name → synonym mappings
+    - ids: Only secondary ID -> primary ID mappings
+    - synonyms: Only name -> synonym mappings
     - all: Both mapping sets combined (default)
     """
     # Download files and determine format
     files = _download_chebi_files(input_file, data_version, subset, use_sdf)
+    # Use version resolved during download (e.g. latest release number)
+    resolved_version = files.get("version") or data_version
 
     # Parse requested mapping sets using API functions
     id_mappings, synonym_mappings = _parse_chebi_mapping_sets(
-        files, data_version, subset, mapping_sets
+        files, resolved_version, subset, mapping_sets
     )
 
     # Combine mapping sets if needed
     result = _combine_chebi_results(id_mappings, synonym_mappings, mapping_sets)
 
     # Get version for output naming
-    version = getattr(result, "mapping_set_version", None) or data_version
+    version = getattr(result, "mapping_set_version", None) or resolved_version
     base_name = _get_chebi_base_name(subset, version)
 
     # Write output in requested format
-    _write_chebi_output(result, output, output_format, base_name, version)
+    _write_chebi_output(result, output, output_format, base_name, resolved_version)
 
 
 def _parse_chebi_mapping_sets(
@@ -472,6 +475,11 @@ def _write_chebi_output(
 )
 @click.option("-o", "--output", type=PathType, help="Output directory or file path")
 @click.option(
+    "--version",
+    "data_version",
+    help="Data version string (e.g. 2024-01-01)",
+)
+@click.option(
     "--format",
     "output_format",
     default="sssom",
@@ -484,6 +492,7 @@ def hmdb(  # noqa C901
     metabolites_only: bool,
     proteins_only: bool,
     output: Path | None,
+    data_version: str | None,
     output_format: str,
 ) -> None:
     """Parse HMDB XML files and generate secondary-to-primary mappings.
@@ -543,7 +552,7 @@ def hmdb(  # noqa C901
     if want_metabolites:
         met_file = _download_if_needed("hmdb", metabolites_file, "metabolites")
         click.echo("Parsing HMDB metabolites...")
-        result_met = parse_hmdb(met_file)
+        result_met = parse_hmdb(met_file, version=data_version)
         _write_result(result_met, "metabolites")
 
     # ------------------------------------------------------------------ #
@@ -552,7 +561,7 @@ def hmdb(  # noqa C901
     if want_proteins:
         prot_file = _download_if_needed("hmdb", proteins_file, "proteins")
         click.echo("Parsing HMDB proteins...")
-        result_prot = parse_hmdb_proteins(prot_file)
+        result_prot = parse_hmdb_proteins(prot_file, version=data_version)
         _write_result(result_prot, "proteins")
 
 
@@ -663,6 +672,11 @@ def hgnc(  # noqa C901
 @click.option("-o", "--output", type=PathType, help="Output file path")
 @click.option("--tax-id", default="9606", help="Taxonomy ID (default: 9606)")
 @click.option(
+    "--version",
+    "data_version",
+    help="Data version string (e.g. 20240101)",
+)
+@click.option(
     "--format",
     "output_format",
     default="sssom",
@@ -678,6 +692,7 @@ def ncbi(
     input_file: Path | None,
     output: Path | None,
     tax_id: str,
+    data_version: str | None,
     output_format: str,
     symbols_file: Path | None,
 ) -> None:
@@ -693,10 +708,10 @@ def ncbi(
     if output_format == "symbol2prev":
         if symbols_file is None:
             symbols_file = _download_if_needed("ncbi", None, "gene_info")
-        result = parse_ncbi_symbols(symbols_file, tax_id=tax_id)
+        result = parse_ncbi_symbols(symbols_file, tax_id=tax_id, version=data_version)
     else:
         input_file = _download_if_needed("ncbi", input_file, "gene_history")
-        result = parse_ncbi(input_file, tax_id=tax_id)
+        result = parse_ncbi(input_file, tax_id=tax_id, version=data_version)
 
     version = getattr(result, "mapping_set_version", None)
     v_suffix = f"_{version}" if version else ""
@@ -753,9 +768,29 @@ def uniprot(
     from pysec2pri.api import parse_uniprot
     from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
 
-    input_file = _download_if_needed("uniprot", input_file, "sec_ac", version=data_version)
+    if input_file is None or delac_file is None:
+        from pysec2pri.download import (
+            CloudflareBlockedError,
+            download_datasource,
+            get_download_urls,
+        )
 
-    result = parse_uniprot(input_file, delac_file=delac_file)
+        version_str = f" version {data_version}" if data_version else ""
+        click.echo(f"Downloading uniprot{version_str}...")
+        urls = get_download_urls("uniprot", version=data_version)
+        for key, url in urls.items():
+            click.echo(f"  {key}: {url}")
+        tmpdir = Path(tempfile.mkdtemp(prefix="pysec2pri_uniprot_"))
+        try:
+            downloaded = download_datasource("uniprot", tmpdir, version=data_version)
+        except CloudflareBlockedError as e:
+            raise click.ClickException(str(e)) from e
+        if input_file is None:
+            input_file = downloaded.get("sec_ac") or next(iter(downloaded.values()))
+        if delac_file is None:
+            delac_file = downloaded.get("delac_sp")
+
+    result = parse_uniprot(input_file, delac_file=delac_file, version=data_version)
     version = getattr(result, "mapping_set_version", None) or data_version
     v_suffix = f"_{version}" if version else ""
 
@@ -883,10 +918,7 @@ def wikidata(
 
 
 def _parse_datasource(ds: str) -> MappingSet:
-    """Download and parse a single datasource.
-
-    Raises on any error — callers decide how to handle failures.
-    """
+    """Download and parse a single datasource."""
     from pysec2pri.api import (
         combine_mapping_sets,
         parse_chebi,
@@ -984,22 +1016,22 @@ def export_all(
         try:
             result = _parse_datasource(ds)
         except CloudflareBlockedError as e:
-            click.echo(f"  WARNING: Skipping {ds.upper()} — {e}", err=True)
+            click.echo(f"  WARNING: Skipping {ds.upper()} - {e}", err=True)
             continue
         except click.ClickException as e:
             if isinstance(e.__cause__, CloudflareBlockedError):
                 click.echo(
-                    f"  WARNING: Skipping {ds.upper()} — {e.__cause__}",
+                    f"  WARNING: Skipping {ds.upper()} - {e.__cause__}",
                     err=True,
                 )
                 continue
             click.echo(
-                f"  WARNING: Skipping {ds.upper()} — {e.format_message()}",
+                f"  WARNING: Skipping {ds.upper()} - {e.format_message()}",
                 err=True,
             )
             continue
         except Exception as e:
-            click.echo(f"  WARNING: Skipping {ds.upper()} — {e}", err=True)
+            click.echo(f"  WARNING: Skipping {ds.upper()} - {e}", err=True)
             continue
 
         version = getattr(result, "mapping_set_version", None)

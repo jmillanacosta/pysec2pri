@@ -62,6 +62,7 @@ class NCBIParser(BaseParser):
         if input_path is None:
             raise ValueError("input_path must not be None")
         input_path = Path(input_path)
+        self._resolve_version(input_path)
 
         # Parse gene_history for ID mappings
         mappings = self._parse_gene_history(input_path, tax_id)
@@ -87,6 +88,7 @@ class NCBIParser(BaseParser):
         if gene_info_path is None:
             raise ValueError("gene_info_path must not be None")
         gene_info_path = Path(gene_info_path)
+        self._resolve_version(gene_info_path)
 
         # Parse gene_info for symbol mappings
         mappings = self._parse_gene_info(gene_info_path, tax_id)
@@ -144,10 +146,16 @@ class NCBIParser(BaseParser):
             return []
 
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
+        fixed_base = {
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
 
-        rows = list(df.iter_rows(named=True))
-        for row in self._progress(rows, desc="Processing gene_history"):
+        rows_data: list[dict[str, str | None]] = []
+        for row in df.iter_rows(named=True):
             subject_id = str(row.get("GeneID") or "")
             object_id = str(row.get("Discontinued_GeneID") or "")
             sec_symbol = row.get("Discontinued_Symbol")
@@ -156,42 +164,34 @@ class NCBIParser(BaseParser):
             if not object_id:
                 continue
 
-            # Normalize withdrawn IDs
             subject_id = self.normalize_withdrawn_id(subject_id)
 
-            # Determine if this is a withdrawn entry with no replacement
             if self.is_withdrawn_primary(subject_id):
-                mapping = Mapping(
-                    subject_id=WITHDRAWN_ENTRY,
-                    object_id=f"NCBIGene:{object_id}",
-                    subject_label=WITHDRAWN_ENTRY_LABEL,
-                    object_label=str(sec_symbol) if sec_symbol else "",
-                    predicate_id="oboInOwl:consider",
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                    comment=f"Withdrawn on {disc_date}." if disc_date else None,
+                rows_data.append(
+                    {
+                        "subject_id": WITHDRAWN_ENTRY,
+                        "object_id": f"NCBIGene:{object_id}",
+                        "subject_label": WITHDRAWN_ENTRY_LABEL,
+                        "object_label": str(sec_symbol) if sec_symbol else "",
+                        "predicate_id": "oboInOwl:consider",
+                        "comment": f"Withdrawn on {disc_date}." if disc_date else None,
+                    }
                 )
             else:
-                # Normal replacement mapping
-                mapping = Mapping(
-                    subject_id=f"NCBIGene:{subject_id}",
-                    object_id=f"NCBIGene:{object_id}",
-                    object_label=str(sec_symbol) if sec_symbol else "",
-                    predicate_id=m_meta["predicate_id"],
-                    predicate_label=m_meta.get("predicate_label"),
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                    comment=f"Discontinued on {disc_date}." if disc_date else None,
+                rows_data.append(
+                    {
+                        "subject_id": f"NCBIGene:{subject_id}",
+                        "object_id": f"NCBIGene:{object_id}",
+                        "object_label": str(sec_symbol) if sec_symbol else "",
+                        "predicate_id": m_meta["predicate_id"],
+                        "predicate_label": m_meta.get("predicate_label"),
+                        "comment": f"Discontinued on {disc_date}." if disc_date else None,
+                    }
                 )
-            mappings.append(mapping)
 
-        return mappings
+        return self._build_mappings(
+            rows_data, fixed_base, desc="Processing gene_history", total=len(rows_data)
+        )
 
     def _parse_gene_info(
         self,
@@ -222,10 +222,17 @@ class NCBIParser(BaseParser):
             return []
 
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
+        fixed = {
+            "predicate_id": "oboInOwl:hasRelatedSynonym",
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
 
-        rows = list(df.iter_rows(named=True))
-        for row in self._progress(rows, desc="Processing gene_info"):
+        rows_data: list[dict[str, str | None]] = []
+        for row in df.iter_rows(named=True):
             gene_id = str(row.get("GeneID") or "")
             pri_symbol = row.get("Symbol")
             synonyms = row.get("Synonyms")
@@ -236,28 +243,23 @@ class NCBIParser(BaseParser):
             pri_symbol_str = str(pri_symbol)
             curie_id = f"NCBIGene:{gene_id}"
 
-            # Process synonyms
             if synonyms:
-                synonyms_str = str(synonyms)
-                for syn in synonyms_str.split("|"):
+                for syn in str(synonyms).split("|"):
                     syn = syn.strip()
                     if syn:
-                        mapping = Mapping(
-                            subject_id=curie_id,
-                            subject_label=pri_symbol_str,
-                            object_id=curie_id,  # Same entity
-                            object_label=syn,
-                            predicate_id="oboInOwl:hasRelatedSynonym",
-                            mapping_justification=m_meta["mapping_justification"],
-                            subject_source=m_meta.get("subject_source"),
-                            object_source=m_meta.get("object_source"),
-                            mapping_tool=m_meta.get("mapping_tool"),
-                            license=m_meta.get("license"),
-                            comment="Gene symbol synonym.",
+                        rows_data.append(
+                            {
+                                "subject_id": curie_id,
+                                "subject_label": pri_symbol_str,
+                                "object_id": curie_id,
+                                "object_label": syn,
+                                "comment": "Gene symbol synonym.",
+                            }
                         )
-                        mappings.append(mapping)
 
-        return mappings
+        return self._build_mappings(
+            rows_data, fixed, desc="Processing gene_info", total=len(rows_data)
+        )
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"

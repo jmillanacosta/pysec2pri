@@ -9,7 +9,6 @@ Uses SSSOM-compliant IdMappingSet with cardinality computation.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import polars as pl
@@ -58,21 +57,22 @@ class UniProtParser(BaseParser):
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
         """
+        # Resolve version
+        self._resolve_version(
+            Path(input_path)
+            if input_path is not None
+            else (Path(delac_path) if delac_path is not None else None)
+        )
+
         mappings: list[Mapping] = []
 
-        # Parse secondary accessions file
         if input_path is not None:
-            sec_mappings = self._parse_sec_ac(Path(input_path))
-            mappings.extend(sec_mappings)
+            mappings.extend(self._parse_sec_ac(Path(input_path)))
 
-        # Parse deleted accessions if provided
         if delac_path is not None:
-            del_mappings = self._parse_delac(Path(delac_path))
-            mappings.extend(del_mappings)
+            mappings.extend(self._parse_delac(Path(delac_path)))
 
-        # Create IdMappingSet and compute cardinalities
-        mapping_set = self._create_mapping_set(mappings)
-        return mapping_set
+        return self._create_mapping_set(mappings)
 
     def _parse_sec_ac(self, file_path: Path) -> list[Mapping]:
         """Parse sec_ac.txt for secondary -> primary accession mappings.
@@ -83,39 +83,65 @@ class UniProtParser(BaseParser):
         Returns:
             List of SSSOM Mapping objects.
         """
-        # Parse the file into a DataFrame
-        lines = list(self._iter_sec_ac_data_lines(file_path))
-        df = self._sec_ac_lines_to_df(lines)
+        # Count lines until (and including) the separator row.
+        skip_rows = 0
+        with file_path.open("r", encoding="utf-8") as f:
+            for raw_line in f:
+                skip_rows += 1
+                if raw_line.startswith("_"):
+                    break  # next line is first data row
+
+        df = (
+            pl.scan_csv(
+                file_path,
+                has_header=False,
+                skip_rows=skip_rows,
+                separator="\n",
+                new_columns=["line"],
+                infer_schema_length=0,
+                quote_char=None,
+            )
+            .filter(
+                pl.col("line").str.len_chars() > 0,
+                ~pl.col("line").str.starts_with("-"),
+                ~pl.col("line").str.starts_with("_"),
+            )
+            .with_columns(
+                pl.col("line")
+                .str.split_exact(" ", 1)
+                .struct.field("field_0")
+                .str.strip_chars()
+                .alias("subject_id"),
+                pl.col("line").str.split(" ").list.last().str.strip_chars().alias("object_id"),
+            )
+            .filter(
+                pl.col("subject_id").str.len_chars() > 0,
+                pl.col("object_id").str.len_chars() > 0,
+                pl.col("subject_id") != pl.col("object_id"),
+            )
+            .with_columns(
+                (pl.lit("UniProtKB:") + pl.col("subject_id")).alias("subject_id"),
+                (pl.lit("UniProtKB:") + pl.col("object_id")).alias("object_id"),
+            )
+            .select(["subject_id", "object_id"])
+            .collect()
+        )
 
         if df.is_empty():
             return []
 
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
-        rows = list(df.iter_rows(named=True))
-        for row in self._progress(rows, desc="Processing sec_ac"):
-            secondary_id = row.get("object_id")
-            primary_id = row.get("subject_id")
-
-            if not secondary_id or not primary_id:
-                continue
-
-            # SSSOM: subject = primary (current), object = secondary (old)
-            mapping = Mapping(
-                subject_id=f"UniProtKB:{primary_id}",
-                object_id=f"UniProtKB:{secondary_id}",
-                predicate_id=m_meta["predicate_id"],
-                predicate_label=m_meta.get("predicate_label"),
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                license=m_meta.get("license"),
-            )
-            mappings.append(mapping)
-
-        return mappings
+        fixed = {
+            "predicate_id": m_meta["predicate_id"],
+            "predicate_label": m_meta.get("predicate_label"),
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
+        rows = df.select(["subject_id", "object_id"]).to_dicts()
+        return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
     def _parse_delac(self, file_path: Path) -> list[Mapping]:
         """Parse delac_sp.txt for deleted accession mappings.
@@ -128,79 +154,51 @@ class UniProtParser(BaseParser):
         Returns:
             List of SSSOM Mapping objects.
         """
-        m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
-
+        skip_rows = 0
         with file_path.open("r", encoding="utf-8") as f:
-            lines = [line.strip() for line in f if line.strip()]
-
-        # Skip header lines (usually starts with "_" or empty)
-        data_lines = [
-            line for line in lines if line and not line.startswith("_") and not line.startswith("-")
-        ]
-
-        for line in self._progress(data_lines, desc="Processing delac"):
-            # Each line is a deleted accession
-            deleted_id = line.strip()
-            if not deleted_id or not re.match(r"^[A-Z0-9]+$", deleted_id):
-                continue
-
-            # Deleted = withdrawn with no replacement
-            mapping = Mapping(
-                subject_id=WITHDRAWN_ENTRY,
-                object_id=f"UniProtKB:{deleted_id}",
-                subject_label=WITHDRAWN_ENTRY_LABEL,
-                predicate_id="oboInOwl:consider",
-                mapping_justification=m_meta["mapping_justification"],
-                subject_source=m_meta.get("subject_source"),
-                object_source=m_meta.get("object_source"),
-                mapping_tool=m_meta.get("mapping_tool"),
-                license=m_meta.get("license"),
-                comment="Deleted accession with no replacement.",
-            )
-            mappings.append(mapping)
-
-        return mappings
-
-    def _iter_sec_ac_data_lines(self, file_path: Path) -> list[str]:
-        """Yield data lines from sec_ac.txt, skipping headers."""
-        pattern = re.compile(r"^[A-Z0-9]+\s+[A-Z0-9]+$")
-        lines = []
-
-        with file_path.open("r", encoding="utf-8") as f:
-            in_data = False
             for raw_line in f:
-                line = raw_line.strip()
-                if not in_data:
-                    if pattern.match(line):
-                        in_data = True
-                    else:
-                        continue
+                skip_rows += 1
+                if raw_line.startswith("_"):
+                    break  # next line is first deleted accession
 
-                if not line or line.startswith("_"):
-                    continue
-
-                lines.append(line)
-
-        return lines
-
-    def _sec_ac_lines_to_df(self, lines: list[str]) -> pl.DataFrame:
-        """Convert parsed sec_ac lines into a Polars DataFrame."""
-        rows = []
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2:
-                rows.append(
-                    {
-                        "object_id": parts[0],
-                        "subject_id": parts[1],
-                    }
+        df = (
+            pl.scan_csv(
+                file_path,
+                has_header=False,
+                skip_rows=skip_rows,
+                separator="\t",
+                new_columns=["accession"],
+                infer_schema_length=0,
+                quote_char=None,
+            )
+            .with_columns(pl.col("accession").str.strip_chars())
+            .filter(
+                pl.col("accession").str.contains(
+                    r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"
                 )
+            )
+            .with_columns((pl.lit("UniProtKB:") + pl.col("accession")).alias("object_id"))
+            .select("object_id")
+            .collect()
+        )
 
-        if not rows:
-            return pl.DataFrame(schema={"object_id": pl.Utf8, "subject_id": pl.Utf8})
+        if df.is_empty():
+            return []
 
-        return pl.DataFrame(rows)
+        m_meta = self.get_mapping_metadata()
+        fixed = {
+            "subject_id": WITHDRAWN_ENTRY,
+            "subject_label": WITHDRAWN_ENTRY_LABEL,
+            "predicate_id": "oboInOwl:consider",
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+            "comment": "Deleted accession with no replacement.",
+        }
+        rows = df.select("object_id").to_dicts()
+        return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"

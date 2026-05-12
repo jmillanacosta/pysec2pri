@@ -61,7 +61,11 @@ def query_wikidata(
             params={"query": query},
             headers=headers,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning("Skipping query - %s", e)
+            return pl.DataFrame()
 
     # Parse TSV response using Polars
     tsv_content = response.text
@@ -79,7 +83,6 @@ def query_wikidata(
             infer_schema_length=0,
             quote_char=None,
         )
-        .with_columns(pl.all().cast(pl.Utf8))
         .with_columns(
             pl.col(pl.Utf8)
             .str.replace(uri_pat, "$1")
@@ -167,8 +170,8 @@ class WikidataParser(BaseParser):
             return self._empty_mappingset()
 
         df = self._normalize_ids(df)
-        mappings = self._build_mappings(df)
-        version = self.version or date.today().isoformat()
+        mappings = self._build_redirect_mappings(df)
+        version = self._resolve_version()
 
         return self._create_mapping_set(mappings, version)
 
@@ -235,7 +238,7 @@ class WikidataParser(BaseParser):
                 self.entity_type = entity_type
 
                 df = self._normalize_ids(df)
-                mappings = self._build_mappings(df)
+                mappings = self._build_redirect_mappings(df)
                 all_mappings.extend(mappings)
 
                 self.entity_type = original_entity
@@ -244,7 +247,7 @@ class WikidataParser(BaseParser):
                 logger.warning("Failed to query %s: %s", entity_type, e)
                 continue
 
-        version = self.version or date.today().isoformat()
+        version = self._resolve_version()
         return self._create_mapping_set(all_mappings, version)
 
     def parse_from_file(self, input_path: Path | str) -> Sec2PriMappingSet:
@@ -260,14 +263,14 @@ class WikidataParser(BaseParser):
 
         df = pl.read_csv(input_path, separator="\t", has_header=True)
         df = self._normalize_ids(df)
-        mappings = self._build_mappings(df)
-        version = self.version or date.today().isoformat()
+        mappings = self._build_redirect_mappings(df)
+        version = self._resolve_version()
 
         return self._create_mapping_set(mappings, version)
 
     def _empty_mappingset(self) -> Sec2PriMappingSet:
         """Create an empty mapping set."""
-        version = self.version or date.today().isoformat()
+        version = self._resolve_version()
         ms_meta = self.get_mappingset_metadata()
 
         curie_map = ms_meta.get("curie_map", {})
@@ -306,23 +309,33 @@ class WikidataParser(BaseParser):
             return df
 
         result = df.with_columns(
-            pl.col(subject_col)
-            .map_elements(self._normalize_qid, return_dtype=pl.Utf8)
-            .alias("subject_id_norm"),
+            self._normalize_qid_expr(subject_col).alias("subject_id_norm"),
         )
 
         if object_col in df.columns:
             result = result.with_columns(
-                pl.col(object_col)
-                .map_elements(self._normalize_qid, return_dtype=pl.Utf8)
-                .alias("object_id_norm"),
+                self._normalize_qid_expr(object_col).alias("object_id_norm"),
             )
         else:
             result = result.with_columns(
-                pl.lit(None).alias("object_id_norm"),
+                pl.lit(None, dtype=pl.Utf8).alias("object_id_norm"),
             )
 
         return result
+
+    @staticmethod
+    def _normalize_qid_expr(col_name: str) -> pl.Expr:
+        """Normalize QID column."""
+        c = pl.col(col_name).str.strip_chars()
+        return (
+            pl.when(pl.col(col_name).is_null() | (c == ""))
+            .then(pl.lit(None, dtype=pl.Utf8))
+            .when(c.str.starts_with("WD:"))
+            .then(c)
+            .when(c.str.contains(r"wikidata\.org/entity/"))
+            .then(pl.lit("WD:") + c.str.split("/").list.last())
+            .otherwise(pl.lit("WD:") + c)
+        )
 
     @staticmethod
     def _normalize_qid(qid: str | None) -> str | None:
@@ -332,31 +345,29 @@ class WikidataParser(BaseParser):
         qid = qid.strip()
         if qid.startswith("WD:"):
             return qid
-        if qid.startswith("Q"):
-            return f"WD:{qid}"
         if "wikidata.org/entity/" in qid:
             qid = qid.split("/")[-1]
-            return f"WD:{qid}"
         return f"WD:{qid}"
 
-    def _build_mappings(self, df: pl.DataFrame) -> list[Mapping]:
+    def _build_redirect_mappings(self, df: pl.DataFrame) -> list[Mapping]:
         col_map = get_column_mapping(self.entity_type)
         primary_label_col = col_map.get("primary_label")
         secondary_label_col = col_map.get("secondary_label")
         m_meta = self.get_mapping_metadata()
 
-        # Precompute constants
-        predicate_id: str = m_meta.get("predicate_id", "oboInOwl:consider")
-        predicate_label = m_meta.get("predicate_label")
-        mapping_justification: str = m_meta.get(
-            "mapping_justification",
-            "semapv:BackgroundKnowledgeBasedMatching",
-        )
-        subject_source: str = self.default_source_url
-        object_source: str = self.default_source_url
-        mapping_tool = m_meta.get("mapping_tool")
-        license_ = m_meta.get("license")
-        comment: str = self._build_comment(f"Wikidata {self.entity_type} redirect.")
+        fixed = {
+            "predicate_id": m_meta.get("predicate_id", "oboInOwl:consider"),
+            "predicate_label": m_meta.get("predicate_label"),
+            "mapping_justification": m_meta.get(
+                "mapping_justification",
+                "semapv:BackgroundKnowledgeBasedMatching",
+            ),
+            "subject_source": self.default_source_url,
+            "object_source": self.default_source_url,
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+            "comment": self._build_comment(f"Wikidata {self.entity_type} redirect."),
+        }
 
         # Build the minimal Polars projection
         cols: list[str] = ["subject_id_norm", "object_id_norm"]
@@ -376,47 +387,28 @@ class WikidataParser(BaseParser):
             .collect()
         )
 
-        # Column index mapping for row extraction
         col_idx: dict[str, int] = {c: i for i, c in enumerate(redirects_df.columns)}
         subj_i = col_idx["subject_id_norm"]
         obj_i = col_idx["object_id_norm"]
         subj_label_i = col_idx.get(primary_label_col) if primary_label_col else None
         obj_label_i = col_idx.get(secondary_label_col) if secondary_label_col else None
 
-        total = redirects_df.height
-        mappings: list[Mapping] = []
+        rows_data = [
+            {
+                "subject_id": row[subj_i],
+                "object_id": row[obj_i],
+                "subject_label": row[subj_label_i] if subj_label_i is not None else None,
+                "object_label": row[obj_label_i] if obj_label_i is not None else None,
+            }
+            for row in redirects_df.iter_rows()
+        ]
 
-        # iter_rows() (tuple) is faster than iter_rows(named=True) (dict)
-        for row in self._progress(
-            redirects_df.iter_rows(),
+        return self._build_mappings(
+            rows_data,
+            fixed,
             desc=f"Building {self.entity_type} mappings",
-            total=total,
-        ):
-            subject_id = row[subj_i]
-            object_id = row[obj_i]
-
-            # Labels are optional
-            subject_label = row[subj_label_i] if subj_label_i is not None else None
-            object_label = row[obj_label_i] if obj_label_i is not None else None
-
-            mappings.append(
-                Mapping(
-                    subject_id=subject_id,
-                    object_id=object_id,
-                    subject_label=subject_label,
-                    object_label=object_label,
-                    predicate_id=predicate_id,
-                    predicate_label=predicate_label,
-                    mapping_justification=mapping_justification,
-                    subject_source=subject_source,
-                    object_source=object_source,
-                    mapping_tool=mapping_tool,
-                    license=license_,
-                    comment=comment,
-                )
-            )
-
-        return mappings
+            total=len(rows_data),
+        )
 
     def _create_mapping_set(
         self,

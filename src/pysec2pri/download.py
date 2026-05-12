@@ -543,10 +543,8 @@ def download_datasource(
         datasource: Name of the datasource.
         output_dir: Directory to save files.
         decompress: Whether to decompress .gz files.
-        version: Specific version to download. Format depends on datasource:
-            - HGNC: date string "YYYY-MM-DD" (e.g., "2026-01-06")
-            - ChEBI: release number (e.g., "232")
-        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
+        version: Specific version to download. Format depends on datasource.
+        subset: For ChEBI: "3star" or "complete" (for releases using SDF only).
 
     Returns:
         Dictionary mapping file keys to downloaded paths.

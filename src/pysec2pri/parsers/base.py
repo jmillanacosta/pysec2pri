@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
-from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -17,16 +17,12 @@ from tqdm import tqdm
 from pysec2pri.logging import logger
 from pysec2pri.version import VERSION
 
-# =============================================================================
 # Values for withdrawn entries
-# =============================================================================
 
 WITHDRAWN_ENTRY = "sssom:NoTermFound"
 WITHDRAWN_ENTRY_LABEL = "Withdrawn Entry"
 
-# =============================================================================
 # Config directory path
-# =============================================================================
 
 CONFIG_DIR = Path(__file__).parent.parent.parent.parent / "config"
 
@@ -131,9 +127,7 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
     )
 
 
-# =============================================================================
 # Base Downloader Class
-# =============================================================================
 
 
 class BaseDownloader(ABC):
@@ -304,191 +298,53 @@ class BaseDownloader(ABC):
         return downloaded
 
 
-class ChEBIDownloader(BaseDownloader):
-    """Downloader for ChEBI data files.
-
-    Supports both TSV flat files (>= release 245) and legacy SDF files.
-    """
-
-    datasource_name = "chebi"
-
-    def __init__(
-        self,
-        version: str | None = None,
-        show_progress: bool = True,
-        subset: str = "3star",
-        use_sdf: bool = False,
-    ) -> None:
-        """Initialize the ChEBI downloader.
-
-        Args:
-            version: Version/release identifier.
-            show_progress: Whether to show progress bars.
-            subset: "3star" or "complete" - which compound subset to use.
-            use_sdf: Force SDF format even for releases >= 245.
-        """
-        super().__init__(version=version, show_progress=show_progress)
-        self.subset = subset
-        self.use_sdf = use_sdf
-
-    def get_download_urls(
-        self,
-        version: str | None = None,
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        """Get ChEBI download URLs based on version.
-
-        For version >= 245 (and use_sdf=False): returns TSV flat file URLs
-        For version < 245 (or use_sdf=True): returns SDF file URL
-
-        URLs are loaded from chebi.yaml config file.
-
-        Args:
-            version: Specific release version.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary with file URLs keyed by type.
-        """
-        v = version or self.version
-        subset = kwargs.get("subset", self.subset)
-        use_sdf = kwargs.get("use_sdf", self.use_sdf)
-
-        if not self._config:
-            raise ValueError("ChEBI config not loaded")
-
-        download_urls = self._config.download_urls
-
-        # Determine format: use new TSV if >= threshold AND not forcing SDF
-        use_tsv = self.is_new_format(v) and not use_sdf
-
-        if use_tsv:
-            # New TSV format (>= 245)
-            new_urls = download_urls.get("new", {})
-            return {
-                "secondary_ids": new_urls["secondary_ids"].format(version=v),
-                "names": new_urls["names"].format(version=v),
-                "compounds": new_urls["compounds"].format(version=v),
-            }
-        else:
-            # SDF format (< 245 legacy OR >= 245 with --use-sdf)
-            sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-
-            if not self.is_new_format(v):
-                # Legacy releases (< 245): use legacy URLs
-                legacy_urls = download_urls.get("legacy", {})
-                url = legacy_urls[sdf_key].format(version=v)
-            else:
-                # New releases (>= 245) with --use-sdf: use new SDF URLs
-                new_urls = download_urls.get("new", {})
-                url = new_urls[sdf_key].format(version=v)
-
-            return {"sdf": url}
-
-    def download(
-        self,
-        output_dir: Path,
-        version: str | None = None,
-        decompress: bool = True,
-        **kwargs: Any,
-    ) -> dict[str, Path]:
-        """Download ChEBI files.
-
-        Args:
-            output_dir: Directory to save files.
-            version: Specific version to download.
-            decompress: Whether to decompress .gz files.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary mapping file keys to downloaded paths.
-        """
-        v = version or self.version
-        urls = self.get_download_urls(v, **kwargs)
-
-        return self._download_urls(urls, output_dir, decompress)
-
-    def get_format(self, version: str | None = None) -> str:
-        """Get the format that will be used for a given version.
-
-        Args:
-            version: Version to check. If None, uses self.version.
-
-        Returns:
-            "tsv" or "sdf"
-        """
-        v = version or self.version
-        use_tsv = self.is_new_format(v) and not self.use_sdf
-        return "tsv" if use_tsv else "sdf"
-
-
-def _determine_cardinality(p_count: int, s_count: int) -> str:
-    """Determine SSSOM cardinality value from counts.
-
-    Args:
-        p_count: Number of mappings with the same primary.
-        s_count: Number of mappings with the same secondary.
-
-    Returns:
-        SSSOM cardinality string.
-    """
-    if not p_count or not s_count:
-        return "1:0"
-    if s_count == 1 and p_count == 1:
-        return "1:1"
-    if s_count > 1 and p_count == 1:
-        return "n:1"
-    if s_count == 1 and p_count > 1:
-        return "1:n"
-    return "n:n"
-
-
-def _get_field_accessors(
-    on: str,
-) -> tuple[Callable[[Mapping], str], Callable[[Mapping], str]]:
-    """Get accessor functions for primary and secondary fields.
-
-    Args:
-        on: Either 'id' or 'label'.
-
-    Returns:
-        Tuple of (get_primary, get_secondary) functions.
-    """
-    if on == "label":
-        return (
-            lambda m: str(getattr(m, "subject_label", None)),
-            lambda m: str(getattr(m, "object_label", None)),
-        )
-    return (
-        lambda m: str(getattr(m, "subject_id", None)),
-        lambda m: str(getattr(m, "object_id", None)),
-    )
-
-
 class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
     """A MappingSet for Sec2Pri, with helpers for cardinality."""
 
     def _compute_cardinalities(self, on: str = "id") -> None:
-        """Compute mapping cardinalities and update each Mapping.
+        """Compute and set mapping_cardinality on all mappings.
 
-        Updates each Mapping's mapping_cardinality field using SSSOM-compliant
-        values. 'on' can be 'id' or 'label'.
+        'on' can be 'id' (uses subject_id/object_id) or 'label'.
         """
         if not self.mappings:  # type: ignore[has-type]
             return
 
         mappings = self._normalize_mappings()
-        get_primary, get_secondary = _get_field_accessors(on)
 
-        primary_counts = Counter(get_primary(m) for m in mappings)
-        secondary_counts = Counter(get_secondary(m) for m in mappings)
+        if on == "label":
+            sec_field, pri_field = "subject_label", "object_label"
+        else:
+            sec_field, pri_field = "subject_id", "object_id"
 
-        for m in mappings:
-            p_count = primary_counts.get(get_primary(m), 0)
-            s_count = secondary_counts.get(get_secondary(m), 0)
-            cardinality = _determine_cardinality(p_count, s_count)
-            # Use constructor to get proper enum type
-            m.mapping_cardinality = MappingCardinalityEnum(cardinality)
+        import polars as pl
+
+        sec_vals = [str(getattr(m, sec_field, None) or "") for m in mappings]
+        pri_vals = [str(getattr(m, pri_field, None) or "") for m in mappings]
+
+        cardinalities: list[str] = (
+            pl.DataFrame({"sec": sec_vals, "pri": pri_vals})
+            .with_columns(
+                pl.col("sec").count().over("sec").alias("s_count"),
+                pl.col("pri").count().over("pri").alias("p_count"),
+            )
+            .select(
+                pl.when(pl.col("s_count") == 1, pl.col("p_count") == 1)
+                .then(pl.lit("1:1"))
+                .when(pl.col("s_count") > 1, pl.col("p_count") == 1)
+                .then(pl.lit("n:1"))
+                .when(pl.col("s_count") == 1, pl.col("p_count") > 1)
+                .then(pl.lit("1:n"))
+                .when(pl.col("s_count") > 1, pl.col("p_count") > 1)
+                .then(pl.lit("n:n"))
+                .otherwise(pl.lit("1:0"))
+                .alias("cardinality")
+            )
+            .get_column("cardinality")
+            .to_list()
+        )
+
+        for m, card in zip(mappings, cardinalities, strict=False):
+            m.mapping_cardinality = MappingCardinalityEnum(card)
 
         self.mappings = mappings
 
@@ -615,6 +471,74 @@ class BaseParser(ABC):
                     if hasattr(mapping, key) and value is not None:
                         setattr(mapping, key, value)
 
+    def _extract_version_from_file(self, file_path: Path) -> str | None:
+        """Extract a version string embedded in a data file's header.
+
+        Override in subclasses where the source file contains release
+        metadata (e.g. ``Release: 2026_01`` in UniProt flat files).
+
+        Args:
+            file_path: Path to the data file to inspect.
+
+        Returns:
+            Version string, or ``None`` if not found.
+        """
+        return None
+
+    def _resolve_version(self, file_path: Path | None = None) -> str:
+        """Resolve the dataset version to use for source version fields.
+
+        Resolution order:
+        1. ``self.version`` if already set explicitly.
+        2. Version extracted from file header via ``_extract_version_from_file``.
+        3. ISO date or release token found in the filename stem
+           (e.g. ``withdrawn_2026-04-07.txt`` -> ``2026-04-07``,
+           ``chebi_245.sdf`` -> ``245``).
+        4. File modification date (ISO-8601) when a path is provided.
+        5. Today's date as a last resort.
+
+        Sets ``self.version`` to the resolved value so that
+        ``create_mapping_set`` picks it up for ``subject_source_version`` /
+        ``object_source_version`` automatically.
+
+        Args:
+            file_path: Optional path to the primary input file.
+
+        Returns:
+            Resolved version string.
+        """
+        if self.version:
+            return self.version
+
+        if file_path is not None:
+            file_path = Path(file_path)
+            # 1. Try header-embedded version (parser-specific override)
+            extracted = self._extract_version_from_file(file_path)
+            if extracted:
+                self.version = extracted
+                return self.version
+            # 2. Try ISO date (YYYY-MM-DD) in the filename stem
+            iso_match = re.search(r"\d{4}-\d{2}-\d{2}", file_path.stem)
+            if iso_match:
+                self.version = iso_match.group(0)
+                return self.version
+            # 3. Try a plain numeric/semver token in the filename stem
+            #    e.g. "chebi_245" -> "245", "gene_history_v2" -> "2"
+            num_match = re.search(r"(?<![.\d])(\d{3,})(?![.\d])", file_path.stem)
+            if num_match:
+                self.version = num_match.group(1)
+                return self.version
+            # 4. Fall back to file modification time
+            try:
+                mtime = file_path.stat().st_mtime
+                self.version = date.fromtimestamp(mtime).isoformat()
+                return self.version
+            except OSError:
+                pass
+
+        self.version = date.today().isoformat()
+        return self.version
+
     @abstractmethod
     def parse(self, input_path: Path | str | None) -> MappingSet:
         """Parse the input file(s) and return a MappingSet.
@@ -645,6 +569,44 @@ class BaseParser(ABC):
         if self.show_progress:
             return cast(Iterable[Any], tqdm(iterable, desc=desc, total=total))
         return iterable
+
+    def _build_mappings(
+        self,
+        rows: Iterable[dict[str, Any]],
+        fixed_fields: dict[str, Any] | None = None,
+        *,
+        desc: str = "Building mappings",
+        total: int | None = None,
+    ) -> list[Mapping]:
+        """Build SSSOM Mapping objects from row dicts.
+
+        Automatically injects mapping-level fields from the parser's
+        config metadata (e.g. ``confidence``) unless the caller already
+        provides them in ``fixed_fields`` or individual row dicts.
+
+        Args:
+            rows: Per-row fields as dicts (subject_id, object_id, etc.).
+            fixed_fields: Fields shared by all rows (predicate_id, license, etc.).
+            desc: Progress bar description.
+            total: Total count for the progress bar.
+
+        Returns:
+            List of Mapping objects.
+        """
+        _auto_fields = ("confidence",)
+        m_meta = self.get_mapping_metadata()
+        auto: dict[str, Any] = {
+            k: m_meta[k] for k in _auto_fields if k in m_meta and m_meta[k] is not None
+        }
+
+        # Build base: auto fields < fixed_fields (fixed wins over auto)
+        base = {**auto, **(fixed_fields or {})}
+
+        if base:
+            merged: Iterable[dict[str, Any]] = ({**base, **row} for row in rows)
+        else:
+            merged = rows
+        return [Mapping(**row) for row in self._progress(merged, desc=desc, total=total)]
 
     def _build_comment(
         self,
@@ -761,7 +723,7 @@ class BaseParser(ABC):
 
         This is the common factory method for creating mapping sets with
         all SSSOM metadata populated from the YAML config. It also computes
-        cardinalities automatically.
+        cardinalities automatically using Polars vectorised counting.
 
         Args:
             mappings: List of SSSOM Mapping objects.
@@ -811,7 +773,7 @@ class BaseParser(ABC):
             object_preprocessing=ms_meta.get("object_preprocessing"),
         )
 
-        # Compute cardinalities using the appropriate method
+        # Compute cardinalities using Polars vectorised counting
         mapping_set.compute_cardinalities()
 
         return mapping_set
@@ -822,7 +784,6 @@ __all__ = [
     "WITHDRAWN_ENTRY_LABEL",
     "BaseDownloader",
     "BaseParser",
-    "ChEBIDownloader",
     "DatasourceConfig",
     "IdMappingSet",
     "LabelMappingSet",

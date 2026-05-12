@@ -84,6 +84,7 @@ class HGNCParser(BaseParser):
         if input_path is None:
             raise ValueError("input_path must not be None")
         input_path = Path(input_path)
+        self._resolve_version(input_path)
 
         # Parse withdrawn file for ID mappings
         mappings = self._parse_withdrawn(input_path)
@@ -110,6 +111,7 @@ class HGNCParser(BaseParser):
         if complete_set_path is None:
             raise ValueError("complete_set_path must not be None")
         complete_set_path = Path(complete_set_path)
+        self._resolve_version(complete_set_path)
 
         # Parse complete set for symbol mappings
         mappings = self._parse_complete_set(complete_set_path, statuses=statuses)
@@ -164,10 +166,16 @@ class HGNCParser(BaseParser):
         symbol_col = self._find_column(df.columns, SYMBOL)
 
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
+        fixed = {
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
 
-        rows = list(df.iter_rows(named=True))
-        for row in self._progress(rows, desc="Processing withdrawn"):
+        rows_data: list[dict[str, str | None]] = []
+        for row in df.iter_rows(named=True):
             hgnc_id = row.get(hgnc_id_col)
             if not hgnc_id:
                 continue
@@ -178,20 +186,16 @@ class HGNCParser(BaseParser):
 
             # Case 1: Withdrawn with no replacement
             if not merged_info and status and "Entry Withdrawn" in str(status):
-                mapping = Mapping(
-                    subject_id=WITHDRAWN_ENTRY,
-                    object_id=hgnc_id,
-                    subject_label=WITHDRAWN_ENTRY_LABEL,
-                    object_label=symbol or "",
-                    predicate_id="oboInOwl:consider",
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                    comment="Withdrawn entry with no replacement.",
+                rows_data.append(
+                    {
+                        "subject_id": WITHDRAWN_ENTRY,
+                        "object_id": hgnc_id,
+                        "subject_label": WITHDRAWN_ENTRY_LABEL,
+                        "object_label": symbol or "",
+                        "predicate_id": "oboInOwl:consider",
+                        "comment": "Withdrawn entry with no replacement.",
+                    }
                 )
-                mappings.append(mapping)
                 continue
 
             # Case 2: Merged into another entry
@@ -199,23 +203,20 @@ class HGNCParser(BaseParser):
                 parsed = self._parse_merged_info(merged_info)
                 if parsed:
                     target_id, target_symbol = parsed
-                    # SSSOM: subject = primary (target), object = secondary (old)
-                    mapping = Mapping(
-                        subject_id=target_id,
-                        object_id=hgnc_id,
-                        subject_label=target_symbol or "",
-                        object_label=symbol or "",
-                        predicate_id=m_meta["predicate_id"],
-                        predicate_label=m_meta.get("predicate_label"),
-                        mapping_justification=m_meta["mapping_justification"],
-                        subject_source=m_meta.get("subject_source"),
-                        object_source=m_meta.get("object_source"),
-                        mapping_tool=m_meta.get("mapping_tool"),
-                        license=m_meta.get("license"),
+                    rows_data.append(
+                        {
+                            "subject_id": target_id,
+                            "object_id": hgnc_id,
+                            "subject_label": target_symbol or "",
+                            "object_label": symbol or "",
+                            "predicate_id": m_meta["predicate_id"],
+                            "predicate_label": m_meta.get("predicate_label"),
+                        }
                     )
-                    mappings.append(mapping)
 
-        return mappings
+        return self._build_mappings(
+            rows_data, fixed, desc="Processing withdrawn", total=len(rows_data)
+        )
 
     def _parse_complete_set(
         self, file_path: Path, statuses: list[str] | None = None
@@ -245,6 +246,8 @@ class HGNCParser(BaseParser):
 
         if not all([status_col, hgnc_id_col, symbol_col]):
             raise ValueError(f"Missing required columns in {file_path}")
+        assert hgnc_id_col is not None
+        assert symbol_col is not None
 
         # Optionally filter by status
         if statuses is not None and status_col:
@@ -253,10 +256,17 @@ class HGNCParser(BaseParser):
             df_approved = df
 
         m_meta = self.get_mapping_metadata()
-        mappings: list[Mapping] = []
+        fixed = {
+            "predicate_id": "oboInOwl:hasRelatedSynonym",
+            "mapping_justification": m_meta["mapping_justification"],
+            "subject_source": m_meta.get("subject_source"),
+            "object_source": m_meta.get("object_source"),
+            "mapping_tool": m_meta.get("mapping_tool"),
+            "license": m_meta.get("license"),
+        }
 
-        rows = list(df_approved.iter_rows(named=True))
-        for row in self._progress(rows, desc="Processing symbols"):
+        rows_data: list[dict[str, str | None]] = []
+        for row in df_approved.iter_rows(named=True):
             hgnc_id = row.get(hgnc_id_col)
             symbol = row.get(symbol_col)
             if not hgnc_id or not symbol:
@@ -267,41 +277,31 @@ class HGNCParser(BaseParser):
             aliases = self._split_symbols(alias_str) if alias_str else []
             prev_symbols = self._split_symbols(prev_str) if prev_str else []
 
-            # Create label mappings for aliases
             for alias in aliases:
-                mapping = Mapping(
-                    subject_id=hgnc_id,
-                    subject_label=symbol,
-                    object_id=hgnc_id,  # Same entity
-                    object_label=alias,
-                    predicate_id="oboInOwl:hasRelatedSynonym",
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                    comment="Alias symbol mapping.",
+                rows_data.append(
+                    {
+                        "subject_id": hgnc_id,
+                        "subject_label": symbol,
+                        "object_id": hgnc_id,
+                        "object_label": alias,
+                        "comment": "Alias symbol mapping.",
+                    }
                 )
-                mappings.append(mapping)
 
-            # Create label mappings for previous symbols
             for prev in prev_symbols:
-                mapping = Mapping(
-                    subject_id=hgnc_id,
-                    subject_label=symbol,
-                    object_id=hgnc_id,  # Same entity
-                    object_label=prev,
-                    predicate_id="oboInOwl:hasRelatedSynonym",
-                    mapping_justification=m_meta["mapping_justification"],
-                    subject_source=m_meta.get("subject_source"),
-                    object_source=m_meta.get("object_source"),
-                    mapping_tool=m_meta.get("mapping_tool"),
-                    license=m_meta.get("license"),
-                    comment="Previous symbol mapping.",
+                rows_data.append(
+                    {
+                        "subject_id": hgnc_id,
+                        "subject_label": symbol,
+                        "object_id": hgnc_id,
+                        "object_label": prev,
+                        "comment": "Previous symbol mapping.",
+                    }
                 )
-                mappings.append(mapping)
 
-        return mappings
+        return self._build_mappings(
+            rows_data, fixed, desc="Processing symbols", total=len(rows_data)
+        )
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
