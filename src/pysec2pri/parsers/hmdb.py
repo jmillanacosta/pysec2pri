@@ -12,8 +12,9 @@ from __future__ import annotations
 import gzip
 import re
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING
 
 import defusedxml.ElementTree as DefusedET
 from sssom_schema import Mapping
@@ -89,9 +90,35 @@ class HMDBParser(BaseParser):
             secondary_normaliser=self._normalise_protein_secondary,
         )
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
+
+    def _extract_version_from_file(self, file_path: Path) -> str | None:
+        """Extract the HMDB dataset version from the first <version> element."""
+        import re as _re
+
+        version_re = _re.compile(r"<version>\s*([^<]+)\s*</version>")
+        read_bytes = 2048
+
+        try:
+            if file_path.suffix == ".zip":
+                with zipfile.ZipFile(file_path, "r") as zf:
+                    xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
+                    if not xml_files:
+                        return None
+                    with zf.open(xml_files[0]) as fh:
+                        head = fh.read(read_bytes).decode("utf-8", errors="replace")
+            elif file_path.suffix == ".gz":
+                with gzip.open(file_path, "rt", encoding="utf-8") as fh:
+                    head = fh.read(read_bytes)
+            else:
+                with file_path.open("r", encoding="utf-8") as fh:
+                    head = fh.read(read_bytes)
+        except Exception as e:
+            logger.debug("Could not read HMDB version from %s: %s", file_path, e)
+            return None
+
+        m = version_re.search(head)
+        return m.group(1).strip() if m else None
 
     @staticmethod
     def _normalise_protein_secondary(raw: str) -> str:
@@ -112,7 +139,7 @@ class HMDBParser(BaseParser):
         element_tag: str,
         prefix: str,
         desc: str,
-        secondary_normaliser: Any = None,
+        secondary_normaliser: Callable[[str], str] | None = None,
     ) -> Sec2PriMappingSet:
         """Parse HMDB XML for metabolites and proteins.
 
@@ -134,7 +161,7 @@ class HMDBParser(BaseParser):
 
         self._resolve_version(file_path)
         m_meta = self.get_mapping_metadata()
-        fixed = {
+        fixed: dict[str, str | None] = {
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
             "mapping_justification": m_meta["mapping_justification"],
@@ -143,7 +170,7 @@ class HMDBParser(BaseParser):
             "mapping_tool": m_meta.get("mapping_tool"),
             "license": m_meta.get("license"),
         }
-        rows_data: list[dict[str, Any]] = []
+        rows_data: list[dict[str, str]] = []
 
         try:
             context = DefusedET.iterparse(xml_content, events=("end",))
@@ -164,8 +191,8 @@ class HMDBParser(BaseParser):
         self,
         elem: Element,
         prefix: str,
-        secondary_normaliser: Any,
-    ) -> list[dict[str, Any]]:
+        secondary_normaliser: Callable[[str], str] | None,
+    ) -> list[dict[str, str]]:
         """Extract row dicts from a single record element."""
         # Primary accession
         accession_elem = elem.find("hmdb:accession", HMDB_NS)
@@ -189,7 +216,7 @@ class HMDBParser(BaseParser):
         if sec_block is None:
             return []
 
-        rows: list[dict[str, Any]] = []
+        rows: list[dict[str, str]] = []
         for sec_elem in sec_block:
             if not sec_elem.text:
                 continue
@@ -211,10 +238,10 @@ class HMDBParser(BaseParser):
         file_path: Path,
         element_tag: str,
         prefix: str,
-        secondary_normaliser: Any,
-    ) -> list[dict[str, Any]]:
+        secondary_normaliser: Callable[[str], str] | None,
+    ) -> list[dict[str, str]]:
         """Fallback parser for test files without namespace."""
-        rows_data: list[dict[str, Any]] = []
+        rows_data: list[dict[str, str]] = []
         try:
             tree = DefusedET.parse(file_path)
             root = tree.getroot()
@@ -224,8 +251,15 @@ class HMDBParser(BaseParser):
             logger.warning("Failed to parse HMDB XML: %s", e)
         return rows_data
 
-    def _read_xml_content(self, file_path: Path) -> Any:
-        """Read XML content, handling compressed files."""
+    def _read_xml_content(self, file_path: Path) -> IO[bytes] | IO[str] | None:
+        """Read XML content, handling compressed files.
+
+        Args:
+            file_path: Path to the XML file (plain, ``.zip``, or ``.gz``).
+
+        Returns:
+            An open file-like object ready for parsing, or ``None`` on failure.
+        """
         if file_path.suffix == ".zip":
             try:
                 with zipfile.ZipFile(file_path, "r") as zf:
@@ -234,7 +268,7 @@ class HMDBParser(BaseParser):
                         return zf.open(xml_files[0])
             except Exception as e:
                 logger.warning("Failed to read zip file %s: %s", file_path, e)
-                return None
+            return None
         elif file_path.suffix == ".gz":
             try:
                 return gzip.open(file_path, "rt", encoding="utf-8")

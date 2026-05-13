@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from sssom import MappingSetDataFrame
 
 if TYPE_CHECKING:
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
 __all__ = [
     "WRITERS",
+    "write_json",
     "write_name2synonym",
     "write_output",
+    "write_owl",
     "write_pri_ids",
+    "write_rdf",
     "write_sec2pri",
     "write_secondary",
     "write_sssom",
@@ -25,47 +30,50 @@ def write_sssom(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write a MappingSet to an SSSOM TSV file."""
+    """Write a mapping set to an SSSOM TSV file.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination ``.sssom.tsv`` file path.
+
+    Returns:
+        Path to the written file.
+    """
     import codecs
     import re
     from typing import cast
 
     import curies
-    from sssom.parsers import (  # type: ignore[attr-defined]
-        to_mapping_set_dataframe,
-    )
+    from sssom.parsers import to_mapping_set_dataframe  # type: ignore[attr-defined]
     from sssom.sssom_document import MappingSetDocument
     from sssom.writers import write_table
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build converter from curie_map
-    raw_curie_map: Any = mapping_set.curie_map or {}
-    # Convert curie_map to format expected by curies
-    # Values may be strings or Prefix objects (sssom_schema converts them)
+    # Build a curies.Converter from the curie_map stored on the mapping set.
+    # Using Converter(records=...) preserves prefix casing exactly as declared
+    # and handles pydantic-wrapped Prefix objects (which expose .prefix_url).
+    raw_curie_map: object = mapping_set.curie_map or {}
     records: list[curies.Record] = []
     if isinstance(raw_curie_map, dict):
         for k, v in raw_curie_map.items():
             if isinstance(v, str):
-                uri_prefix = v
+                uri_prefix: str = v
             elif hasattr(v, "prefix_url"):
                 uri_prefix = cast(str, v.prefix_url)
             else:
                 continue
             records.append(curies.Record(prefix=k, uri_prefix=uri_prefix))
     converter = curies.Converter(records=records)
-
-    # Wrap in MappingSetDocument for sssom library compatibility
     doc = MappingSetDocument(mapping_set=mapping_set, converter=converter)
     msdf = to_mapping_set_dataframe(doc)
 
     with output_path.open("w", encoding="utf-8") as f:
         write_table(msdf, f)
 
-    # Fix escaped unicode in YAML header (sssom issue: )
+    # Fix escaped unicode in YAML header (sssom issue)
     content = output_path.read_text(encoding="utf-8")
-    # Replace \xNN escapes with actual unicode characters
     content = re.sub(
         r"\\x([0-9a-fA-F]{2})",
         lambda m: codecs.decode(bytes([int(m.group(1), 16)]), "latin-1"),
@@ -76,11 +84,123 @@ def write_sssom(
     return output_path
 
 
+def _to_msdf_via_sssom_parser(mapping_set: Sec2PriMappingSet) -> MappingSetDataFrame | None:
+    """Write to a temporary SSSOM TSV then parse back with sssom's own parser.
+
+    Args:
+        mapping_set: The mapping set to convert.
+
+    Returns:
+        A fully-validated ``MappingSetDataFrame`` ready for RDF/JSON/OWL serialisation.
+    """
+    import tempfile
+
+    from sssom.parsers import parse_sssom_table
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".sssom.tsv", mode="w", encoding="utf-8", delete=False
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        write_sssom(mapping_set, tmp_path)
+        return parse_sssom_table(str(tmp_path))
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def write_rdf(
+    mapping_set: Sec2PriMappingSet,
+    output_path: Path | str,
+    serialisation: str = "turtle",
+) -> Path:
+    """Write a mapping set to an RDF file.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``mappings.ttl``).
+        serialisation: RDFLib serialisation format.
+
+    Returns:
+        Path to the written file.
+    """
+    from sssom.writers import write_rdf as _sssom_write_rdf
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    msdf = _to_msdf_via_sssom_parser(mapping_set)
+    if msdf is None:
+        raise ValueError("Failed to parse mapping set for RDF serialisation.")
+    with output_path.open("w", encoding="utf-8") as f:
+        _sssom_write_rdf(msdf, f, serialisation=serialisation)
+    return output_path
+
+
+def write_json(
+    mapping_set: Sec2PriMappingSet,
+    output_path: Path | str,
+) -> Path:
+    """Write a mapping set to an SSSOM JSON file.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``mappings.json``).
+
+    Returns:
+        Path to the written file.
+    """
+    from sssom.writers import write_json as _sssom_write_json
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    msdf = _to_msdf_via_sssom_parser(mapping_set)
+    if msdf is None:
+        raise ValueError("Failed to parse mapping set for JSON serialisation.")
+    with output_path.open("w", encoding="utf-8") as f:
+        _sssom_write_json(msdf, f)
+    return output_path
+
+
+def write_owl(
+    mapping_set: Sec2PriMappingSet,
+    output_path: Path | str,
+    serialisation: str = "turtle",
+) -> Path:
+    """Write a mapping set to an OWL/RDF file (default: Turtle).
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``mappings_owl.ttl``).
+        serialisation: RDFLib serialisation format.
+
+    Returns:
+        Path to the written file.
+    """
+    from sssom.writers import write_owl as _sssom_write_owl
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    msdf = _to_msdf_via_sssom_parser(mapping_set)
+    if msdf is None:
+        raise ValueError("Failed to parse mapping set for OWL serialisation.")
+    with output_path.open("w", encoding="utf-8") as f:
+        _sssom_write_owl(msdf, f, serialisation=serialisation)
+    return output_path
+
+
 def write_pri_ids(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write unique primary IDs (object_id) to a text file, one per line."""
+    """Write unique primary IDs (object_id) to a text file, one per line.
+
+    Args:
+        mapping_set: The mapping set to read primary IDs from.
+        output_path: Destination file path.
+
+    Returns:
+        Path to the written file.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -102,7 +222,17 @@ def write_sec2pri(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write secondary to primary ID mappings to a TSV file."""
+    """Write secondary to primary ID mappings to a TSV file.
+
+    Columns: ``subject_id``, ``object_id``, ``predicate_id``, ``mapping_cardinality``.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``sec2pri.tsv``).
+
+    Returns:
+        Path to the written file.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -126,7 +256,18 @@ def write_name2synonym(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write name to synonym mappings to a TSV file."""
+    """Write name to synonym mappings to a TSV file.
+
+    Only rows where at least one of ``subject_label`` or ``object_label`` is set are
+    written.  Columns: ``subject_id``, ``subject_label``, ``object_label``.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``name2synonym.tsv``).
+
+    Returns:
+        Path to the written file.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -152,7 +293,19 @@ def write_symbol2prev(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write symbol to previous symbol mappings to a TSV file."""
+    """Write symbol to previous symbol mappings to a TSV file.
+
+    Only rows where at least one of ``subject_label`` or ``object_label`` is set are
+    written.  Columns: ``subject_id``, ``subject_label``, ``object_label``,
+    ``mapping_cardinality``.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``symbol2prev.tsv``).
+
+    Returns:
+        Path to the written file.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -179,7 +332,15 @@ def write_secondary(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write unique secondary IDs (subject_id) to a text file, one per line."""
+    """Write unique secondary IDs (subject_id) to a text file, one per line.
+
+    Args:
+        mapping_set: The mapping set to read secondary IDs from.
+        output_path: Destination file path.
+
+    Returns:
+        Path to the written file.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -206,6 +367,9 @@ WRITERS: dict[str, Callable[..., Path]] = {
     "secIDs": write_secondary,
     "name2synonym": write_name2synonym,
     "symbol2prev": write_symbol2prev,
+    "rdf": write_rdf,
+    "json": write_json,
+    "owl": write_owl,
 }
 
 

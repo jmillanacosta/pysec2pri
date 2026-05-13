@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import yaml
 from sssom_schema import Mapping, MappingCardinalityEnum, MappingSet
@@ -16,6 +16,8 @@ from tqdm import tqdm
 
 from pysec2pri.logging import logger
 from pysec2pri.version import VERSION
+
+_T = TypeVar("_T")
 
 # Values for withdrawn entries
 
@@ -552,10 +554,10 @@ class BaseParser(ABC):
 
     def _progress(
         self,
-        iterable: Iterable[Any],
+        iterable: Iterable[_T],
         desc: str | None = None,
         total: int | None = None,
-    ) -> Iterable[Any]:
+    ) -> Iterable[_T]:
         """Wrap an iterable with a progress bar if enabled.
 
         Args:
@@ -567,7 +569,7 @@ class BaseParser(ABC):
             The iterable, optionally wrapped in tqdm.
         """
         if self.show_progress:
-            return cast(Iterable[Any], tqdm(iterable, desc=desc, total=total))
+            return cast(Iterable[_T], tqdm(iterable, desc=desc, total=total))
         return iterable
 
     def _build_mappings(
@@ -600,7 +602,7 @@ class BaseParser(ABC):
         }
 
         # Build base: auto fields < fixed_fields (fixed wins over auto)
-        base = {**auto, **(fixed_fields or {})}
+        base: dict[str, Any] = {**auto, **(fixed_fields or {})}
 
         if base:
             merged: Iterable[dict[str, Any]] = ({**base, **row} for row in rows)
@@ -721,9 +723,9 @@ class BaseParser(ABC):
     ) -> Sec2PriMappingSet:
         """Create an IdMappingSet or LabelMappingSet with config metadata.
 
-        This is the common factory method for creating mapping sets with
+        Common factory method for creating mapping sets with
         all SSSOM metadata populated from the YAML config. It also computes
-        cardinalities automatically using Polars vectorised counting.
+        cardinalities for mappings.
 
         Args:
             mappings: List of SSSOM Mapping objects.
@@ -731,10 +733,23 @@ class BaseParser(ABC):
                          "label" for LabelMappingSet (cardinality by label).
 
         Returns:
-            Configured MappingSet with computed cardinalities.
+            MappingSet with computed cardinalities.
         """
+        import curies as _curies
+
         ms_meta = self.get_mappingset_metadata()
         curie_map = self.get_curie_map()
+
+        # Build a converter from the curie_map
+        converter = _curies.Converter.from_prefix_map(curie_map)
+
+        def _compress(val: Any) -> Any:
+            """Compress a URI string or list of URI strings to CURIEs."""
+            if isinstance(val, str):
+                return converter.compress(val) or val
+            if isinstance(val, list):
+                return [converter.compress(v) or v if isinstance(v, str) else v for v in val]
+            return val
 
         # Choose the appropriate MappingSet class
         if mapping_type == "label":
@@ -755,22 +770,22 @@ class BaseParser(ABC):
             mapping_set_version=self.version,
             mapping_set_title=ms_meta.get("mapping_set_title"),
             mapping_set_description=description or None,
-            creator_id=ms_meta.get("creator_id"),
+            creator_id=_compress(ms_meta.get("creator_id")),
             creator_label=ms_meta.get("creator_label"),
             comment=ms_meta.get("comment"),
-            license=ms_meta.get("license"),
+            license=_compress(ms_meta.get("license")),
             subject_source=ms_meta.get("subject_source"),
             subject_source_version=self.version,
             object_source=ms_meta.get("object_source"),
             object_source_version=self.version,
-            mapping_provider=ms_meta.get("mapping_provider"),
-            mapping_tool=ms_meta.get("mapping_tool"),
+            mapping_provider=_compress(ms_meta.get("mapping_provider")),
+            mapping_tool=_compress(ms_meta.get("mapping_tool")),
             mapping_tool_version=VERSION,
             mapping_date=date.today().isoformat(),
-            see_also=ms_meta.get("see_also"),
-            issue_tracker=ms_meta.get("issue_tracker"),
-            subject_preprocessing=ms_meta.get("subject_preprocessing"),
-            object_preprocessing=ms_meta.get("object_preprocessing"),
+            see_also=_compress(ms_meta.get("see_also")),
+            issue_tracker=_compress(ms_meta.get("issue_tracker")),
+            subject_preprocessing=_compress(ms_meta.get("subject_preprocessing")),
+            object_preprocessing=_compress(ms_meta.get("object_preprocessing")),
         )
 
         # Compute cardinalities using Polars vectorised counting

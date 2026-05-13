@@ -6,9 +6,10 @@ import tempfile
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import click
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from sssom_schema import MappingSet
@@ -18,8 +19,29 @@ if TYPE_CHECKING:
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="sssom")
 
-PathType: Any = click.Path(path_type=Path)  # type: ignore[type-var]
-ExistingPathType: Any = click.Path(
+
+class _ChEBITSVFiles(TypedDict):
+    """Paths returned when ChEBI is downloaded as TSV flat files (>= 245)."""
+
+    format: str
+    version: str | None
+    secondary_ids: Path | None
+    names: Path | None
+    compounds: Path | None
+
+
+class _ChEBISDFFiles(TypedDict):
+    """Paths returned when ChEBI is downloaded as SDF (< 245 or forced)."""
+
+    format: str
+    version: str | None
+    sdf: Path | None
+
+
+_ChEBIFiles = _ChEBITSVFiles | _ChEBISDFFiles
+
+PathType = click.Path(path_type=Path)  # type: ignore[type-var]
+ExistingPathType = click.Path(
     exists=True,
     path_type=Path,  # type: ignore[type-var]
 )
@@ -31,7 +53,18 @@ def _download_if_needed(
     file_key: str = "main",
     version: str | None = None,
 ) -> Path:
-    """Download datasource file if not provided."""
+    """Download datasource file if not provided.
+
+    Args:
+        datasource: Datasource name (e.g. ``"hgnc"``, ``"ncbi"``).
+        input_file: User-supplied local path; returned as-is when not ``None``.
+        file_key: Key identifying which file to retrieve from the downloaded
+            bundle (e.g. ``"main"``, ``"gene_history"``).
+        version: Optional version string passed to the downloader.
+
+    Returns:
+        Path to the local file (downloaded or user-supplied).
+    """
     if input_file is not None:
         return input_file
 
@@ -57,15 +90,38 @@ def _download_if_needed(
     return next(iter(downloaded.values()))
 
 
+_FORMAT_EXTENSIONS: dict[str, str] = {
+    "rdf": ".ttl",
+    "owl": "_owl.ttl",
+    "json": ".json",
+}
+
+
 def _get_output_filename(
     datasource: str,
     output_format: str,
     version: str | None = None,
 ) -> Path:
-    """Generate output filename with optional version."""
+    """Generate output filename with optional version.
+
+    Args:
+        datasource: Datasource prefix for the filename (e.g. ``"chebi_3star"``).
+        output_format: Output format key (e.g. ``"sssom"``, ``"rdf"``, ``"json"``).
+        version: Optional version string inserted between datasource and format.
+
+    Returns:
+        Generated :class:`~pathlib.Path` filename (no parent directory).
+    """
+    ext = _FORMAT_EXTENSIONS.get(output_format, ".tsv")
+    # For owl the suffix already contains an underscore qualifier, so we
+    # embed it differently to avoid e.g. "chebi_251_owl.owl.ttl".
+    if output_format == "owl":
+        if version:
+            return Path(f"{datasource}_{version}{ext}")
+        return Path(f"{datasource}{ext}")
     if version:
-        return Path(f"{datasource}_{version}_{output_format}.tsv")
-    return Path(f"{datasource}_{output_format}.tsv")
+        return Path(f"{datasource}_{version}_{output_format}{ext}")
+    return Path(f"{datasource}_{output_format}{ext}")
 
 
 def _resolve_output_path(
@@ -79,6 +135,15 @@ def _resolve_output_path(
     If *output* is an existing directory, place the generated filename
     inside it.  Otherwise use *output* as-is, or fall back to the default
     generated filename.
+
+    Args:
+        output: Output path or ``None``.
+        datasource: Datasource prefix.
+        output_format: Output format key.
+        version: Optional version string.
+
+    Returns:
+        :class:`~pathlib.Path` for the output file.
     """
     filename = _get_output_filename(datasource, output_format, version)
     if output is None:
@@ -92,7 +157,15 @@ def _get_output_dir(
     datasource: str,
     version: str | None = None,
 ) -> Path:
-    """Generate output directory name for 'all' format."""
+    """Generate output directory name for 'all' format.
+
+    Args:
+        datasource: Datasource name (e.g. ``"chebi"``).
+        version: Optional version string appended with an underscore.
+
+    Returns:
+        Generated :class:`~pathlib.Path` directory name.
+    """
     if version:
         return Path(f"{datasource}_{version}")
     return Path(datasource)
@@ -109,6 +182,14 @@ def _resolve_all_format_dir(
     use its parent directory plus versioned folder.
     If output is a directory, use it directly.
     If output is None, generate default directory name.
+
+    Args:
+        output: User-supplied output path or ``None``.
+        datasource: Datasource name (e.g. ``"chebi"``).
+        version: Optional version string.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` for the output directory.
     """
     if output is not None:
         # If output looks like a file path (has extension), use parent dir
@@ -125,7 +206,7 @@ def _download_chebi_files(
     version: str | None,
     subset: str,
     use_sdf: bool = False,
-) -> dict[str, Any]:
+) -> _ChEBIFiles:
     """Download ChEBI files based on version.
 
     For version >= 245 (and use_sdf=False): downloads TSV flat files
@@ -148,7 +229,7 @@ def _download_chebi_files(
 
     # If user provided a file, assume it's SDF (legacy behavior)
     if input_file is not None:
-        return {"format": "sdf", "sdf": input_file}
+        return {"format": "sdf", "version": None, "sdf": input_file}
 
     # Determine version to use
     if version is None:
@@ -257,7 +338,12 @@ def diff(
 
 
 def _show_diff_details(result: MappingDiff) -> None:
-    """Show detailed diff output for added/removed/changed mappings."""
+    """Show detailed diff output for added/removed/changed mappings.
+
+    Args:
+        result: :class:`~pysec2pri.diff.MappingDiff` produced by
+            :func:`~pysec2pri.diff.diff_sssom_files`.
+    """
     if result.added_count > 0:
         click.echo("")
         click.echo(f"=== Added mappings ({result.added_count}) ===")
@@ -304,7 +390,7 @@ def _show_diff_details(result: MappingDiff) -> None:
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "pri_ids", "name2synonym", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "name2synonym", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 @click.option(
@@ -357,12 +443,24 @@ def chebi(
 
 
 def _parse_chebi_mapping_sets(
-    files: dict[str, Any],
+    files: _ChEBIFiles,
     version: str | None,
     subset: str,
     mapping_sets: str,
 ) -> tuple[Sec2PriMappingSet | None, Sec2PriMappingSet | None]:
-    """Parse ChEBI mapping sets based on format and mapping_sets option."""
+    """Parse ChEBI mapping sets based on format and mapping_sets option.
+
+    Args:
+        files: Dict returned by :func:`_download_chebi_files` with keys
+            ``"format"`` and the relevant file paths.
+        version: ChEBI release version string.
+        subset: ``"3star"`` or ``"complete"``.
+        mapping_sets: ``"ids"``, ``"synonyms"``, or ``"all"``.
+
+    Returns:
+        Tuple of ``(id_mappings, synonym_mappings)``, either of which may be
+        ``None`` if that set was not requested.
+    """
     from pysec2pri.api import parse_chebi, parse_chebi_synonyms
 
     id_mappings = None
@@ -371,17 +469,25 @@ def _parse_chebi_mapping_sets(
     if files["format"] == "tsv":
         # New TSV format (>= 245): secondary_ids.tsv, names.tsv, compounds.tsv
         # are all in the same directory; pass the directory to the parser.
-        tsv_dir = files["secondary_ids"].parent
+        tsv_files = cast(_ChEBITSVFiles, files)
+        tsv_dir = tsv_files["secondary_ids"] or tsv_files["compounds"] or tsv_files["names"]
+        if tsv_dir is None:
+            raise click.ClickException("No TSV files found in downloaded ChEBI bundle.")
+        tsv_dir = tsv_dir.parent
         if mapping_sets in ("ids", "all"):
             id_mappings = parse_chebi(tsv_dir, version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
             synonym_mappings = parse_chebi_synonyms(tsv_dir, version=version, subset=subset)
     else:
         # Legacy SDF format (< 245)
+        sdf_files = cast(_ChEBISDFFiles, files)
+        sdf_path = sdf_files["sdf"]
+        if sdf_path is None:
+            raise click.ClickException("No SDF file found in downloaded ChEBI bundle.")
         if mapping_sets in ("ids", "all"):
-            id_mappings = parse_chebi(files["sdf"], version=version, subset=subset)
+            id_mappings = parse_chebi(sdf_path, version=version, subset=subset)
         if mapping_sets in ("synonyms", "all"):
-            synonym_mappings = parse_chebi_synonyms(files["sdf"], version=version, subset=subset)
+            synonym_mappings = parse_chebi_synonyms(sdf_path, version=version, subset=subset)
 
     return id_mappings, synonym_mappings
 
@@ -391,7 +497,20 @@ def _combine_chebi_results(
     synonym_mappings: Sec2PriMappingSet | None,
     mapping_sets: str,
 ) -> Sec2PriMappingSet:
-    """Combine mapping sets and report counts."""
+    """Combine mapping sets and report counts.
+
+    Args:
+        id_mappings: Parsed secondary to primary ID mapping set, or ``None``.
+        synonym_mappings: Parsed name to synonym mapping set, or ``None``.
+        mapping_sets: ``"ids"``, ``"synonyms"``,
+            or ``"all"``.
+
+    Returns:
+        Combined (or single) :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`.
+
+    Raises:
+        :class:`click.ClickException`: If no mapping sets were generated.
+    """
     from pysec2pri.api import combine_mapping_sets
 
     if mapping_sets == "all" and id_mappings and synonym_mappings:
@@ -412,7 +531,15 @@ def _combine_chebi_results(
 
 
 def _get_chebi_base_name(subset: str, version: str | None) -> str:
-    """Generate base name for ChEBI output files."""
+    """Generate base name for ChEBI output files.
+
+    Args:
+        subset: ``"3star"`` or ``"complete"``.
+        version: ChEBI release version string, or ``None``.
+
+    Returns:
+        Base filename stem, e.g. ``"chebi_3star_251"``.
+    """
     subset_sfx = "_3star" if subset == "3star" else ""
     v_suffix = f"_{version}" if version else ""
     return f"chebi{subset_sfx}{v_suffix}"
@@ -425,14 +552,17 @@ def _write_chebi_output(
     base_name: str,
     version: str | None,
 ) -> None:
-    """Write ChEBI output in requested format."""
+    """Write ChEBI output in requested format.
+
+    Args:
+        result: Combined mapping set to write.
+        output: Output path or ``None``.
+        output_format: Output format key (e.g. ``"sssom"``, ``"all"``).
+        base_name: Base filename stem (e.g. ``"chebi_3star_251"``).
+        version: ChEBI release version string.
+    """
     from pysec2pri.api import write_all_formats
-    from pysec2pri.exports import (
-        write_name2synonym,
-        write_pri_ids,
-        write_sec2pri,
-        write_sssom,
-    )
+    from pysec2pri.exports import write_output
 
     if output_format == "all":
         datasource = base_name.split("_")[0]
@@ -441,20 +571,18 @@ def _write_chebi_output(
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
         out_path = output or Path(f"{base_name}_{output_format}.tsv")
-        if output_format == "sssom":
-            write_sssom(result, out_path)
-        elif output_format == "sec2pri":
-            write_sec2pri(result, out_path)
-        elif output_format == "pri_ids":
-            write_pri_ids(result, out_path)
-        elif output_format == "name2synonym":
-            write_name2synonym(result, out_path)
+        write_output(result, output_format, out_path)
         n = len(result.mappings or [])
         click.echo(f"Wrote {n} mappings to {out_path}")
 
 
 @main.command()
-@click.argument("metabolites_file", type=ExistingPathType, required=False)
+@click.option(
+    "--metabolites-file",
+    type=ExistingPathType,
+    default=None,
+    help="Path to hmdb_metabolites.xml/.zip.",
+)
 @click.option(
     "--proteins-file",
     type=ExistingPathType,
@@ -483,7 +611,7 @@ def _write_chebi_output(
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 def hmdb(  # noqa C901
@@ -501,23 +629,36 @@ def hmdb(  # noqa C901
     and written to separate output files.  Use ``--metabolites-only`` or
     ``--proteins-only`` to restrict to one entity type.
 
-    METABOLITES_FILE is the path to ``hmdb_metabolites.xml`` (or ``.zip``).
-    If omitted, the file is downloaded automatically (subject to Cloudflare
-    blocking, see the warning above).
+    Pass ``--metabolites-file`` and/or ``--proteins-file`` to use local files.
+    If both are omitted, files are downloaded automatically (for now subject to
+    Cloudflare blocking, download manually and pass the local path instead).
     """
     from pysec2pri.api import parse_hmdb, parse_hmdb_proteins
-    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
+    from pysec2pri.exports import write_output, write_pri_ids, write_sec2pri, write_sssom
+
+    metabolites_input = metabolites_file
 
     if metabolites_only and proteins_only:
         raise click.UsageError("--metabolites-only and --proteins-only are mutually exclusive.")
 
-    want_metabolites = not proteins_only
-    want_proteins = not metabolites_only
+    # If only one explicit input file is provided and no only-flags are set,
+    # infer a single-entity run to avoid unnecessary automatic downloads.
+    if not metabolites_only and not proteins_only:
+        if proteins_file is not None and metabolites_input is None:
+            want_metabolites = False
+            want_proteins = True
+        elif metabolites_input is not None and proteins_file is None:
+            want_metabolites = True
+            want_proteins = False
+        else:
+            want_metabolites = True
+            want_proteins = True
+    else:
+        want_metabolites = not proteins_only
+        want_proteins = not metabolites_only
 
-    # ------------------------------------------------------------------ #
-    # Resolve output destination                                           #
-    # ------------------------------------------------------------------ #
-    def _write_result(result: Any, label: str) -> None:
+    # Resolve output destination
+    def _write_result(result: Sec2PriMappingSet, label: str) -> None:
         version = getattr(result, "mapping_set_version", None)
         v_suffix = f"_{version}" if version else ""
         base = f"hmdb_{label}{v_suffix}"
@@ -537,27 +678,18 @@ def hmdb(  # noqa C901
                 out_path = output
             else:
                 out_path = Path(f"{base}_{output_format}.tsv")
-            if output_format == "sssom":
-                write_sssom(result, out_path)
-            elif output_format == "sec2pri":
-                write_sec2pri(result, out_path)
-            elif output_format == "pri_ids":
-                write_pri_ids(result, out_path)
+            write_output(result, output_format, out_path)
             n = len(result.mappings or [])
             click.echo(f"  Wrote {n} {label} mappings to {out_path}")
 
-    # ------------------------------------------------------------------ #
-    # Metabolites                                                          #
-    # ------------------------------------------------------------------ #
+    # Metabolites
     if want_metabolites:
-        met_file = _download_if_needed("hmdb", metabolites_file, "metabolites")
+        met_file = _download_if_needed("hmdb", metabolites_input, "metabolites")
         click.echo("Parsing HMDB metabolites...")
         result_met = parse_hmdb(met_file, version=data_version)
         _write_result(result_met, "metabolites")
 
-    # ------------------------------------------------------------------ #
-    # Proteins                                                             #
-    # ------------------------------------------------------------------ #
+    # Proteins
     if want_proteins:
         prot_file = _download_if_needed("hmdb", proteins_file, "proteins")
         click.echo("Parsing HMDB proteins...")
@@ -577,7 +709,7 @@ def hmdb(  # noqa C901
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 @click.option(
@@ -597,7 +729,7 @@ def hmdb(  # noqa C901
         "Use --status='' to include all statuses."
     ),
 )
-def hgnc(  # noqa C901
+def hgnc(
     input_file: Path | None,
     output: Path | None,
     data_version: str | None,
@@ -605,9 +737,22 @@ def hgnc(  # noqa C901
     symbols_file: Path | None,
     statuses: tuple[str, ...],
 ) -> None:
-    """Parse HGNC withdrawn file and generate mappings."""
+    """Parse HGNC withdrawn file and generate mappings.
+
+    Args:
+        input_file: Path to HGNC withdrawn file.  Downloaded automatically
+            when omitted (unless ``--format symbol2prev`` is used, in which
+            case the complete-set file is downloaded instead).
+        output: Output file path or directory.
+        data_version: Version string embedded in output filenames.
+        output_format: One of ``sssom``, ``sec2pri``, ``symbol2prev``,
+            ``pri_ids``, ``rdf``, ``json``, ``owl``, or ``all``.
+        symbols_file: HGNC complete-set TSV for symbol mappings.
+        statuses: Entry statuses to include (default: ``Approved``).
+    """
     from pysec2pri.api import parse_hgnc, parse_hgnc_symbols
     from pysec2pri.exports import (
+        write_output,
         write_pri_ids,
         write_sec2pri,
         write_sssom,
@@ -656,14 +801,7 @@ def hgnc(  # noqa C901
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
         out_path = _resolve_output_path(output, f"hgnc{status_suffix}", output_format, version)
-        if output_format == "sssom":
-            write_sssom(result, out_path)
-        elif output_format == "sec2pri":
-            write_sec2pri(result, out_path)
-        elif output_format == "symbol2prev":
-            write_symbol2prev(result, out_path)
-        elif output_format == "pri_ids":
-            write_pri_ids(result, out_path)
+        write_output(result, output_format, out_path)
         click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
 
 
@@ -680,7 +818,7 @@ def hgnc(  # noqa C901
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "symbol2prev", "pri_ids", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 @click.option(
@@ -696,9 +834,21 @@ def ncbi(
     output_format: str,
     symbols_file: Path | None,
 ) -> None:
-    """Parse NCBI Gene history file and generate mappings."""
+    """Parse NCBI Gene history file and generate mappings.
+
+    Args:
+        input_file: Path to ``gene_history.gz`` or similar.  Downloaded
+            automatically when omitted.
+        output: Output file path or directory.
+        tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
+        data_version: Version string embedded in output filenames.
+        output_format: One of ``sssom``, ``sec2pri``, ``symbol2prev``,
+            ``pri_ids``, ``rdf``, ``json``, ``owl``, or ``all``.
+        symbols_file: Gene info file used for ``symbol2prev`` output.
+    """
     from pysec2pri.api import parse_ncbi, parse_ncbi_symbols
     from pysec2pri.exports import (
+        write_output,
         write_pri_ids,
         write_sec2pri,
         write_sssom,
@@ -726,14 +876,7 @@ def ncbi(
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
         out_path = _resolve_output_path(output, "ncbi", output_format, version)
-        if output_format == "sssom":
-            write_sssom(result, out_path)
-        elif output_format == "sec2pri":
-            write_sec2pri(result, out_path)
-        elif output_format == "symbol2prev":
-            write_symbol2prev(result, out_path)
-        elif output_format == "pri_ids":
-            write_pri_ids(result, out_path)
+        write_output(result, output_format, out_path)
         click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
 
 
@@ -749,7 +892,7 @@ def ncbi(
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 @click.option(
@@ -764,9 +907,20 @@ def uniprot(
     output_format: str,
     delac_file: Path | None,
 ) -> None:
-    """Parse UniProt secondary accessions file and generate mappings."""
+    """Parse UniProt secondary accessions file and generate mappings.
+
+    Args:
+        input_file: Path to UniProt secondary accessions file
+            (``sec_ac.txt``).  Downloaded automatically when omitted.
+        output: Output file path or directory.
+        data_version: Version string embedded in output filenames.
+        output_format: One of ``sssom``, ``sec2pri``, ``pri_ids``,
+            ``rdf``, ``json``, ``owl``, or ``all``.
+        delac_file: Path to ``delac_sp.txt``.  Downloaded automatically
+            when omitted.
+    """
     from pysec2pri.api import parse_uniprot
-    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
+    from pysec2pri.exports import write_output, write_pri_ids, write_sec2pri, write_sssom
 
     if input_file is None or delac_file is None:
         from pysec2pri.download import (
@@ -803,12 +957,7 @@ def uniprot(
         click.echo(f"Wrote all formats to {out_dir}/")
     else:
         out_path = _resolve_output_path(output, "uniprot", output_format, version)
-        if output_format == "sssom":
-            write_sssom(result, out_path)
-        elif output_format == "sec2pri":
-            write_sec2pri(result, out_path)
-        elif output_format == "pri_ids":
-            write_pri_ids(result, out_path)
+        write_output(result, output_format, out_path)
         click.echo(f"Wrote {len(result.mappings or [])} mappings to {out_path}")
 
 
@@ -819,7 +968,7 @@ def uniprot(
     "--format",
     "output_format",
     default="sssom",
-    type=click.Choice(["sssom", "sec2pri", "pri_ids", "all"]),
+    type=click.Choice(["sssom", "sec2pri", "pri_ids", "rdf", "json", "owl", "all"]),
     help="Output format",
 )
 @click.option(
@@ -853,7 +1002,7 @@ def wikidata(
     Uses the QLever endpoint for better performance.
     """
     from pysec2pri.api import parse_wikidata
-    from pysec2pri.exports import write_pri_ids, write_sec2pri, write_sssom
+    from pysec2pri.exports import write_output, write_pri_ids, write_sec2pri, write_sssom
 
     # Determine which entity types to process
     if entity_type:
@@ -907,18 +1056,20 @@ def wikidata(
                 fname = f"{out_prefix}{v_suffix}_{output_format}.tsv"
                 out_path = out_dir / fname
 
-            if output_format == "sssom":
-                write_sssom(result, out_path)
-            elif output_format == "sec2pri":
-                write_sec2pri(result, out_path)
-            elif output_format == "pri_ids":
-                write_pri_ids(result, out_path)
+            write_output(result, output_format, out_path)
             n = len(result.mappings or [])
             click.echo(f"  Wrote {n} {etype} mappings to {out_path}")
 
 
 def _parse_datasource(ds: str) -> MappingSet:
-    """Download and parse a single datasource."""
+    """Download and parse a single datasource.
+
+    Args:
+        ds: Datasource name (e.g. ``"chebi"``, ``"hgnc"``, ``"hmdb"``).
+
+    Returns:
+        Parsed :class:`~sssom_schema.MappingSet`.
+    """
     from pysec2pri.api import (
         combine_mapping_sets,
         parse_chebi,
@@ -965,7 +1116,7 @@ def _parse_datasource(ds: str) -> MappingSet:
 
 def _get_formats_for_datasource(
     ds: str,
-) -> list[tuple[str, Callable[[MappingSet, Path], None]]]:
+) -> list[tuple[str, Callable[..., Path]]]:
     """Get the list of export formats applicable to a datasource."""
     from pysec2pri.exports import (
         write_name2synonym,
@@ -975,7 +1126,7 @@ def _get_formats_for_datasource(
         write_symbol2prev,
     )
 
-    base_formats: list[tuple[str, Any]] = [
+    base_formats: list[tuple[str, Callable[..., Path]]] = [
         ("sssom", write_sssom),
         ("sec2pri", write_sec2pri),
         ("pri_ids", write_pri_ids),
