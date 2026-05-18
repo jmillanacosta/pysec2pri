@@ -300,7 +300,7 @@ def _parse_secondary_ids_tsv(
         three_star_ids = _get_3star_compound_ids(compounds_path, show_progress)
         df = df.filter(pl.col("compound_id").is_in(three_star_ids))
 
-    # Build mapping tuples with CHEBI: prefix — vectorized, no Python row loop
+    # Build mapping tuples with CHEBI: prefix
     mappings: list[tuple[str, str]] = df.select(
         [
             (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("primary_id"),
@@ -359,7 +359,7 @@ def _parse_names_tsv(
     # Filter to only synonym rows (where name != primary_name)
     synonyms_df = df_with_primary.filter(pl.col("name") != pl.col("primary_name"))
 
-    # Build mapping tuples — vectorized, no Python row loop
+    # Build mapping tuples
     mappings: list[tuple[str, str, str]] = synonyms_df.select(
         [
             (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("subject_id"),

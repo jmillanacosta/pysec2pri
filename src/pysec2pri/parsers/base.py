@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import yaml
 from sssom_schema import Mapping, MappingCardinalityEnum, MappingSet
@@ -16,6 +16,11 @@ from tqdm import tqdm
 
 from pysec2pri.logging import logger
 from pysec2pri.version import VERSION
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import rdflib
+    from sssom import sssom_document
 
 _T = TypeVar("_T")
 
@@ -301,7 +306,355 @@ class BaseDownloader(ABC):
 
 
 class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
-    """A MappingSet for Sec2Pri, with helpers for cardinality."""
+    """A MappingSet for Sec2Pri, with helpers for cardinality and export."""
+
+    # Export helpers
+
+    def _default_stem(self) -> str:
+        """Derive a base filename stem from mapping set metadata."""
+        ms_id: str = str(getattr(self, "mapping_set_id", None) or "")
+        if ms_id:
+            stem = ms_id.rstrip("/").rsplit("/", 1)[-1]
+        else:
+            stem = str(getattr(self, "mapping_set_title", None) or "mapping_set")
+            stem = stem.lower().replace(" ", "_")
+        version = getattr(self, "mapping_set_version", None)
+        if version:
+            stem = f"{stem}_{version}"
+        return stem
+
+    def _resolve_path(self, output_path: Path | str | None, suffix: str) -> Path:
+        """Return *output_path* if given, else auto-generate one."""
+        if output_path is not None:
+            return Path(output_path)
+        return Path(f"{self._default_stem()}{suffix}")
+
+    def to_sssom(self, output_path: Path | str | None = None) -> sssom_document.MappingSetDocument:
+        """Return an SSSOM ``MappingSetDocument``, optionally writing to TSV.
+
+        Args:
+            output_path: If given, the document is also serialised to an SSSOM
+                TSV file at this path
+
+        Returns:
+            :class:`sssom.sssom_document.MappingSetDocument` for the mapping set.
+        """
+        import curies
+        from sssom.sssom_document import MappingSetDocument
+
+        raw_curie_map: object = self.curie_map or {}
+        records: list[curies.Record] = []
+        if isinstance(raw_curie_map, dict):
+            for k, v in raw_curie_map.items():
+                if isinstance(v, str):
+                    uri_prefix: str = v
+                elif hasattr(v, "prefix_url"):
+                    uri_prefix = cast(str, v.prefix_url)
+                else:
+                    continue
+                records.append(curies.Record(prefix=k, uri_prefix=uri_prefix))
+        converter = curies.Converter(records=records)
+        doc = MappingSetDocument(mapping_set=self, converter=converter)
+
+        if output_path is not None:
+            from pysec2pri.exports import write_sssom
+
+            write_sssom(self, self._resolve_path(output_path, "_sssom.tsv"))
+
+        return doc
+
+    def to_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of secondary to primary mappings, optionally writing to TSV.
+
+        Columns: ``subject_id``, ``object_id``, ``predicate_id``,
+        ``mapping_cardinality``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with one row per mapping.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "object_id": str(getattr(m, "object_id", "") or ""),
+                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
+                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+            }
+            for m in (self.mappings or [])  # type: ignore[has-type]
+        ]
+        df = pd.DataFrame(
+            rows, columns=["subject_id", "object_id", "predicate_id", "mapping_cardinality"]
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_sec2pri.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def to_pri_ids(self, output_path: Path | str | None = None) -> list[str]:
+        """Return a sorted list of unique primary IDs, optionally writing to TXT.
+
+        Args:
+            output_path: If given, the IDs are also written one-per-line to a
+                text file.
+
+        Returns:
+            Sorted list of unique primary ID strings.
+        """
+        ids = sorted(
+            {str(getattr(m, "object_id", None) or "") for m in (self.mappings or [])}  # type: ignore[has-type]
+            - {""}
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_pri_ids.txt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(ids) + "\n", encoding="utf-8")
+
+        return ids
+
+    def to_rdf(
+        self,
+        output_path: Path | str | None = None,
+        serialisation: str = "turtle",
+    ) -> rdflib.Graph:
+        """Return an RDFLib graph, optionally writing it to a file.
+
+        When *output_path* is given (or auto-generated via the ``save``
+        dispatcher), the graph is also serialised to disk.  Either way
+        the :class:`rdflib.Graph` is returned so callers can query or
+        manipulate it directly.
+
+        Args:
+            output_path: Destination path. Pass a path (or ``None`` to
+                auto-generate one) to persist the graph.  If you only want
+                the in-memory graph without touching the file-system, call
+                ``to_rdf()`` with no arguments and ignore the path attribute.
+            serialisation: RDFLib serialisation format (default: ``"turtle"``).
+
+        Returns:
+            :class:`rdflib.Graph` containing all mappings as RDF triples.
+        """
+        import io
+
+        import rdflib
+        from sssom.writers import write_rdf as _sssom_write_rdf
+
+        from pysec2pri.exports import _to_msdf_via_sssom_parser, write_rdf
+
+        msdf = _to_msdf_via_sssom_parser(self)
+        if msdf is None:
+            raise ValueError("Failed to convert mapping set to RDF.")
+
+        buf = io.StringIO()
+        _sssom_write_rdf(msdf, buf, serialisation=serialisation)
+        g = rdflib.Graph()
+        g.parse(data=buf.getvalue(), format=serialisation)
+
+        if output_path is not None:
+            write_rdf(self, self._resolve_path(output_path, ".ttl"), serialisation=serialisation)
+
+        return g
+
+    def to_json(self, output_path: Path | str | None = None) -> dict[str, Any]:
+        """Return the mapping set as a JSON-compatible ``dict``, optionally writing to file.
+
+        Args:
+            output_path: If given, the JSON is also written to this path.
+
+        Returns:
+            ``dict`` representation of the mapping set in SSSOM JSON format.
+        """
+        import io
+        import json
+
+        from sssom.writers import write_json as _sssom_write_json
+
+        from pysec2pri.exports import _to_msdf_via_sssom_parser
+
+        msdf = _to_msdf_via_sssom_parser(self)
+        if msdf is None:
+            raise ValueError("Failed to convert mapping set to JSON.")
+        buf = io.StringIO()
+        _sssom_write_json(msdf, buf)
+        data: dict[str, Any] = json.loads(buf.getvalue())
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, ".json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(buf.getvalue(), encoding="utf-8")
+
+        return data
+
+    def to_owl(
+        self, output_path: Path | str | None = None, serialisation: str = "turtle"
+    ) -> rdflib.Graph:
+        """Return an OWL ``rdflib.Graph``, optionally writing to file.
+
+        Args:
+            output_path: If given, the graph is also serialised to this path.
+            serialisation: RDFLib serialisation format (default: ``"turtle"``).
+
+        Returns:
+            :class:`rdflib.Graph` containing OWL axioms for the mapping set.
+        """
+        import io
+
+        import rdflib
+        from sssom.writers import write_owl as _sssom_write_owl
+
+        from pysec2pri.exports import _to_msdf_via_sssom_parser
+
+        msdf = _to_msdf_via_sssom_parser(self)
+        if msdf is None:
+            raise ValueError("Failed to convert mapping set to OWL.")
+        buf = io.StringIO()
+        _sssom_write_owl(msdf, buf, serialisation=serialisation)
+        g = rdflib.Graph()
+        g.parse(data=buf.getvalue(), format=serialisation)
+
+        if output_path is not None:
+            from pysec2pri.exports import write_owl
+
+            write_owl(
+                self, self._resolve_path(output_path, "_owl.ttl"), serialisation=serialisation
+            )
+
+        return g
+
+    def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a name to synonym ``DataFrame``, optionally writing to TSV.
+
+        Only rows where ``subject_label`` or ``object_label`` is set are
+        included.  Columns: ``subject_id``, ``subject_label``, ``object_label``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with label mapping rows.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "subject_label": str(getattr(m, "subject_label", "") or ""),
+                "object_label": str(getattr(m, "object_label", "") or ""),
+            }
+            for m in (self.mappings or [])  # type: ignore[has-type]
+            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
+        ]
+        df = pd.DataFrame(rows, columns=["subject_id", "subject_label", "object_label"])
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_name2synonym.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def to_symbol2prev(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a symbol to previous-symbol ``DataFrame``, optionally writing to TSV.
+
+        Only rows where ``subject_label`` or ``object_label`` is set are
+        included.  Columns: ``subject_id``, ``subject_label``, ``object_label``,
+        ``mapping_cardinality``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with symbol mapping rows.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "subject_label": str(getattr(m, "subject_label", "") or ""),
+                "object_label": str(getattr(m, "object_label", "") or ""),
+                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+            }
+            for m in (self.mappings or [])  # type: ignore[has-type]
+            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
+        ]
+        df = pd.DataFrame(
+            rows, columns=["subject_id", "subject_label", "object_label", "mapping_cardinality"]
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_symbol2prev.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def save(
+        self,
+        fmt: str,
+        output_path: Path | str | None = None,
+        **kwargs: object,
+    ) -> Path:
+        """Write to any supported format by name.
+
+        Args:
+            fmt: Format key, one of ``"sssom"``, ``"sec2pri"``, ``"pri_ids"``,
+            ``"rdf"``, ``"json"``, ``"owl"``, ``"name2synonym"``,
+            ``"symbol2prev"``.
+            output_path: Destination path. Auto-generated if ``None``.
+            **kwargs: Forwarded to the format-specific method.
+
+        Returns:
+            Path to the written file.
+
+        Raises:
+            ValueError: For unknown format keys.
+        """
+        # "rdf", "owl", "json" return in-memory objects, save() must always return a Path.
+        if fmt in ("rdf", "owl", "json"):
+            from collections.abc import Callable as _Callable
+
+            from pysec2pri.exports import write_json, write_owl, write_rdf
+
+            _write_fns: dict[str, tuple[_Callable[..., Path], str]] = {
+                "rdf": (write_rdf, ".ttl"),
+                "owl": (write_owl, "_owl.ttl"),
+                "json": (write_json, ".json"),
+            }
+            fn, suffix = _write_fns[fmt]
+            return fn(self, self._resolve_path(output_path, suffix), **kwargs)
+
+        # "sssom" returns a MappingSetDocument
+        if fmt == "sssom":
+            from pysec2pri.exports import write_sssom
+
+            return write_sssom(self, self._resolve_path(output_path, "_sssom.tsv"))
+
+        _dispatch: dict[str, tuple[Any, str]] = {
+            "sec2pri": (self.to_sec2pri, "_sec2pri.tsv"),
+            "pri_ids": (self.to_pri_ids, "_pri_ids.txt"),
+            "name2synonym": (self.to_name2synonym, "_name2synonym.tsv"),
+            "symbol2prev": (self.to_symbol2prev, "_symbol2prev.tsv"),
+        }
+        entry = _dispatch.get(fmt)
+        if entry is None:
+            raise ValueError(
+                f"Unknown format {fmt!r}. Choose from: "
+                f"{sorted([*_dispatch, 'rdf', 'owl', 'json', 'sssom'])}"
+            )
+        method, suffix = entry
+        resolved = self._resolve_path(output_path, suffix)
+        method(resolved, **kwargs)
+        return resolved
+
+    # Cardinality helpers
 
     def _compute_cardinalities(self, on: str = "id") -> None:
         """Compute and set mapping_cardinality on all mappings.

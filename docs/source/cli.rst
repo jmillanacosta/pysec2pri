@@ -2,9 +2,7 @@
 Command Line Interface
 ######################
 
-The ``pysec2pri`` CLI provides commands for each supported database.
-
-All commands write SSSOM-compliant TSV files by default.
+The ``pysec2pri`` CLI provides easy commands for each supported database.
 
 .. click:: pysec2pri.cli:main
     :prog: pysec2pri

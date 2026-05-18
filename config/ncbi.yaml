@@ -73,14 +73,14 @@ mapping:
   creator_label: null
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: null
-  subject_source: "NCBIGene"
+  subject_source: "ncbi:gene"
   subject_source_version: null
   object_type: null
-  object_source: "NCBIGene"
+  object_source: "ncbi:gene"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "NCBIGene"
+  mapping_source: "ncbi:gene"
   mapping_cardinality: null
   cardinality_scope: null
   mapping_tool: "pysec2pri"

@@ -73,10 +73,10 @@ mapping:
   creator_label: null
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: null
-  subject_source: null
+  subject_source: "obo:chebi.owl"
   subject_source_version: null
   object_type: null
-  object_source: null
+  object_source: "obo:chebi.owl"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
