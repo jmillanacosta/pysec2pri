@@ -170,9 +170,7 @@ class ChEBIParser(BaseParser):
         mappings = self._build_label_mappings(raw_mappings)
         return self._create_mapping_set(mappings, mapping_type="label")
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
 
     def _resolve_tsv_paths(
         self,
@@ -594,7 +592,7 @@ class ChEBIDownloader(BaseDownloader):
 
         if use_tsv:
             # New TSV format (>= 245)
-            new_urls = download_urls.get("new", {})
+            new_urls: dict[str, str] = download_urls.get("new", {})
             return {
                 "secondary_ids": new_urls["secondary_ids"].format(version=v),
                 "names": new_urls["names"].format(version=v),
@@ -606,7 +604,7 @@ class ChEBIDownloader(BaseDownloader):
 
             if not self.is_new_format(v):
                 # Legacy releases (< 245): use legacy URLs
-                legacy_urls = download_urls.get("legacy", {})
+                legacy_urls: dict[str, str] = download_urls.get("legacy", {})
                 url = legacy_urls[sdf_key].format(version=v)
             else:
                 # New releases (>= 245) with --use-sdf: use new SDF URLs

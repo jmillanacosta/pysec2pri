@@ -10,8 +10,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pysec2pri.exports import (
+    write_json,
     write_name2synonym,
+    write_output,
+    write_owl,
     write_pri_ids,
+    write_rdf,
     write_sec2pri,
     write_sssom,
     write_symbol2prev,
@@ -35,7 +39,11 @@ __all__ = [
     "parse_wikidata",
     "write_all_formats",
     "write_diff_output",
+    "write_json",
     "write_name2synonym",
+    "write_output",
+    "write_owl",
+    "write_rdf",
     "write_sec2pri",
     "write_sssom",
     "write_symbol2prev",
@@ -349,6 +357,9 @@ def write_all_formats(
     write_sssom(mapping_set, output_dir / f"{base_name}_sssom.tsv")
     write_sec2pri(mapping_set, output_dir / f"{base_name}_sec2pri.tsv")
     write_pri_ids(mapping_set, output_dir / f"{base_name}_pri_ids.tsv")
+    write_rdf(mapping_set, output_dir / f"{base_name}.ttl")
+    write_json(mapping_set, output_dir / f"{base_name}.json")
+    write_owl(mapping_set, output_dir / f"{base_name}_owl.ttl")
 
     if include_name2synonym:
         write_name2synonym(mapping_set, output_dir / f"{base_name}_name2synonym.tsv")

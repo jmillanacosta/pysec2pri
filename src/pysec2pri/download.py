@@ -55,7 +55,7 @@ class CloudflareBlockedError(Exception):
             f"Download of '{url}' was blocked by Cloudflare bot protection.\n"
             "Please download the file manually in a web browser and pass the "
             "local path as an argument "
-            "(e.g. pysec2pri hmdb /path/to/hmdb_metabolites.zip).\n"
+            "(e.g. pysec2pri hmdb --metabolites-file /path/to/hmdb_metabolites.zip).\n"
         )
 
 
@@ -406,7 +406,7 @@ def _get_chebi_urls_for_version(
 
     if release_num >= new_format_version:
         # New TSV format (>= 245)
-        new_urls = download_urls.get("new", {})
+        new_urls: dict[str, str] = download_urls.get("new", {})
         return {
             "secondary_ids": new_urls["secondary_ids"].format(version=version),
             "names": new_urls["names"].format(version=version),
@@ -414,7 +414,7 @@ def _get_chebi_urls_for_version(
         }
     else:
         # Legacy SDF format (< 245)
-        legacy_urls = download_urls.get("legacy", {})
+        legacy_urls: dict[str, str] = download_urls.get("legacy", {})
         sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
         url = legacy_urls[sdf_key].format(version=version)
         return {"sdf": url}
