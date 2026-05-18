@@ -6,14 +6,17 @@ databases including ChEBI, HMDB, HGNC, NCBI Gene, and UniProt.
 """
 
 from pysec2pri.api import (
-    parse_chebi,
-    parse_chebi_synonyms,
-    parse_hgnc,
-    parse_hgnc_symbols,
-    parse_hmdb,
-    parse_ncbi,
-    parse_ncbi_symbols,
-    parse_uniprot,
+    generate_chebi,
+    generate_chebi_synonyms,
+    generate_hgnc,
+    generate_hgnc_symbols,
+    generate_hmdb,
+    generate_hmdb_proteins,
+    generate_ncbi,
+    generate_ncbi_symbols,
+    generate_uniprot,
+    generate_wikidata,
+    resolve_ids,
     write_json,
     write_name2synonym,
     write_output,
@@ -30,6 +33,7 @@ from pysec2pri.parsers.base import (
     LabelMappingSet,
     Sec2PriMappingSet,
 )
+from pysec2pri.update_ids import build_lookup, update_ids
 
 __all__ = [
     # Sentinel values
@@ -39,15 +43,21 @@ __all__ = [
     "IdMappingSet",
     "LabelMappingSet",
     "Sec2PriMappingSet",
-    # Parsing functions
-    "parse_chebi",
-    "parse_chebi_synonyms",
-    "parse_hgnc",
-    "parse_hgnc_symbols",
-    "parse_hmdb",
-    "parse_ncbi",
-    "parse_ncbi_symbols",
-    "parse_uniprot",
+    # ID resolution
+    "build_lookup",
+    # generate_* (download + parse in one call)
+    "generate_chebi",
+    "generate_chebi_synonyms",
+    "generate_hgnc",
+    "generate_hgnc_symbols",
+    "generate_hmdb",
+    "generate_hmdb_proteins",
+    "generate_ncbi",
+    "generate_ncbi_symbols",
+    "generate_uniprot",
+    "generate_wikidata",
+    "resolve_ids",
+    "update_ids",
     # Export functions
     "write_json",
     "write_name2synonym",

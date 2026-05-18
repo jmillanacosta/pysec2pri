@@ -206,7 +206,7 @@ def write_pri_ids(
 
     # Collect unique primary IDs
     pri_ids: set[str] = set()
-    for m in mapping_set.mappings or []:
+    for m in mapping_set.mappings or []:  # type: ignore[has-type]
         obj_id = getattr(m, "object_id", None)
         if obj_id:
             pri_ids.add(str(obj_id))
@@ -240,7 +240,7 @@ def write_sec2pri(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
+        for m in mapping_set.mappings or []:  # type: ignore[has-type]
             values = [
                 str(getattr(m, "subject_id", "") or ""),
                 str(getattr(m, "object_id", "") or ""),
@@ -275,7 +275,7 @@ def write_name2synonym(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
+        for m in mapping_set.mappings or []:  # type: ignore[has-type]
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
@@ -313,7 +313,7 @@ def write_symbol2prev(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
+        for m in mapping_set.mappings or []:  # type: ignore[has-type]
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
@@ -345,7 +345,7 @@ def write_secondary(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     sec_ids: set[str] = set()
-    for m in mapping_set.mappings or []:
+    for m in mapping_set.mappings or []:  # type: ignore[has-type]
         subj_id = getattr(m, "subject_id", None)
         if subj_id:
             sec_ids.add(str(subj_id))

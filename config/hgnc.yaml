@@ -73,14 +73,14 @@ mapping:
   creator_label: null
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: null
-  subject_source: "HGNC"
+  subject_source: "genenames:download"
   subject_source_version: null
   object_type: null
-  object_source: "HGNC"
+  object_source: "genenames:download"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "HGNC"
+  mapping_source: "genenames:download"
   mapping_cardinality: null
   cardinality_scope: null
   mapping_tool: "pysec2pri"

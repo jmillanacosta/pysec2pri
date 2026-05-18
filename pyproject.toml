@@ -218,6 +218,7 @@ extend-select = [
 ]
 ignore = [
     "D105", # Missing docstring in magic method
+    "D418", # Function decorated with @overload shouldn't contain a docstring
     "E203", # Black conflicts with the following
     "S101", # Used in tests,
     "RUF001", # Special characters for tests

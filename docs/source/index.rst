@@ -57,7 +57,7 @@ Quick Start
 
     # Access sssom_schema.Mapping objects directly
     for mapping in mapping_set.mappings:
-        print(f"{mapping.object_id}  to  {mapping.subject_id}")
+        print(f"{mapping.object_id} to {mapping.subject_id}")
 
 .. toctree::
     :maxdepth: 2
@@ -81,3 +81,4 @@ Quick Start
     api
     parsers
     models
+    update_ids
