@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
+from importlib import resources as _importlib_resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
@@ -31,7 +32,7 @@ WITHDRAWN_ENTRY_LABEL = "Withdrawn Entry"
 
 # Config directory path
 
-CONFIG_DIR = Path(__file__).parent.parent.parent.parent / "config"
+CONFIG_DIR = Path(_importlib_resources.files("pysec2pri.config"))  # type: ignore[arg-type]
 
 
 @dataclass
