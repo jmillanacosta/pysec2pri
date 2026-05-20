@@ -17,21 +17,21 @@ SSSOM outputs use **sssom-schema**:
 Supported Databases
 ===================
 
-+--------------+------------------------------------------+
-| Database     | Mapping Types                            |
-+==============+==========================================+
-| **ChEBI**    | Secondary to Primary IDs, Name to Synonyms     |
-+--------------+------------------------------------------+
-| **HMDB**     | Secondary to Primary IDs                    |
-+--------------+------------------------------------------+
-| **HGNC**     | Withdrawn to Current IDs, Symbol to Previous   |
-+--------------+------------------------------------------+
-| **NCBI Gene**| Discontinued to Current IDs, Symbol to Aliases |
-+--------------+------------------------------------------+
-| **UniProt**  | Secondary to Primary accessions             |
-+--------------+------------------------------------------+
-| **Wikidata** | Redirect mappings (SPARQL)               |
-+--------------+------------------------------------------+
++--------------+-------------------------------------------------------------+
+| Database     | Mapping Types                                               |
++==============+=============================================================+
+| **ChEBI**    | Secondary to Primary IDs, Synonyms to name                  |
++--------------+-------------------------------------------------------------+
+| **HMDB**     | Secondary to Primary IDs                                    |
++--------------+-------------------------------------------------------------+
+| **HGNC**     | Withdrawn to Current IDs, Secondary to Primary Symbols      |
++--------------+-------------------------------------------------------------+
+| **NCBI Gene**| Discontinued to Current IDs, Secondary to Primary Symbols   |
++--------------+-------------------------------------------------------------+
+| **UniProt**  | Secondary to Primary accessions                             |
++--------------+-------------------------------------------------------------+
+| **Wikidata** | Redirect mappings (SPARQL)                                  |
++--------------+-------------------------------------------------------------+
 
 Quick Start
 ===========

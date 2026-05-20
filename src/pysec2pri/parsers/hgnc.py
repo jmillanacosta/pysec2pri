@@ -72,11 +72,19 @@ class HGNCParser(BaseParser):
         """Get the complete set download URL from config."""
         return self.get_download_url("complete") or ""
 
-    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+    def parse(
+        self,
+        input_path: Path | str | None,
+        complete_set_path: Path | str | None = None,
+    ) -> Sec2PriMappingSet:
         """Parse HGNC withdrawn TSV file into an IdMappingSet.
 
         Args:
             input_path: Path to the withdrawn HGNC TSV file.
+            complete_set_path: Optional path to the HGNC complete set TSV.
+                When supplied, ``all_primary_ids`` on the returned mapping set
+                is populated with every current HGNC ID, not just those that
+                appear as ``object_id`` in a withdrawn to primary mapping.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
@@ -91,6 +99,45 @@ class HGNCParser(BaseParser):
 
         # Create IdMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
+
+        # Populate the full primary ID set when the complete set is available
+        if complete_set_path is not None:
+            object.__setattr__(
+                mapping_set,
+                "_primary_ids",
+                self._extract_primary_ids(Path(complete_set_path)),
+            )
+
+        return mapping_set
+
+    def parse_primary_ids(
+        self,
+        complete_set_path: Path | str | None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set whose only content is the full primary ID list.
+
+        Reads the HGNC complete set to extract every current HGNC ID and
+        stores it in ``_primary_ids``.  The ``mappings`` list is intentionally
+        left empty, this mapping set exists only to drive ``to_pri_ids()``.
+
+        Args:
+            complete_set_path: Path to the HGNC complete set TSV file.
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.IdMappingSet` with no mappings and
+            ``_primary_ids`` populated with all current HGNC IDs.
+        """
+        if complete_set_path is None:
+            raise ValueError("complete_set_path must not be None")
+        complete_set_path = Path(complete_set_path)
+        self._resolve_version(complete_set_path)
+
+        mapping_set = self._create_mapping_set([], mapping_type="id")
+        object.__setattr__(
+            mapping_set,
+            "_primary_ids",
+            self._extract_primary_ids(complete_set_path),
+        )
         return mapping_set
 
     def parse_symbols(
@@ -137,6 +184,26 @@ class HGNCParser(BaseParser):
         id_mappings = self.parse(withdrawn_path)
         label_mappings = self.parse_symbols(complete_set_path)
         return id_mappings, label_mappings
+
+    def _extract_primary_ids(self, file_path: Path) -> set[str]:
+        """Extract all current HGNC IDs from the complete set file.
+
+        Args:
+            file_path: Path to the HGNC complete set TSV file.
+
+        Returns:
+            Set of all HGNC IDs present in the complete set.
+        """
+        df = pl.read_csv(
+            file_path,
+            separator="\t",
+            infer_schema_length=10000,
+            null_values=[""],
+        )
+        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
+        if hgnc_id_col is None:
+            raise ValueError(f"Could not find hgnc_id column in {file_path}")
+        return {str(val) for val in df[hgnc_id_col].drop_nulls().to_list()}
 
     def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
         """Parse withdrawn HGNC file for ID-to-ID mappings.
@@ -188,10 +255,10 @@ class HGNCParser(BaseParser):
             if not merged_info and status and "Entry Withdrawn" in str(status):
                 rows_data.append(
                     {
-                        "subject_id": WITHDRAWN_ENTRY,
-                        "object_id": hgnc_id,
-                        "subject_label": WITHDRAWN_ENTRY_LABEL,
-                        "object_label": symbol or "",
+                        "subject_id": hgnc_id,
+                        "object_id": WITHDRAWN_ENTRY,
+                        "subject_label": symbol or "",
+                        "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
                     }
@@ -205,10 +272,10 @@ class HGNCParser(BaseParser):
                     target_id, target_symbol = parsed
                     rows_data.append(
                         {
-                            "subject_id": target_id,
-                            "object_id": hgnc_id,
-                            "subject_label": target_symbol or "",
-                            "object_label": symbol or "",
+                            "subject_id": hgnc_id,
+                            "object_id": target_id,
+                            "subject_label": symbol or "",
+                            "object_label": target_symbol or "",
                             "predicate_id": m_meta["predicate_id"],
                             "predicate_label": m_meta.get("predicate_label"),
                         }
@@ -281,9 +348,9 @@ class HGNCParser(BaseParser):
                 rows_data.append(
                     {
                         "subject_id": hgnc_id,
-                        "subject_label": symbol,
+                        "subject_label": alias,
                         "object_id": hgnc_id,
-                        "object_label": alias,
+                        "object_label": symbol,
                         "comment": "Alias symbol mapping.",
                     }
                 )
@@ -292,9 +359,9 @@ class HGNCParser(BaseParser):
                 rows_data.append(
                     {
                         "subject_id": hgnc_id,
-                        "subject_label": symbol,
+                        "subject_label": prev,
                         "object_id": hgnc_id,
-                        "object_label": prev,
+                        "object_label": symbol,
                         "comment": "Previous symbol mapping.",
                     }
                 )

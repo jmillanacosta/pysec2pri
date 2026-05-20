@@ -1,7 +1,7 @@
-"""Main API functions for pysec2pri.
+"""Main functions for pysec2pri.
 
-This module provides high-level functions for parsing biological database
-secondary-to-primary mapping files and generating output.
+This module provides functions for parsing biological database
+secondary-to-primary mapping files and generating and using the standardized Mapping sets.
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ from pysec2pri.exports import (
     write_rdf,
     write_sec2pri,
     write_sssom,
-    write_symbol2prev,
+)
+from pysec2pri.exports import (
+    write_symbol2prev as write_symbol_sec2pri,
 )
 
 if TYPE_CHECKING:
@@ -27,11 +29,14 @@ if TYPE_CHECKING:
     from pysec2pri.diff import MappingDiff
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
+from pysec2pri.parsers.base import IdMappingSet, LabelMappingSet
+
 __all__ = [
     "combine_mapping_sets",
     "generate_chebi",
     "generate_chebi_synonyms",
     "generate_hgnc",
+    "generate_hgnc_primary_ids",
     "generate_hgnc_symbols",
     "generate_hmdb",
     "generate_hmdb_proteins",
@@ -39,7 +44,11 @@ __all__ = [
     "generate_ncbi_symbols",
     "generate_uniprot",
     "generate_wikidata",
+    "generate_wikidata_symbols",
+    "load_label_mapping",
+    "load_mapping",
     "resolve_ids",
+    "resolve_symbols",
     "save",
     "write_all_formats",
     "write_diff_output",
@@ -50,18 +59,29 @@ __all__ = [
     "write_rdf",
     "write_sec2pri",
     "write_sssom",
-    "write_symbol2prev",
+    "write_symbol_sec2pri",
 ]
 
 
-def _auto_download(datasource: str, version: str | None = None) -> dict[str, Path]:
-    """Download all files for *datasource* into a temp dir."""
+def _auto_download(
+    datasource: str,
+    version: str | None = None,
+    keys: list[str] | None = None,
+) -> dict[str, Path]:
+    """Download files for *datasource* into a temp dir.
+
+    Args:
+        datasource: Datasource name (e.g. ``"hgnc"``).
+        version: Optional specific version to download.
+        keys: Optional list of file-key names to download. When given, only
+            those keys are fetched (e.g. ``["complete"]``).
+    """
     import tempfile
 
     from pysec2pri.download import download_datasource
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_{datasource}_"))
-    return download_datasource(datasource, tmpdir, version=version)
+    return download_datasource(datasource, tmpdir, version=version, keys=keys)
 
 
 def generate_chebi(
@@ -127,25 +147,64 @@ def generate_chebi_synonyms(
 
 def generate_hgnc(
     input_path: Path | str | None = None,
+    complete_set_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
     """Return HGNC secondary to primary ID mappings.
 
-    Downloads the withdrawn file automatically when ``input_path`` is omitted.
+    Downloads the withdrawn and complete set files automatically when
+    ``input_path`` / ``complete_set_path`` are omitted.  The complete set is
+    used to populate the full list of current primary IDs so that
+    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids` returns the
+    authoritative list (~45 k IDs) rather than just the ~5 k primaries that
+    happen to have a secondary.
 
     Args:
         input_path: Local HGNC withdrawn TSV. Auto-downloaded if ``None``.
+        complete_set_path: Local HGNC complete set TSV. Auto-downloaded if
+            ``None``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import HGNCParser
+
+    if input_path is None or complete_set_path is None:
+        files = _auto_download("hgnc", version)
+        if input_path is None:
+            input_path = files["withdrawn"]
+        if complete_set_path is None:
+            complete_set_path = files["complete"]
+
+    parser = HGNCParser(version=version, show_progress=show_progress)
+    return parser.parse(Path(input_path), complete_set_path=Path(complete_set_path))
+
+
+def generate_hgnc_primary_ids(
+    input_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current HGNC primary IDs.
+
+    Only the HGNC complete set file is downloaded/read.  The returned mapping
+    set has an empty ``mappings`` list; its ``_primary_ids`` store is
+    populated with every current HGNC ID so that ``to_pri_ids()`` produces
+    the authoritative complete list, not just the subset of primaries that
+    happen to have an associated secondary.
+
+    Args:
+        input_path: Local HGNC complete set TSV. Auto-downloaded if ``None``.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
     from pysec2pri.parsers import HGNCParser
 
     if input_path is None:
-        input_path = _auto_download("hgnc", version)["withdrawn"]
+        input_path = _auto_download("hgnc", version, keys=["complete"])["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
-    return parser.parse(Path(input_path))
+    return parser.parse_primary_ids(Path(input_path))
 
 
 def generate_hgnc_symbols(
@@ -343,6 +402,58 @@ def generate_wikidata(
     return parser.parse()
 
 
+def generate_wikidata_symbols(
+    input_path: Path | str | None = None,
+    entity_type: str | None = None,
+    version: str | None = None,
+    endpoint: str | None = None,
+    show_progress: bool = True,
+    test_subset: bool = False,
+) -> LabelMappingSet:
+    """Return Wikidata label mappings (previous label  to current label).
+
+    Queries the QLever Wikidata endpoint when ``input_path`` is omitted.
+    If ``entity_type`` is ``None``, all entity types are queried and
+    their label mappings combined.
+
+    Args:
+        input_path: Pre-downloaded TSV file. Queries SPARQL if ``None``.
+        entity_type: ``"metabolites"``, ``"chemicals"``, ``"genes"``, or
+            ``"proteins"``. Queries all types when ``None``.
+        version: Version string for metadata.
+        endpoint: Custom SPARQL endpoint URL.
+        show_progress: Whether to show progress bars.
+        test_subset: Use test queries limited to 10 results.
+
+    Returns:
+        :class:`~pysec2pri.parsers.base.LabelMappingSet` with label mappings.
+    """
+    from pysec2pri.parsers import WikidataParser
+
+    entity_types = ["metabolites", "genes", "proteins"] if entity_type is None else [entity_type]
+
+    sets = []
+    for etype in entity_types:
+        parser = WikidataParser(
+            version=version,
+            show_progress=show_progress,
+            entity_type=etype,
+            endpoint=endpoint,
+            test_subset=test_subset,
+        )
+        sets.append(parser.parse_symbols(Path(input_path) if input_path else None))
+
+    if len(sets) == 1:
+        return sets[0]
+
+    # Combine multiple LabelMappingSets into one
+    all_mappings = [m for ms in sets for m in (ms.mappings or [])]
+    combined = sets[0]
+    combined.mappings = all_mappings
+    combined.compute_cardinalities()
+    return combined
+
+
 def combine_mapping_sets(
     id_mappings: Sec2PriMappingSet | None,
     synonym_mappings: Sec2PriMappingSet | None,
@@ -404,8 +515,8 @@ def save(
     Args:
         mapping_set: The mapping set to write.
         output_format: One of ``sssom``, ``sec2pri``, ``pri_ids``,
-            ``name2synonym``, ``symbol2prev``, ``rdf``, ``json``, ``owl``,
-            or ``all``.
+            ``name2synonym``, ``symbol_sec2pri``, ``pri_symbols``,
+            ``rdf``, ``json``, ``owl``, or ``all``.
         output: Explicit output path or directory.  When ``None``, a
             default name derived from *base_name* is used.
         base_name: Stem used to derive file names, e.g. ``"hgnc_2026-04-07"``.
@@ -453,14 +564,19 @@ def write_all_formats(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     write_sssom(mapping_set, output_dir / f"{base_name}_sssom.tsv")
-    write_sec2pri(mapping_set, output_dir / f"{base_name}_sec2pri.tsv")
-    write_pri_ids(mapping_set, output_dir / f"{base_name}_pri_ids.tsv")
+
+    if isinstance(mapping_set, IdMappingSet):
+        write_sec2pri(mapping_set, output_dir / f"{base_name}_sec2pri.tsv")
+        write_pri_ids(mapping_set, output_dir / f"{base_name}_pri_ids.txt")
+
+    if isinstance(mapping_set, LabelMappingSet):
+        write_symbol_sec2pri(mapping_set, output_dir / f"{base_name}_symbol_sec2pri.tsv")
+        if include_name2synonym:
+            write_name2synonym(mapping_set, output_dir / f"{base_name}_name2synonym.tsv")
+
     write_rdf(mapping_set, output_dir / f"{base_name}.ttl")
     write_json(mapping_set, output_dir / f"{base_name}.json")
     write_owl(mapping_set, output_dir / f"{base_name}_owl.ttl")
-
-    if include_name2synonym:
-        write_name2synonym(mapping_set, output_dir / f"{base_name}_name2synonym.tsv")
 
 
 def write_diff_output(
@@ -523,53 +639,229 @@ def write_diff_output(
         combined.write_csv(output_path, separator="\t")
 
 
+def load_mapping(path: Path | str) -> IdMappingSet:
+    """Load an ID mapping set from a pysec2pri TSV file.
+
+    Accepts the ``sec2pri`` TSV format (columns ``subject_id``, ``object_id``,
+    ``predicate_id``, ``mapping_cardinality``) and the full SSSOM TSV format
+    (comment-prefixed metadata lines are skipped automatically).
+
+    Args:
+        path: Path to the TSV file to load.
+
+    Returns:
+        An :class:`~pysec2pri.parsers.base.IdMappingSet` populated from the
+        file, ready to pass to :func:`resolve_ids`.
+    """
+    import pandas as pd
+    from sssom_schema import Mapping
+
+    path = Path(path)
+    df = pd.read_csv(path, sep="\t", dtype=str, comment="#")
+    ms = IdMappingSet(
+        mapping_set_id=str(path),
+        license="https://creativecommons.org/licenses/by/4.0/",
+    )
+    mappings: list[Mapping] = []
+    for _, row in df.iterrows():
+        m = Mapping(
+            subject_id=row.get("subject_id") or "",
+            object_id=row.get("object_id") or "",
+            predicate_id=row.get("predicate_id") or "",
+            mapping_justification=row.get("mapping_justification")
+            or "semapv:BackgroundKnowledgeBasedMatching",
+            mapping_cardinality=row.get("mapping_cardinality") or None,
+        )
+        mappings.append(m)
+    ms.mappings = mappings
+    return ms
+
+
+def load_label_mapping(path: Path | str) -> LabelMappingSet:
+    """Load a label/symbol mapping set from a pysec2pri TSV file.
+
+    Accepts the ``symbol2prev`` TSV format (columns ``subject_id``,
+    ``subject_label``, ``object_label``, ``mapping_cardinality``) and the
+    full SSSOM TSV format (comment-prefixed metadata lines are skipped).
+
+    Args:
+        path: Path to the TSV file to load.
+
+    Returns:
+        A :class:`~pysec2pri.parsers.base.LabelMappingSet` populated from
+        the file, ready to pass to :func:`resolve_symbols`.
+    """
+    import pandas as pd
+    from sssom_schema import Mapping
+
+    path = Path(path)
+    df = pd.read_csv(path, sep="\t", dtype=str, comment="#")
+    ms = LabelMappingSet(
+        mapping_set_id=str(path),
+        license="https://creativecommons.org/licenses/by/4.0/",
+    )
+    mappings: list[Mapping] = []
+    for _, row in df.iterrows():
+        m = Mapping(
+            subject_id=row.get("subject_id") or "",
+            subject_label=row.get("subject_label") or None,
+            object_label=row.get("object_label") or None,
+            predicate_id=row.get("predicate_id") or "",
+            mapping_justification=row.get("mapping_justification")
+            or "semapv:BackgroundKnowledgeBasedMatching",
+            mapping_cardinality=row.get("mapping_cardinality") or None,
+        )
+        mappings.append(m)
+    ms.mappings = mappings
+    return ms
+
+
 def resolve_ids(
-    input_path: Path | str,
+    input_path: Path | str | list[str],
     mapping_set: Sec2PriMappingSet,
-    at: str | list[str],
+    at: str | list[str] | None = None,
     *,
     output_path: Path | str | None = None,
     suffix: str = "_primary",
     sep: str | None = None,
-) -> pd.DataFrame:
-    r"""Read a delimited file, resolve secondary IDs to primary IDs, and return a DataFrame.
+) -> pd.DataFrame | str | list[str]:
+    r"""Resolve secondary IDs to primary IDs.
 
-    The file is read with ``pandas.read_csv`` (auto-detecting TSV vs CSV by
-    extension unless *sep* is supplied).  For each column named in *at*, a new
-    column ``<col><suffix>`` is appended containing the resolved primary IDs.
+    Direct lookup: when *input_path* is a plain identifier string or a list
+    of identifier strings (i.e. not a path to an existing file), the function
+    returns the resolved primary ID(s).  *at*, *output_path*, *suffix*, and
+    *sep* are ignored in this mode::
+
+        resolve_ids("HMDB00001", hmdb_ms)  # → "HMDB:HMDB0000001"
+        resolve_ids(["HMDB00001", "HMDB00002"], hmdb_ms)  # → ["...", "..."]
+
+    DataFrame mode: when *input_path* points to an existing TSV/CSV
+    file, *at* is required.  The file is read with
+    ``pandas.read_csv`` and for each column named in *at* a new column
+    ``<col><suffix>`` is appended containing the resolved primary IDs.
     Identifiers not present in *mapping_set* are kept unchanged.
 
     Args:
-        input_path: Path to the input TSV or CSV file.
+        input_path: An identifier string, a list of identifier strings, or
+            the path to a TSV/CSV file.
         mapping_set: A :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`
             (e.g. the result of ``generate_hgnc()``).
-        at: Column name or list of column names that contain identifiers to
-            resolve.
-        output_path: If given, the resulting DataFrame is written back to this
-            path in the same delimiter format (TSV when the extension is
-            ``.tsv``, CSV otherwise).
+        at: Column name(s) to resolve.  Required in DataFrame mode;
+            ignored in direct-lookup mode.
+        output_path: If given, the resulting DataFrame is written to this
+            path (DataFrame mode only).
         suffix: Suffix appended to each resolved column name
             (default ``"_primary"``).
-        sep: Delimiter to use when reading the file.  Inferred from the file
-            extension when ``None`` (``"\\t"`` for ``.tsv``, ``","`` for all
-            others).
+        sep: Delimiter for reading the file.  Inferred from the extension
+            when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
 
     Returns:
-        :class:`pandas.DataFrame` with one additional column per entry in *at*.
+        A resolved identifier string, a list of resolved strings (direct-lookup
+        mode), or a :class:`pandas.DataFrame` with one additional column per
+        entry in *at* (DataFrame mode).
     """
     import pandas as pd
 
     from pysec2pri.update_ids import build_lookup, update_ids
 
-    input_path = Path(input_path)
+    # list direct-lookup mode
+    if isinstance(input_path, list):
+        lkp = build_lookup(mapping_set)
+        return [lkp.get(v, v) for v in input_path]
+
+    # single-value lookup mode
+    input_path_obj = Path(input_path)
+    if not input_path_obj.exists():
+        lkp = build_lookup(mapping_set)
+        return lkp.get(str(input_path), str(input_path))
+
+    # DataFrame mode
+    if at is None:
+        raise TypeError("resolve_ids() requires 'at' when input_path is a file")
 
     if sep is None:
-        sep = "\t" if input_path.suffix.lower() == ".tsv" else ","
+        sep = "\t" if input_path_obj.suffix.lower() == ".tsv" else ","
 
-    df = pd.read_csv(input_path, sep=sep, dtype=str)
-
+    df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
     lkp = build_lookup(mapping_set)
-    result: pd.DataFrame = update_ids(df, mapping_set, at=at, suffix=suffix, lookup=lkp)
+    result = pd.DataFrame(update_ids(df, mapping_set, at=at, suffix=suffix, lookup=lkp))
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        out_sep = "\t" if output_path.suffix.lower() == ".tsv" else ","
+        result.to_csv(output_path, sep=out_sep, index=False)
+
+    return result
+
+
+def resolve_symbols(
+    input_path: Path | str | list[str],
+    mapping_set: Sec2PriMappingSet,
+    at: str | list[str] | None = None,
+    *,
+    output_path: Path | str | None = None,
+    suffix: str = "_current",
+    sep: str | None = None,
+) -> pd.DataFrame | str | list[str]:
+    r"""Resolve previous/alias symbols to current symbols.
+
+    Direct lookup: when *input_path* is a plain symbol string or a list
+    of symbol strings (i.e. not a path to an existing file), the function
+    returns the resolved current symbol(s).  *at*, *output_path*, *suffix*,
+    and *sep* are ignored in this mode::
+
+        resolve_symbols("Ibuprofen", chebi_ms)  # → "ibuprofen"
+        resolve_symbols(["Ibuprofen", "Glucose"], chebi_ms)  # → ["...", "..."]
+
+    DataFrame mode: when *input_path* points to an existing TSV/CSV
+    file, *at* is required.  For each column named in *at* a new
+    column ``<col><suffix>`` is appended containing the resolved current
+    symbols.  Symbols not present in *mapping_set* are kept unchanged.
+
+    Args:
+        input_path: A symbol string, a list of symbol strings, or the path
+            to a TSV/CSV file.
+        mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`
+            (e.g. the result of ``generate_hgnc_symbols()``).
+        at: Column name(s) to resolve.  Required in DataFrame mode;
+            ignored in direct-lookup mode.
+        output_path: If given, the resulting DataFrame is written to this
+            path (DataFrame mode only).
+        suffix: Suffix appended to each resolved column name
+            (default ``"_current"``).
+        sep: Delimiter for reading the file.  Inferred from the extension
+            when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
+
+    Returns:
+        A resolved symbol string, a list of resolved strings (direct-lookup
+        mode), or a :class:`pandas.DataFrame` with one additional column per
+        entry in *at* (DataFrame mode).
+    """
+    import pandas as pd
+
+    from pysec2pri.update_ids import build_symbol_lookup, update_symbols
+
+    # list direct-lookup mode
+    if isinstance(input_path, list):
+        lkp = build_symbol_lookup(mapping_set)
+        return [lkp.get(v, v) for v in input_path]
+
+    # single-value direct-lookup mode
+    input_path_obj = Path(input_path)
+    if not input_path_obj.exists():
+        lkp = build_symbol_lookup(mapping_set)
+        return lkp.get(str(input_path), str(input_path))
+
+    # DataFrame mode
+    if at is None:
+        raise TypeError("resolve_symbols() requires 'at' when input_path is a file")
+
+    if sep is None:
+        sep = "\t" if input_path_obj.suffix.lower() == ".tsv" else ","
+
+    df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
+    lkp = build_symbol_lookup(mapping_set)
+    result = pd.DataFrame(update_symbols(df, mapping_set, at=at, suffix=suffix, lookup=lkp))
 
     if output_path is not None:
         output_path = Path(output_path)

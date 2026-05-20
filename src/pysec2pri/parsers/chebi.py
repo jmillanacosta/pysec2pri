@@ -88,6 +88,7 @@ class ChEBIParser(BaseParser):
         """Parse ChEBI data into an IdMappingSet.
 
         Accepts three calling conventions:
+
         - ``input_path`` is a **directory**: expects ``secondary_ids.tsv``
           (and optionally ``compounds.tsv``) inside it (TSV format >= 245).
         - ``input_path`` is an **SDF file**: legacy format (< 245).
@@ -133,6 +134,7 @@ class ChEBIParser(BaseParser):
         """Parse ChEBI data into a LabelMappingSet for synonyms.
 
         Accepts three calling conventions:
+
         - ``input_path`` is a **directory**: expects ``names.tsv``
           (and optionally ``compounds.tsv``) inside it (TSV format >= 245).
         - ``input_path`` is an **SDF file**: legacy format (< 245).
@@ -211,7 +213,7 @@ class ChEBIParser(BaseParser):
             "confidence": m_meta.get("confidence"),
             "license": m_meta.get("license"),
         }
-        rows = [{"subject_id": pri, "object_id": sec} for pri, sec in raw_id_mappings]
+        rows = [{"subject_id": sec, "object_id": pri} for pri, sec in raw_id_mappings]
         return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
 
     def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:

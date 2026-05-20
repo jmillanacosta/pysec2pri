@@ -192,7 +192,7 @@ def write_pri_ids(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write unique primary IDs (object_id) to a text file, one per line.
+    """Write unique primary IDs to a text file, one per line.
 
     Args:
         mapping_set: The mapping set to read primary IDs from.
@@ -204,15 +204,18 @@ def write_pri_ids(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Collect unique primary IDs
-    pri_ids: set[str] = set()
-    for m in mapping_set.mappings or []:  # type: ignore[has-type]
-        obj_id = getattr(m, "object_id", None)
-        if obj_id:
-            pri_ids.add(str(obj_id))
+    # Use the authoritative set when available (never appears in other outputs)
+    all_ids: set[str] = getattr(mapping_set, "_primary_ids", set()) or set()
+
+    if not all_ids:
+        # Fall back to extracting from mappings
+        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+            obj_id = getattr(m, "object_id", None)
+            if obj_id:
+                all_ids.add(str(obj_id))
 
     with output_path.open("w", encoding="utf-8") as f:
-        for pri_id in sorted(pri_ids):
+        for pri_id in sorted(all_ids):
             f.write(f"{pri_id}\n")
 
     return output_path

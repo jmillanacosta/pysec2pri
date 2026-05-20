@@ -169,10 +169,10 @@ class NCBIParser(BaseParser):
             if self.is_withdrawn_primary(subject_id):
                 rows_data.append(
                     {
-                        "subject_id": WITHDRAWN_ENTRY,
-                        "object_id": f"NCBIGene:{object_id}",
-                        "subject_label": WITHDRAWN_ENTRY_LABEL,
-                        "object_label": str(sec_symbol) if sec_symbol else "",
+                        "subject_id": f"NCBIGene:{object_id}",
+                        "object_id": WITHDRAWN_ENTRY,
+                        "subject_label": str(sec_symbol) if sec_symbol else "",
+                        "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
                     }
@@ -180,9 +180,9 @@ class NCBIParser(BaseParser):
             else:
                 rows_data.append(
                     {
-                        "subject_id": f"NCBIGene:{subject_id}",
-                        "object_id": f"NCBIGene:{object_id}",
-                        "object_label": str(sec_symbol) if sec_symbol else "",
+                        "subject_id": f"NCBIGene:{object_id}",
+                        "object_id": f"NCBIGene:{subject_id}",
+                        "subject_label": str(sec_symbol) if sec_symbol else "",
                         "predicate_id": m_meta["predicate_id"],
                         "predicate_label": m_meta.get("predicate_label"),
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,

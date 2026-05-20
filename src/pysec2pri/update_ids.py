@@ -280,7 +280,125 @@ def update_ids(
     return result
 
 
+def build_symbol_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+    """Return a ``{secondary_label: primary_label}`` dictionary.
+
+    Useful when you want to apply the look-up yourself or cache it for
+    repeated calls.
+
+    Args:
+        mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`
+            (e.g. the result of ``generate_hgnc_symbols()``).
+
+    Returns:
+        Dictionary mapping every previous/alias symbol to its current symbol.
+    """
+    lookup: dict[str, str] = {}
+    for m in mapping_set.mappings or []:
+        sec = str(getattr(m, "subject_label", None) or "")
+        pri = str(getattr(m, "object_label", None) or "")
+        if sec:
+            lookup[sec] = pri
+    return lookup
+
+
+def update_symbols(
+    symbols: IdsInput,
+    mapping_set: Sec2PriMappingSet,
+    *,
+    at: str | list[str] | None = None,
+    suffix: str = "_current",
+    lookup: dict[str, str] | None = None,
+) -> dict[str, str] | pd.DataFrame:
+    """Resolve previous/alias gene symbols to current symbols.
+
+    Behaves identically to :func:`update_ids` but resolves via the
+    ``subject_label`` to ``object_label`` mapping rather than IDs.
+
+    Parameters
+    ----------
+    symbols:
+        One of:
+
+        * **str**: a single symbol, or multiple symbols joined by
+          ``|``, ``,``, ``;``, or whitespace.
+        * **list[str]**: a list of symbol strings.
+        * **pandas.DataFrame**: a DataFrame; you must also supply *at*.
+
+    mapping_set:
+        A :class:`~pysec2pri.parsers.base.LabelMappingSet`
+        (e.g. the result of ``generate_hgnc_symbols()``).
+
+    at:
+        *DataFrame mode only.* Column name or list of column names that
+        contain symbols.  For each column ``col`` a new column named
+        ``col + suffix`` is added to the returned DataFrame.
+
+    suffix:
+        Suffix appended to column names in DataFrame mode (default
+        ``"_current"``).
+
+    lookup:
+        Pre-built ``{previous_symbol: current_symbol}`` dictionary.
+        Pass the result of :func:`build_symbol_lookup` to avoid rebuilding
+        on repeated calls.
+
+    Returns
+    -------
+    dict[str, str]
+        When *symbols* is a ``str`` or ``list[str]``: a dictionary mapping
+        each unique input symbol to its resolved current symbol.
+        Symbols not found in the mapping set are returned unchanged.
+
+    pandas.DataFrame
+        When *symbols* is a ``DataFrame``: a copy of the DataFrame with one
+        new ``<col><suffix>`` column per entry in *at*.
+    """
+    lkp = lookup if lookup is not None else build_symbol_lookup(mapping_set)
+
+    if isinstance(symbols, str):
+        tokens = _split_ids(symbols)
+        unique = dict.fromkeys(tokens)
+        return {tok: lkp.get(tok, tok) for tok in unique}
+
+    if isinstance(symbols, list):
+        unique_l: dict[str, None] = {}
+        for item in symbols:
+            for tok in _split_ids(item):
+                unique_l[tok] = None
+        return {tok: lkp.get(tok, tok) for tok in unique_l}
+
+    import pandas as pd
+
+    if not isinstance(symbols, pd.DataFrame):
+        raise TypeError(
+            f"'symbols' must be a str, list[str], or pandas.DataFrame, "
+            f"got {type(symbols).__name__!r}."
+        )
+
+    if at is None:
+        raise ValueError(
+            "When 'symbols' is a DataFrame you must specify 'at' (column name or list of names)."
+        )
+
+    columns: list[str] = [at] if isinstance(at, str) else list(at)
+    missing = [c for c in columns if c not in symbols.columns]
+    if missing:
+        raise KeyError(f"Column(s) not found in DataFrame: {missing}")
+
+    result = symbols.copy()
+    for col in columns:
+        new_col = col + suffix
+        result[new_col] = (
+            result[col].astype(str).map(lambda cell, _lkp=lkp: _resolve_string(cell, _lkp))
+        )
+
+    return result
+
+
 __all__ = [
     "build_lookup",
+    "build_symbol_lookup",
     "update_ids",
+    "update_symbols",
 ]

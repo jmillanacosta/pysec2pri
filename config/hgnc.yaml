@@ -108,7 +108,7 @@ download_urls:
   withdrawn: "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/withdrawn.tsv"
 
 primary_file_key: "withdrawn"
-archive_url: "https://www.genenames.org/download/archive/quarterly/tsv/"
+archive_url: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/"
 id_pattern: "^HGNC:\\d+$"
 default_output_filename: "hgnc_sec2pri.sssom.tsv"
 
@@ -122,6 +122,6 @@ input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt
 
-source: "HGNC database"
+source: "HGNC"
 homepage: "https://www.genenames.org/"
 data_license: "https://www.genenames.org/about/license"
