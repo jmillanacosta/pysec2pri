@@ -101,7 +101,7 @@ bumpversion-release:
 
 [doc("build an sdist and wheel")]
 build:
-    uv build --sdist --wheel --clear
+    uv build --sdist --wheel
 
 [doc("Release the code to PyPI so users can pip install it, using credentials from keyring")]
 release:
