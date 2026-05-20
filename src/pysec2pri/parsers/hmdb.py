@@ -226,9 +226,10 @@ class HMDBParser(BaseParser):
             secondary_id = f"{prefix}:{raw_sec}"
             rows.append(
                 {
-                    "subject_id": primary_id,
-                    "subject_label": primary_label,
-                    "object_id": secondary_id,
+                    "subject_id": secondary_id,
+                    "subject_label": "",
+                    "object_id": primary_id,
+                    "object_label": primary_label,
                 }
             )
         return rows

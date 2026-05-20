@@ -9,6 +9,7 @@ from pysec2pri.api import (
     generate_chebi,
     generate_chebi_synonyms,
     generate_hgnc,
+    generate_hgnc_primary_ids,
     generate_hgnc_symbols,
     generate_hmdb,
     generate_hmdb_proteins,
@@ -16,7 +17,9 @@ from pysec2pri.api import (
     generate_ncbi_symbols,
     generate_uniprot,
     generate_wikidata,
+    generate_wikidata_symbols,
     resolve_ids,
+    resolve_symbols,
     write_json,
     write_name2synonym,
     write_output,
@@ -24,7 +27,7 @@ from pysec2pri.api import (
     write_rdf,
     write_sec2pri,
     write_sssom,
-    write_symbol2prev,
+    write_symbol_sec2pri,
 )
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
@@ -33,7 +36,7 @@ from pysec2pri.parsers.base import (
     LabelMappingSet,
     Sec2PriMappingSet,
 )
-from pysec2pri.update_ids import build_lookup, update_ids
+from pysec2pri.update_ids import build_lookup, build_symbol_lookup, update_ids, update_symbols
 
 __all__ = [
     # Sentinel values
@@ -45,10 +48,12 @@ __all__ = [
     "Sec2PriMappingSet",
     # ID resolution
     "build_lookup",
+    "build_symbol_lookup",
     # generate_* (download + parse in one call)
     "generate_chebi",
     "generate_chebi_synonyms",
     "generate_hgnc",
+    "generate_hgnc_primary_ids",
     "generate_hgnc_symbols",
     "generate_hmdb",
     "generate_hmdb_proteins",
@@ -56,8 +61,11 @@ __all__ = [
     "generate_ncbi_symbols",
     "generate_uniprot",
     "generate_wikidata",
+    "generate_wikidata_symbols",
     "resolve_ids",
+    "resolve_symbols",
     "update_ids",
+    "update_symbols",
     # Export functions
     "write_json",
     "write_name2synonym",
@@ -66,5 +74,5 @@ __all__ = [
     "write_rdf",
     "write_sec2pri",
     "write_sssom",
-    "write_symbol2prev",
+    "write_symbol_sec2pri",
 ]

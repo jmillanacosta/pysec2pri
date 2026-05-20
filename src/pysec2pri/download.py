@@ -532,6 +532,7 @@ def download_datasource(
     decompress: bool = True,
     version: str | None = None,
     subset: str = "3star",
+    keys: list[str] | None = None,
 ) -> dict[str, Path]:
     """Download all files for a datasource.
 
@@ -545,6 +546,8 @@ def download_datasource(
         decompress: Whether to decompress .gz files.
         version: Specific version to download. Format depends on datasource.
         subset: For ChEBI: "3star" or "complete" (for releases using SDF only).
+        keys: Optional list of file-key names to download. When given, only
+            URLs whose key is in this list are fetched. Defaults to all keys.
 
     Returns:
         Dictionary mapping file keys to downloaded paths.
@@ -556,6 +559,8 @@ def download_datasource(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     urls = _get_datasource_urls(datasource_lower, config, version, subset)
+    if keys is not None:
+        urls = {k: v for k, v in urls.items() if k in keys}
 
     return _download_urls(urls, output_dir, decompress)
 

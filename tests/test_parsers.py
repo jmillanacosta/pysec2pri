@@ -98,17 +98,17 @@ class TestHMDBParser:
         assert len(result.mappings or []) == 3
 
     def test_parse_subject_object_ids(self, hmdb_xml_path: Path) -> None:
-        """Primary IDs are subjects; secondary IDs are objects."""
+        """Secondary IDs are subjects; primary IDs are objects."""
         parser = HMDBParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         mappings = result.mappings or []
         subjects = {m.subject_id for m in mappings}
         objects = {m.object_id for m in mappings}
-        assert "HMDB:HMDB0000001" in subjects
-        assert "HMDB:HMDB00001" in objects
-        assert "HMDB:HMDB0001001" in objects
-        assert "HMDB:HMDB0000002" in subjects
-        assert "HMDB:HMDB00002" in objects
+        assert "HMDB:HMDB00001" in subjects
+        assert "HMDB:HMDB0001001" in subjects
+        assert "HMDB:HMDB0000001" in objects
+        assert "HMDB:HMDB00002" in subjects
+        assert "HMDB:HMDB0000002" in objects
 
     def test_parse_no_secondary_skipped(self, hmdb_xml_path: Path) -> None:
         """Records with empty secondary_accessions produce no mappings."""
@@ -134,11 +134,11 @@ class TestHMDBParser:
         """Bare numeric secondary accessions are normalised to HMDBP prefix."""
         parser = HMDBParser(show_progress=False)
         result = parser.parse_proteins(hmdb_proteins_xml_path)
-        objects = {m.object_id for m in (result.mappings or [])}
-        # "5229" should become "HMDB:HMDBP05229"
-        assert "HMDB:HMDBP05229" in objects
+        subjects = {m.subject_id for m in (result.mappings or [])}
+        # "5229" should become "HMDB:HMDBP05229" (secondary to subject)
+        assert "HMDB:HMDBP05229" in subjects
         # full HMDBP accession unchanged
-        assert "HMDB:HMDBP05261" in objects
+        assert "HMDB:HMDBP05261" in subjects
 
     def test_parse_proteins_no_secondary_skipped(self, hmdb_proteins_xml_path: Path) -> None:
         """Protein records with empty secondary_accessions produce no mappings."""

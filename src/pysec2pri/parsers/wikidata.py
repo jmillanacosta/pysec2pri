@@ -20,6 +20,7 @@ from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
     BaseParser,
     IdMappingSet,
+    LabelMappingSet,
     Sec2PriMappingSet,
 )
 from pysec2pri.queries import (
@@ -268,6 +269,79 @@ class WikidataParser(BaseParser):
 
         return self._create_mapping_set(mappings, version)
 
+    def parse_symbols(self, input_path: Path | str | None = None) -> LabelMappingSet:
+        """Return a LabelMappingSet of previous-label  to current-label mappings.
+
+        Queries the SPARQL endpoint (or reads *input_path*) exactly like
+        :meth:`parse`, but wraps the result in a :class:`LabelMappingSet`
+        so label-specific exports (``symbol_sec2pri``, ``pri_symbols``) work.
+
+        Args:
+            input_path: Pre-downloaded TSV file. Queries SPARQL if ``None``.
+
+        Returns:
+            :class:`LabelMappingSet` with label-based mappings.
+        """
+        if input_path is not None:
+            input_path = Path(input_path)
+            df = pl.read_csv(input_path, separator="\t", has_header=True)
+        else:
+            if self.test_subset:
+                query_str = WIKIDATA_TEST_QUERIES.get(self.entity_type)
+            else:
+                query_str = WIKIDATA_QUERIES.get(self.entity_type)
+            if query_str is None:
+                available = list(WIKIDATA_QUERIES.keys())
+                raise ValueError(f"Unknown entity type: {self.entity_type}. Available: {available}")
+            df = query_wikidata(query_str, endpoint=self.endpoint)
+
+        if df.is_empty():
+            return self._create_label_mapping_set([], self._resolve_version())
+
+        df = self._normalize_ids(df)
+        mappings = self._build_redirect_mappings(df)
+        version = self._resolve_version()
+        return self._create_label_mapping_set(mappings, version)
+
+    def _create_label_mapping_set(
+        self,
+        mappings: list[Mapping],
+        version: str,
+    ) -> LabelMappingSet:
+        """Create a LabelMappingSet with metadata."""
+        ms_meta = self.get_mappingset_metadata()
+
+        curie_map = ms_meta.get("curie_map", {})
+        curie_map_str: dict[str, str] = {}
+        for k, v in curie_map.items():
+            if hasattr(v, "prefix_reference"):
+                curie_map_str[str(k)] = str(v.prefix_reference)
+            else:
+                curie_map_str[str(k)] = str(v)
+
+        mapping_set = LabelMappingSet(
+            mapping_set_id=ms_meta.get("mapping_set_id", ""),
+            mapping_set_version=version,
+            mapping_set_title=ms_meta.get("mapping_set_title"),
+            mapping_set_description=ms_meta.get("mapping_set_description"),
+            curie_map=curie_map_str,
+            license=ms_meta.get("license"),
+            creator_id=ms_meta.get("creator_id"),
+            creator_label=ms_meta.get("creator_label"),
+            mapping_provider=ms_meta.get("mapping_provider"),
+            mapping_tool=ms_meta.get("mapping_tool"),
+            mapping_tool_version=VERSION,
+            mapping_date=date.today().isoformat(),
+            subject_source=ms_meta.get("subject_source"),
+            object_source=ms_meta.get("object_source"),
+            subject_source_version=version,
+            object_source_version=version,
+            comment=self._build_comment(f"Wikidata label mappings for {self.entity_type}."),
+            mappings=mappings,
+        )
+        mapping_set.compute_cardinalities()
+        return mapping_set
+
     def _empty_mappingset(self) -> Sec2PriMappingSet:
         """Create an empty mapping set."""
         version = self._resolve_version()
@@ -390,8 +464,8 @@ class WikidataParser(BaseParser):
         col_idx: dict[str, int] = {c: i for i, c in enumerate(redirects_df.columns)}
         subj_i = col_idx["subject_id_norm"]
         obj_i = col_idx["object_id_norm"]
-        subj_label_i = col_idx.get(primary_label_col) if primary_label_col else None
-        obj_label_i = col_idx.get(secondary_label_col) if secondary_label_col else None
+        subj_label_i = col_idx.get(secondary_label_col) if secondary_label_col else None
+        obj_label_i = col_idx.get(primary_label_col) if primary_label_col else None
 
         rows_data = [
             {

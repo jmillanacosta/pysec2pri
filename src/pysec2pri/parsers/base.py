@@ -307,7 +307,23 @@ class BaseDownloader(ABC):
 
 
 class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
-    """A MappingSet for Sec2Pri, with helpers for cardinality and export."""
+    """A MappingSet for Sec2Pri, with helpers for cardinality and export.
+
+    Attributes:
+        _primary_ids: Private store for the full authoritative primary ID set.
+            Kept private so sssom serialisers never include it in any output.
+            Access it only through :meth:`to_pri_ids`.
+    """
+
+    # Primaries are private to sssom's schema
+    # Populated by parsers that have access to the full primary ID list
+    # (e.g. HGNCParser when the complete set file is provided).
+    _primary_ids: set[str]
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initialise the mapping set and the private primary-IDs store."""
+        super().__init__(*args, **kwargs)
+        object.__setattr__(self, "_primary_ids", set())
 
     # Export helpers
 
@@ -363,62 +379,6 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
             write_sssom(self, self._resolve_path(output_path, "_sssom.tsv"))
 
         return doc
-
-    def to_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
-        """Return a ``DataFrame`` of secondary to primary mappings, optionally writing to TSV.
-
-        Columns: ``subject_id``, ``object_id``, ``predicate_id``,
-        ``mapping_cardinality``.
-
-        Args:
-            output_path: If given, the DataFrame is also written as a TSV file.
-
-        Returns:
-            :class:`pandas.DataFrame` with one row per mapping.
-        """
-        import pandas as pd
-
-        rows = [
-            {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "object_id": str(getattr(m, "object_id", "") or ""),
-                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
-                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
-            }
-            for m in (self.mappings or [])  # type: ignore[has-type]
-        ]
-        df = pd.DataFrame(
-            rows, columns=["subject_id", "object_id", "predicate_id", "mapping_cardinality"]
-        )
-
-        if output_path is not None:
-            path = self._resolve_path(output_path, "_sec2pri.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
-
-        return df
-
-    def to_pri_ids(self, output_path: Path | str | None = None) -> list[str]:
-        """Return a sorted list of unique primary IDs, optionally writing to TXT.
-
-        Args:
-            output_path: If given, the IDs are also written one-per-line to a
-                text file.
-
-        Returns:
-            Sorted list of unique primary ID strings.
-        """
-        ids = sorted(
-            {str(getattr(m, "object_id", None) or "") for m in (self.mappings or [])}  # type: ignore[has-type]
-            - {""}
-        )
-
-        if output_path is not None:
-            path = self._resolve_path(output_path, "_pri_ids.txt")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(ids) + "\n", encoding="utf-8")
-
-        return ids
 
     def to_rdf(
         self,
@@ -529,96 +489,17 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
         return g
 
-    def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
-        """Return a name to synonym ``DataFrame``, optionally writing to TSV.
-
-        Only rows where ``subject_label`` or ``object_label`` is set are
-        included.  Columns: ``subject_id``, ``subject_label``, ``object_label``.
-
-        Args:
-            output_path: If given, the DataFrame is also written as a TSV file.
-
-        Returns:
-            :class:`pandas.DataFrame` with label mapping rows.
-        """
-        import pandas as pd
-
-        rows = [
-            {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "subject_label": str(getattr(m, "subject_label", "") or ""),
-                "object_label": str(getattr(m, "object_label", "") or ""),
-            }
-            for m in (self.mappings or [])  # type: ignore[has-type]
-            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
-        ]
-        df = pd.DataFrame(rows, columns=["subject_id", "subject_label", "object_label"])
-
-        if output_path is not None:
-            path = self._resolve_path(output_path, "_name2synonym.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
-
-        return df
-
-    def to_symbol2prev(self, output_path: Path | str | None = None) -> pd.DataFrame:
-        """Return a symbol to previous-symbol ``DataFrame``, optionally writing to TSV.
-
-        Only rows where ``subject_label`` or ``object_label`` is set are
-        included.  Columns: ``subject_id``, ``subject_label``, ``object_label``,
-        ``mapping_cardinality``.
-
-        Args:
-            output_path: If given, the DataFrame is also written as a TSV file.
-
-        Returns:
-            :class:`pandas.DataFrame` with symbol mapping rows.
-        """
-        import pandas as pd
-
-        rows = [
-            {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "subject_label": str(getattr(m, "subject_label", "") or ""),
-                "object_label": str(getattr(m, "object_label", "") or ""),
-                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
-            }
-            for m in (self.mappings or [])  # type: ignore[has-type]
-            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
-        ]
-        df = pd.DataFrame(
-            rows, columns=["subject_id", "subject_label", "object_label", "mapping_cardinality"]
-        )
-
-        if output_path is not None:
-            path = self._resolve_path(output_path, "_symbol2prev.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
-
-        return df
-
-    def save(
+    def _save_shared(
         self,
         fmt: str,
-        output_path: Path | str | None = None,
+        output_path: Path | str | None,
         **kwargs: object,
-    ) -> Path:
-        """Write to any supported format by name.
+    ) -> Path | None:
+        """Write one of the shared formats (sssom/rdf/json/owl).
 
-        Args:
-            fmt: Format key, one of ``"sssom"``, ``"sec2pri"``, ``"pri_ids"``,
-            ``"rdf"``, ``"json"``, ``"owl"``, ``"name2synonym"``,
-            ``"symbol2prev"``.
-            output_path: Destination path. Auto-generated if ``None``.
-            **kwargs: Forwarded to the format-specific method.
-
-        Returns:
-            Path to the written file.
-
-        Raises:
-            ValueError: For unknown format keys.
+        Returns the written :class:`Path`, or ``None`` if *fmt* is not a
+        shared format (caller should handle it).
         """
-        # "rdf", "owl", "json" return in-memory objects, save() must always return a Path.
         if fmt in ("rdf", "owl", "json"):
             from collections.abc import Callable as _Callable
 
@@ -632,28 +513,39 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
             fn, suffix = _write_fns[fmt]
             return fn(self, self._resolve_path(output_path, suffix), **kwargs)
 
-        # "sssom" returns a MappingSetDocument
         if fmt == "sssom":
             from pysec2pri.exports import write_sssom
 
             return write_sssom(self, self._resolve_path(output_path, "_sssom.tsv"))
 
-        _dispatch: dict[str, tuple[Any, str]] = {
-            "sec2pri": (self.to_sec2pri, "_sec2pri.tsv"),
-            "pri_ids": (self.to_pri_ids, "_pri_ids.txt"),
-            "name2synonym": (self.to_name2synonym, "_name2synonym.tsv"),
-            "symbol2prev": (self.to_symbol2prev, "_symbol2prev.tsv"),
-        }
-        entry = _dispatch.get(fmt)
-        if entry is None:
-            raise ValueError(
-                f"Unknown format {fmt!r}. Choose from: "
-                f"{sorted([*_dispatch, 'rdf', 'owl', 'json', 'sssom'])}"
-            )
-        method, suffix = entry
-        resolved = self._resolve_path(output_path, suffix)
-        method(resolved, **kwargs)
-        return resolved
+        return None
+
+    def save(
+        self,
+        fmt: str,
+        output_path: Path | str | None = None,
+        **kwargs: object,
+    ) -> Path:
+        """Write to any supported format by name.
+
+        Shared formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``.
+        Subclasses override this to add type-specific formats.
+
+        Args:
+            fmt: Format key (see above).
+            output_path: Destination path. Auto-generated if ``None``.
+            **kwargs: Forwarded to the format-specific writer.
+
+        Returns:
+            Path to the written file.
+
+        Raises:
+            ValueError: For unknown format keys.
+        """
+        shared = self._save_shared(fmt, output_path, **kwargs)
+        if shared is not None:
+            return shared
+        raise ValueError(f"Unknown format {fmt!r}. Choose from: json, owl, rdf, sssom")
 
     # Cardinality helpers
 
@@ -720,19 +612,269 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
 
 class IdMappingSet(Sec2PriMappingSet):
-    """Child class for ID-based mapping sets."""
+    """Mapping set for ID-based (secondary to primary identifier) mappings."""
 
     def compute_cardinalities(self) -> None:
         """Compute cardinalities using subject_id and object_id fields."""
         self._compute_cardinalities(on="id")
 
+    def to_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of secondary to primary ID mappings.
+
+        Columns: ``subject_id`` (secondary), ``object_id`` (primary),
+        ``predicate_id``, ``mapping_cardinality``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with one row per mapping.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "object_id": str(getattr(m, "object_id", "") or ""),
+                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
+                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+            }
+            for m in (self.mappings or [])
+        ]
+        df = pd.DataFrame(
+            rows, columns=["subject_id", "object_id", "predicate_id", "mapping_cardinality"]
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_sec2pri.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def to_pri_ids(self, output_path: Path | str | None = None) -> list[str]:
+        """Return a sorted list of unique primary IDs, optionally writing to TXT.
+
+        When ``_primary_ids`` is populated (e.g. from the HGNC complete set)
+        that set is used.  Otherwise primary IDs are derived from the unique
+        ``object_id`` values in the mappings.
+
+        Args:
+            output_path: If given, the IDs are also written one-per-line to a
+                text file.
+
+        Returns:
+            Sorted list of unique primary ID strings.
+        """
+        private: set[str] = (
+            object.__getattribute__(self, "_primary_ids")
+            if hasattr(self, "_primary_ids")
+            else set()
+        )
+
+        if private:
+            ids = sorted(private)
+        else:
+            ids = sorted(
+                {str(getattr(m, "object_id", None) or "") for m in (self.mappings or [])} - {""}
+            )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_pri_ids.txt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(ids) + "\n", encoding="utf-8")
+
+        return ids
+
+    def save(
+        self,
+        fmt: str,
+        output_path: Path | str | None = None,
+        **kwargs: object,
+    ) -> Path:
+        """Write to any supported format by name.
+
+        Formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``,
+        ``"sec2pri"``, ``"pri_ids"``.
+
+        Args:
+            fmt: Format key (see above).
+            output_path: Destination path. Auto-generated if ``None``.
+            **kwargs: Forwarded to the format-specific writer.
+
+        Returns:
+            Path to the written file.
+
+        Raises:
+            ValueError: For unknown format keys.
+        """
+        shared = self._save_shared(fmt, output_path, **kwargs)
+        if shared is not None:
+            return shared
+
+        if fmt == "sec2pri":
+            self.to_sec2pri(output_path)
+            return self._resolve_path(output_path, "_sec2pri.tsv")
+
+        if fmt == "pri_ids":
+            self.to_pri_ids(output_path)
+            return self._resolve_path(output_path, "_pri_ids.txt")
+
+        raise ValueError(
+            f"Unknown format {fmt!r}. Choose from: json, owl, pri_ids, rdf, sec2pri, sssom"
+        )
+
 
 class LabelMappingSet(Sec2PriMappingSet):
-    """Child class for label-based mapping sets."""
+    """Mapping set for label-based (previous/alias symbol to current symbol) mappings."""
 
     def compute_cardinalities(self) -> None:
         """Compute cardinalities using subject_label and object_label."""
         self._compute_cardinalities(on="label")
+
+    def to_symbol_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of previous/alias symbol to current symbol mappings.
+
+        Columns: ``subject_id``, ``subject_label`` (secondary/previous symbol),
+        ``object_id``, ``object_label`` (primary/current symbol),
+        ``predicate_id``, ``mapping_cardinality``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with one row per symbol mapping.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "subject_label": str(getattr(m, "subject_label", "") or ""),
+                "object_id": str(getattr(m, "object_id", "") or ""),
+                "object_label": str(getattr(m, "object_label", "") or ""),
+                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
+                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+            }
+            for m in (self.mappings or [])
+        ]
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "subject_id",
+                "subject_label",
+                "object_id",
+                "object_label",
+                "predicate_id",
+                "mapping_cardinality",
+            ],
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_symbol_sec2pri.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def to_pri_symbols(self, output_path: Path | str | None = None) -> list[str]:
+        """Return a sorted list of unique current/primary symbols, optionally writing to TXT.
+
+        Derived from the unique ``object_label`` values in the mappings.
+
+        Args:
+            output_path: If given, the symbols are also written one-per-line to
+                a text file.
+
+        Returns:
+            Sorted list of unique primary symbol strings.
+        """
+        symbols = sorted(
+            {str(getattr(m, "object_label", None) or "") for m in (self.mappings or [])} - {""}
+        )
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_pri_symbols.txt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
+
+        return symbols
+
+    def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a name to synonym ``DataFrame``, optionally writing to TSV.
+
+        Columns: ``subject_id``, ``subject_label`` (primary name),
+        ``object_label`` (synonym/previous name).
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with label mapping rows.
+        """
+        import pandas as pd
+
+        rows = [
+            {
+                "subject_id": str(getattr(m, "subject_id", "") or ""),
+                "subject_label": str(getattr(m, "subject_label", "") or ""),
+                "object_label": str(getattr(m, "object_label", "") or ""),
+            }
+            for m in (self.mappings or [])
+            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
+        ]
+        df = pd.DataFrame(rows, columns=["subject_id", "subject_label", "object_label"])
+
+        if output_path is not None:
+            path = self._resolve_path(output_path, "_name2synonym.tsv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(path, sep="\t", index=False)
+
+        return df
+
+    def save(
+        self,
+        fmt: str,
+        output_path: Path | str | None = None,
+        **kwargs: object,
+    ) -> Path:
+        """Write to any supported format by name.
+
+        Formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``,
+        ``"symbol_sec2pri"`` (``"symbol2prev"`` is a deprecated alias),
+        ``"pri_symbols"``, ``"name2synonym"``.
+
+        Args:
+            fmt: Format key (see above).
+            output_path: Destination path. Auto-generated if ``None``.
+            **kwargs: Forwarded to the format-specific writer.
+
+        Returns:
+            Path to the written file.
+
+        Raises:
+            ValueError: For unknown format keys.
+        """
+        shared = self._save_shared(fmt, output_path, **kwargs)
+        if shared is not None:
+            return shared
+
+        if fmt in ("symbol_sec2pri", "symbol2prev"):
+            self.to_symbol_sec2pri(output_path)
+            return self._resolve_path(output_path, "_symbol_sec2pri.tsv")
+
+        if fmt == "pri_symbols":
+            self.to_pri_symbols(output_path)
+            return self._resolve_path(output_path, "_pri_symbols.txt")
+
+        if fmt == "name2synonym":
+            self.to_name2synonym(output_path)
+            return self._resolve_path(output_path, "_name2synonym.tsv")
+
+        raise ValueError(
+            f"Unknown format {fmt!r}. Choose from: "
+            "json, name2synonym, owl, pri_symbols, rdf, sssom, symbol_sec2pri"
+        )
 
 
 class BaseParser(ABC):

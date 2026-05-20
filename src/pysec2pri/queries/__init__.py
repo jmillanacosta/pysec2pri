@@ -54,26 +54,26 @@ WIKIDATA_TEST_QUERIES: dict[str, str] = {
 # Maps entity type to the expected column names in query results
 QUERY_COLUMNS: dict[str, dict[str, str]] = {
     "metabolites": {
-        "subject_id": "primaryID",
-        "object_id": "secondaryID",
+        "subject_id": "secondaryID",
+        "object_id": "primaryID",
         "primary_label": "name",
         "secondary_label": "synonym",
     },
     "chemicals": {
-        "subject_id": "primaryID",
-        "object_id": "secondaryID",
+        "subject_id": "secondaryID",
+        "object_id": "primaryID",
         "primary_label": "name",
         "secondary_label": "synonym",
     },
     "genes": {
-        "subject_id": "primaryID",
-        "object_id": "secondaryID",
+        "subject_id": "secondaryID",
+        "object_id": "primaryID",
         "primary_label": "primarySymbol",
         "secondary_label": "secondarySymbol",
     },
     "proteins": {
-        "subject_id": "primaryID",
-        "object_id": "secondaryID",
+        "subject_id": "secondaryID",
+        "object_id": "primaryID",
         "primary_label": "name",
         "secondary_label": "synonym",
     },
