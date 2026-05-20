@@ -21,11 +21,11 @@
         <img src='https://readthedocs.org/projects/pysec2pri/badge/?version=latest' alt='Documentation Status' /></a>
 </p>
 
-Create and use mapping files for secondary (retired/withdrawn) biological database
-identifiers and symbols to primary (current) identifiers and symbols.
+Create and use mapping files for secondary (retired/withdrawn) biological
+database identifiers and symbols to primary (current) identifiers and symbols.
 
-Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subjects are secondary, objects are primary.
-
+Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subjects
+are secondary, objects are primary.
 
 ## Installation
 
@@ -65,8 +65,7 @@ pysec2pri --help
 pysec2pri chebi --help
 ```
 
-The default output is in
-[SSSOM](https://mapping-commons.github.io/sssom/)
+The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
 (Simple Standard for Sharing Ontology Mappings) TSV format.
 
 ### Updating IDs and symbols
@@ -86,7 +85,8 @@ gene	data
 HGNC:131	3.5
 ```
 
-Resolve the `gene` column to primary HGNC IDs (a new `_primary` column is added):
+Resolve the `gene` column to primary HGNC IDs (a new `_primary` column is
+added):
 
 ```bash
 pysec2pri update-ids gene_ex.tsv hgnc --at gene -o gene_ex_primary.tsv
@@ -111,7 +111,6 @@ pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.t
 ## Documentation
 
 Full documentation: <https://pysec2pri.readthedocs.io/>
-
 
 ## Supported Databases
 
