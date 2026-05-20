@@ -3,82 +3,69 @@
 ###################################
 
 **pysec2pri** maps secondary (retired/withdrawn) biological database identifiers
-to primary (current) identifiers using the `SSSOM <https://mapping-commons.github.io/sssom/>`_ standard.
+and symbols to primary (current) ones, with
+`SSSOM <https://mapping-commons.github.io/sssom/>`_ output by default.
 
-SSSOM Interoperability
-======================
-
-SSSOM outputs use **sssom-schema**:
-
-- Mappings use ``sssom_schema.Mapping`` objects
-- Mapping sets extend ``sssom_schema.MappingSet``
-- Exports to SSSOM TSV via the ``sssom`` Python library
-
-Supported Databases
-===================
-
-+--------------+-------------------------------------------------------------+
-| Database     | Mapping Types                                               |
-+==============+=============================================================+
-| **ChEBI**    | Secondary to Primary IDs, Synonyms to name                  |
-+--------------+-------------------------------------------------------------+
-| **HMDB**     | Secondary to Primary IDs                                    |
-+--------------+-------------------------------------------------------------+
-| **HGNC**     | Withdrawn to Current IDs, Secondary to Primary Symbols      |
-+--------------+-------------------------------------------------------------+
-| **NCBI Gene**| Discontinued to Current IDs, Secondary to Primary Symbols   |
-+--------------+-------------------------------------------------------------+
-| **UniProt**  | Secondary to Primary accessions                             |
-+--------------+-------------------------------------------------------------+
-| **Wikidata** | Redirect mappings (SPARQL)                                  |
-+--------------+-------------------------------------------------------------+
+Supported databases: ChEBI, HMDB, HGNC, NCBI Gene, UniProt, Wikidata.
 
 Quick Start
 ===========
 
-**CLI:**
+**Generate a mapping set (CLI):**
 
 .. code-block:: bash
 
-    # Parse ChEBI and output SSSOM
-    pysec2pri chebi chebi_3star.sdf -o chebi.sssom.tsv
+    pysec2pri hgnc ids
+    pysec2pri chebi synonyms
 
-    # Parse HGNC with custom format
-    pysec2pri hgnc hgnc_withdrawn.tsv --format sec2pri
+**Update IDs or symbols in a file (CLI):**
+
+.. code-block:: bash
+
+    pysec2pri update-ids data.tsv hgnc --at gene_id -o data_primary.tsv
+    pysec2pri update-symbols data.tsv hgnc --at symbol
+    # reuse a saved mapping file
+    pysec2pri update-ids data.tsv hgnc --at gene_id --mapping hgnc_sssom.tsv
 
 **Python API:**
 
 .. code-block:: python
 
-    from pysec2pri.api import parse_chebi, write_sssom
+    from pysec2pri import generate_hgnc, resolve_ids
+    from pysec2pri import generate_hgnc_symbols, resolve_symbols
+    from pysec2pri import load_mapping, load_label_mapping
 
-    mapping_set = parse_chebi("chebi_3star.sdf")
-    write_sssom(mapping_set, "chebi.sssom.tsv")
+    ms = generate_hgnc()
+    resolve_ids("HGNC:131", ms)              # → "HGNC:145"
+    resolve_ids(["HGNC:131", "HGNC:2"], ms)  # → ["HGNC:145", ...]
 
-    # Access sssom_schema.Mapping objects directly
-    for mapping in mapping_set.mappings:
-        print(f"{mapping.object_id} to {mapping.subject_id}")
+    lms = generate_hgnc_symbols()
+    resolve_symbols("BRCA1_OLD", lms)        # → "BRCA1"
 
-.. toctree::
-    :maxdepth: 2
-    :caption: Getting Started
-
-    installation
-    cli
-
-.. toctree::
-    :maxdepth: 2
-    :caption: Features
-
-    download
-    diff
-    exports
+    # load from a saved sec2pri / SSSOM file
+    ms = load_mapping("hgnc_sec2pri.tsv")
+    lms = load_label_mapping("hgnc_symbol2prev.tsv")
 
 .. toctree::
-    :maxdepth: 2
-    :caption: API Reference
+   :maxdepth: 1
+   :caption: Getting Started
 
-    api
-    parsers
-    models
-    update_ids
+   installation
+   cli
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Features
+
+   download
+   exports
+   diff
+
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
+
+   api
+   parsers
+   models
+   update_ids
