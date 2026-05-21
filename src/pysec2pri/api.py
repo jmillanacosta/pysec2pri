@@ -207,6 +207,33 @@ def generate_hgnc_primary_ids(
     return parser.parse_primary_ids(Path(input_path))
 
 
+def generate_hgnc_primary_symbols(
+    input_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current HGNC primary Symbols.
+
+    Only the HGNC complete set file is downloaded/read.  The returned mapping
+    set has an empty ``mappings`` list; its ``_primary_symbols`` store is
+    populated with every current HGNC Symbol so that ``to_pri_symbols()`` produces
+    the authoritative complete list, not just the subset of primaries that
+    happen to have an associated secondary.
+
+    Args:
+        input_path: Local HGNC complete set TSV. Auto-downloaded if ``None``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import HGNCParser
+
+    if input_path is None:
+        input_path = _auto_download("hgnc", version, keys=["complete"])["complete"]
+
+    parser = HGNCParser(version=version, show_progress=show_progress)
+    return parser.parse_primary_symbols(Path(input_path))
+
+
 def generate_hgnc_symbols(
     input_path: Path | str | None = None,
     version: str | None = None,

@@ -82,7 +82,7 @@ class HGNCParser(BaseParser):
         Args:
             input_path: Path to the withdrawn HGNC TSV file.
             complete_set_path: Optional path to the HGNC complete set TSV.
-                When supplied, ``all_primary_ids`` on the returned mapping set
+                When supplied, ``all_primary_ids|symbols`` on the returned mapping set
                 is populated with every current HGNC ID, not just those that
                 appear as ``object_id`` in a withdrawn to primary mapping.
 
@@ -107,7 +107,37 @@ class HGNCParser(BaseParser):
                 "_primary_ids",
                 self._extract_primary_ids(Path(complete_set_path)),
             )
+        return mapping_set
 
+    def parse_primary_symbols(
+        self,
+        complete_set_path: Path | str | None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set whose only content is the full primary Symbol list.
+
+        Reads the HGNC complete set to extract every current HGNC Symbol and
+        stores it in ``_primary_symbols``.  The ``mappings`` list is intentionally
+        left empty, this mapping set exists only to drive ``to_pri_symbols()``.
+
+        Args:
+            complete_set_path: Path to the HGNC complete set TSV file.
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.LabelMappingSet` with no mappings and
+            ``_primary_symbols`` populated with all current HGNC symbols.
+        """
+        if complete_set_path is None:
+            raise ValueError("complete_set_path must not be None")
+        complete_set_path = Path(complete_set_path)
+        self._resolve_version(complete_set_path)
+
+        mapping_set = self._create_mapping_set([], mapping_type="label")
+        complete_pri_sym = self._extract_primary_symbols(complete_set_path)
+        object.__setattr__(
+            mapping_set,
+            "_primary_symbols",
+            complete_pri_sym,
+        )
         return mapping_set
 
     def parse_primary_ids(
@@ -165,6 +195,11 @@ class HGNCParser(BaseParser):
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
+        object.__setattr__(
+            mapping_set,
+            "_primary_symbols",
+            self._extract_primary_symbols(Path(complete_set_path)),
+        )
         return mapping_set
 
     def parse_all(
@@ -204,6 +239,26 @@ class HGNCParser(BaseParser):
         if hgnc_id_col is None:
             raise ValueError(f"Could not find hgnc_id column in {file_path}")
         return {str(val) for val in df[hgnc_id_col].drop_nulls().to_list()}
+
+    def _extract_primary_symbols(self, file_path: Path) -> set[str]:
+        """Extract all current HGNC Symbols from the complete set file.
+
+        Args:
+            file_path: Path to the HGNC complete set TSV file.
+
+        Returns:
+            Set of all HGNC Symbols present in the complete set.
+        """
+        df = pl.read_csv(
+            file_path,
+            separator="\t",
+            infer_schema_length=10000,
+            null_values=[""],
+        )
+        hgnc_sym_col = self._find_column(df.columns, "symbol")
+        if hgnc_sym_col is None:
+            raise ValueError(f"Could not find hgnc_symbol column in {file_path}")
+        return {str(val) for val in df[hgnc_sym_col].drop_nulls().to_list()}
 
     def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
         """Parse withdrawn HGNC file for ID-to-ID mappings.
