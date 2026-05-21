@@ -311,19 +311,20 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
     Attributes:
         _primary_ids: Private store for the full authoritative primary ID set.
-            Kept private so sssom serialisers never include it in any output.
-            Access it only through :meth:`to_pri_ids`.
+        _primary_symbols: Private store for the full authoritative primary Symbol set.
     """
 
     # Primaries are private to sssom's schema
-    # Populated by parsers that have access to the full primary ID list
+    # Populated by parsers that have access to the full primary ID/symbol list
     # (e.g. HGNCParser when the complete set file is provided).
     _primary_ids: set[str]
+    _primary_symbols: set[str]
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initialise the mapping set and the private primary-IDs store."""
         super().__init__(*args, **kwargs)
         object.__setattr__(self, "_primary_ids", set())
+        object.__setattr__(self, "_primary_symbols", set())
 
     # Export helpers
 
@@ -778,21 +779,31 @@ class LabelMappingSet(Sec2PriMappingSet):
         return df
 
     def to_pri_symbols(self, output_path: Path | str | None = None) -> list[str]:
-        """Return a sorted list of unique current/primary symbols, optionally writing to TXT.
+        """Return a sorted list of unique primary symbols, optionally writing to TXT.
 
-        Derived from the unique ``object_label`` values in the mappings.
+        When ``_primary_symbols`` is populated (e.g. from the HGNC complete set)
+        that set is used.  Otherwise primary IDs are derived from the unique
+        ``object_label`` values in the mappings.
 
         Args:
-            output_path: If given, the symbols are also written one-per-line to
-                a text file.
+            output_path: If given, the IDs are also written one-per-line to a
+                text file.
 
         Returns:
-            Sorted list of unique primary symbol strings.
+            Sorted list of unique primary ID strings.
         """
-        symbols = sorted(
-            {str(getattr(m, "object_label", None) or "") for m in (self.mappings or [])} - {""}
+        private: set[str] = (
+            object.__getattribute__(self, "_primary_symbols")
+            if hasattr(self, "_primary_symbols")
+            else set()
         )
 
+        if private:
+            symbols = sorted(private)
+        else:
+            symbols = sorted(
+                {str(getattr(m, "object_id", None) or "") for m in (self.mappings or [])} - {""}
+            )
         if output_path is not None:
             path = self._resolve_path(output_path, "_pri_symbols.txt")
             path.parent.mkdir(parents=True, exist_ok=True)

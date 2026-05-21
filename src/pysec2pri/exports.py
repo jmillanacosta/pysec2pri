@@ -221,6 +221,39 @@ def write_pri_ids(
     return output_path
 
 
+def write_pri_symbols(
+    mapping_set: Sec2PriMappingSet,
+    output_path: Path | str,
+) -> Path:
+    """Write unique primary symbols to a text file, one per line.
+
+    Args:
+        mapping_set: The mapping set to read primary IDs from.
+        output_path: Destination file path.
+
+    Returns:
+        Path to the written file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Use the authoritative set when available (never appears in other outputs)
+    all_sym: set[str] = getattr(mapping_set, "_primary_symbols", set()) or set()
+
+    if not all_sym:
+        # Fall back to extracting from mappings
+        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+            obj_label = getattr(m, "object_label", None)
+            if obj_label:
+                all_sym.add(str(obj_label))
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for pri_sym in sorted(all_sym):
+            f.write(f"{pri_sym}\n")
+
+    return output_path
+
+
 def write_sec2pri(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
