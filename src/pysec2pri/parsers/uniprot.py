@@ -17,6 +17,7 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
+    BaseDownloader,
     BaseParser,
     Sec2PriMappingSet,
 )
@@ -207,4 +208,61 @@ class UniProtParser(BaseParser):
         return self.create_mapping_set(mappings, mapping_type)
 
 
-__all__ = ["UniProtParser"]
+class UniProtDownloader(BaseDownloader):
+    """Downloader for UniProt data files."""
+
+    datasource_name = "uniprot"
+
+    def get_download_urls(
+        self,
+        version: str | None = None,
+        **kwargs: object,
+    ) -> dict[str, str]:
+        """Get UniProt download URLs for *version*, or latest."""
+        from pysec2pri.download import _get_uniprot_urls_for_version
+
+        if version:
+            return _get_uniprot_urls_for_version(version)
+        if self._config:
+            return dict(self._config.download_urls)
+        raise ValueError("UniProt config not loaded")
+
+    def download(
+        self,
+        output_dir: Path,
+        version: str | None = None,
+        decompress: bool = True,
+        **kwargs: object,
+    ) -> dict[str, Path]:
+        """Download UniProt files into *output_dir*."""
+        urls = self.get_download_urls(version)
+        return self._download_urls(urls, output_dir, decompress)
+
+    def list_versions(self) -> list[str]:
+        """List all available UniProt previous-release versions.
+
+        Scrapes the UniProt FTP previous_releases directory for version
+        strings.
+
+        Returns:
+            Sorted list of version strings
+            (e.g. ``["2024_01", "2024_02", ...]``).
+
+        Raises:
+            ValueError: If the archive URL is not configured.
+        """
+        import re
+
+        import httpx
+
+        if not self._config or not self._config.archive_url:
+            raise ValueError("UniProt archive URL not configured")
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(self._config.archive_url)
+            response.raise_for_status()
+        # FTP HTML index: links like "release-2024_01/"
+        matches = re.findall(r'href="release-(\d{4}_\d{2})/', response.text)
+        return sorted(set(matches))
+
+
+__all__ = ["UniProtDownloader", "UniProtParser"]

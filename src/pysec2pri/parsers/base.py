@@ -305,13 +305,33 @@ class BaseDownloader(ABC):
 
         return downloaded
 
+    def list_versions(self) -> list[str]:
+        """List all available archive versions for this datasource.
+
+        Subclasses for datasources that publish versioned archives should
+        override this method with source-specific retrieval logic.
+        The base implementation raises :class:`ValueError` because most
+        datasources only provide the latest release.
+
+        Returns:
+            Sorted list of version strings available for download.
+
+        Raises:
+            ValueError: Always, override in a subclass to provide versions.
+        """
+        name = self.datasource_name or type(self).__name__
+        raise ValueError(
+            f"{name.upper()} does not maintain a versioned archive. "
+            "Only the latest release is available for download."
+        )
+
 
 class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
     """A MappingSet for Sec2Pri, with helpers for cardinality and export.
 
     Attributes:
-        _primary_ids: Private store for the full authoritative primary ID set.
-        _primary_symbols: Private store for the full authoritative primary Symbol set.
+        _primary_ids: Private store for the full primary ID set.
+        _primary_symbols: Private store for the full primary Symbol set.
     """
 
     # Primaries are private to sssom's schema
@@ -1079,6 +1099,54 @@ class BaseParser(ABC):
             return cast(Iterable[_T], tqdm(iterable, desc=desc, total=total))
         return iterable
 
+    def _label_predicate_for_type(self, label_type: str) -> dict[str, str]:
+        """Return predicate fields for a label mapping type.
+
+        Used by :meth:`_build_mappings` when a row carries a ``_label_type``
+        key.
+
+        - ``"previous"``: the secondary name, label or symbol ``IAO:0100001`` "term replaced by").
+        - ``"alias"`` (or any other value): a valid alternative name: ``oboInOwl:hasExactSynonym``.
+
+        Args:
+            label_type: ``"previous"`` or ``"alias"``.
+
+        Returns:
+            Dict with at least ``predicate_id`` and, where available,
+            ``predicate_label``.
+        """
+        if label_type == "previous":
+            m_meta = self.get_mapping_metadata()
+            result: dict[str, str] = {"predicate_id": m_meta["predicate_id"]}
+            pred_label = m_meta.get("predicate_label")
+            if pred_label:
+                result["predicate_label"] = str(pred_label)
+            return result
+        return {
+            "predicate_id": "oboInOwl:hasExactSynonym",
+            "predicate_label": "has exact synonym",
+        }
+
+    def _finalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Resolve ``_label_type`` into predicate fields and remove the key.
+
+        If the row contains a ``_label_type`` entry and does *not* already
+        have an explicit ``predicate_id``, the appropriate predicate fields
+        are injected via :meth:`_label_predicate_for_type`.  The sentinel key
+        is always removed before the row is used to construct a
+        :class:`~sssom_schema.Mapping`.
+
+        Args:
+            row: Merged row dict (may contain ``_label_type``).
+
+        Returns:
+            The same dict, mutated in-place and returned for convenience.
+        """
+        label_type = row.pop("_label_type", None)
+        if label_type is not None and "predicate_id" not in row:
+            row.update(self._label_predicate_for_type(label_type))
+        return row
+
     def _build_mappings(
         self,
         rows: Iterable[dict[str, Any]],
@@ -1092,6 +1160,12 @@ class BaseParser(ABC):
         Automatically injects mapping-level fields from the parser's
         config metadata (e.g. ``confidence``) unless the caller already
         provides them in ``fixed_fields`` or individual row dicts.
+
+        Rows may carry a special ``_label_type`` key (``"alias"`` or
+        ``"previous"``) instead of an explicit ``predicate_id``; the base
+        class will resolve it to the correct predicate via
+        :meth:`_label_predicate_for_type` before constructing the
+        :class:`~sssom_schema.Mapping`.
 
         Args:
             rows: Per-row fields as dicts (subject_id, object_id, etc.).
@@ -1108,13 +1182,13 @@ class BaseParser(ABC):
             k: m_meta[k] for k in _auto_fields if k in m_meta and m_meta[k] is not None
         }
 
-        # Build base: auto fields < fixed_fields (fixed wins over auto)
+        # Build base
         base: dict[str, Any] = {**auto, **(fixed_fields or {})}
 
         if base:
-            merged: Iterable[dict[str, Any]] = ({**base, **row} for row in rows)
+            merged: Iterable[dict[str, Any]] = (self._finalize_row({**base, **row}) for row in rows)
         else:
-            merged = rows
+            merged = (self._finalize_row(dict(row)) for row in rows)
         return [Mapping(**row) for row in self._progress(merged, desc=desc, total=total)]
 
     def _build_comment(
@@ -1188,11 +1262,11 @@ class BaseParser(ABC):
         return WITHDRAWN_ENTRY == identifier
 
     @staticmethod
-    def _split_symbols(symbols_str: str) -> list[str]:
-        """Split a pipe-separated string of symbols."""
+    def _split_symbols(symbols_str: str, sep: str = "|") -> list[str]:
+        """Split a separated string of symbols."""
         if not symbols_str:
             return []
-        return [s.strip() for s in symbols_str.split("|") if s.strip()]
+        return [s.strip() for s in symbols_str.split(sep) if s.strip()]
 
     @staticmethod
     def is_withdrawn_primary(subject_id: str) -> bool:
@@ -1269,7 +1343,7 @@ class BaseParser(ABC):
         if self.version and description:
             description = f"{description} Version: {self.version}."
 
-        # Create the mapping set with all SSSOM metadata
+        # Create the mapping set with SSSOM metadata
         mapping_set = mapping_set_class(
             mappings=mappings,
             curie_map=curie_map,

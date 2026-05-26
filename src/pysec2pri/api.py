@@ -7,7 +7,7 @@ secondary-to-primary mapping files and generating and using the standardized Map
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pysec2pri.exports import (
     write_json,
@@ -45,6 +45,7 @@ __all__ = [
     "generate_uniprot",
     "generate_wikidata",
     "generate_wikidata_symbols",
+    "list_versions",
     "load_label_mapping",
     "load_mapping",
     "resolve_ids",
@@ -896,3 +897,32 @@ def resolve_symbols(
         result.to_csv(output_path, sep=out_sep, index=False)
 
     return result
+
+
+def list_versions(datasource: str) -> Any:
+    """List all available archive versions for a datasource.
+
+    For datasources that publish versioned archives (ChEBI, HGNC, UniProt),
+    this queries the remote archive index and returns all available version
+    strings sorted in ascending order.
+
+    NCBI and HMDB do not maintain versioned archives; calling this function
+    for those datasources raises :class:`ValueError`.
+
+    Args:
+        datasource: Datasource name, one of ``"chebi"``, ``"hgnc"``, or
+            ``"uniprot"``.
+
+    Returns:
+        Sorted list of version strings.  Format depends on the datasource:
+
+        - **chebi**: integer release numbers, e.g. ``["200", ..., "245"]``
+        - **hgnc**: ISO dates, e.g. ``["2023-01-01", ..., "2026-04-07"]``
+        - **uniprot**: release IDs, e.g. ``["2024_01", "2024_02", ...]``
+
+    Raises:
+        ValueError: If *datasource* is unknown or has no versioned archive.
+    """
+    from pysec2pri.download import list_versions as _list_versions
+
+    return _list_versions(datasource)

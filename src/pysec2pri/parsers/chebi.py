@@ -220,7 +220,6 @@ class ChEBIParser(BaseParser):
         """Build Mapping objects for label/synonym mappings."""
         m_meta = self.get_mapping_metadata()
         fixed = {
-            "predicate_id": "oboInOwl:hasRelatedSynonym",
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
             "object_source": m_meta.get("object_source"),
@@ -228,7 +227,13 @@ class ChEBIParser(BaseParser):
             "license": m_meta.get("license"),
         }
         rows = [
-            {"subject_id": sid, "subject_label": pname, "object_id": sid, "object_label": syn}
+            {
+                "subject_id": sid,
+                "subject_label": pname,
+                "object_id": sid,
+                "object_label": syn,
+                "_label_type": "alias",
+            }
             for sid, pname, syn in raw_name_mappings
         ]
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
@@ -650,6 +655,56 @@ class ChEBIDownloader(BaseDownloader):
         v = version or self.version
         use_tsv = self.is_new_format(v) and not self.use_sdf
         return "tsv" if use_tsv else "sdf"
+
+    def list_versions(self) -> list[str]:
+        """List all available ChEBI archive release numbers.
+
+        Queries both the current archive (TSV releases >= 245) and the legacy
+        archive (SDF-only releases < 245) and returns all release numbers
+        sorted in ascending order.
+
+        Returns:
+            Sorted list of version strings (e.g. ``["100", "101", ..., "251"]``).
+
+        Raises:
+            ValueError: If the archive URL is not configured.
+        """
+        import re
+
+        import httpx
+
+        if not self._config or not self._config.archive_url:
+            raise ValueError("ChEBI archive URL not configured")
+
+        versions: set[str] = set()
+
+        # Derive legacy archive base URL from the legacy SDF URL template in config:
+        # e.g. ".../chebi_legacy/archive/rel{version}/SDF/..." -> ".../chebi_legacy/archive/"
+        legacy_base: str | None = None
+        legacy_urls: dict[str, str] = self._config.download_urls.get("legacy", {})
+        legacy_template = next(iter(legacy_urls.values()), None)
+        if legacy_template:
+            # Strip from "rel{version}" onwards to get the directory listing URL
+            idx = legacy_template.find("rel{version}")
+            if idx != -1:
+                legacy_base = legacy_template[:idx]
+
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            # New archive (>= 245)
+            response = client.get(self._config.archive_url)
+            response.raise_for_status()
+            versions.update(re.findall(r"rel(\d+)", response.text))
+
+            # Legacy archive (< 245)
+            if legacy_base:
+                try:
+                    legacy_response = client.get(legacy_base)
+                    legacy_response.raise_for_status()
+                    versions.update(re.findall(r"rel(\d+)", legacy_response.text))
+                except httpx.HTTPError:
+                    pass  # Legacy archive unavailable, still return what we have
+
+        return sorted(versions, key=int)
 
 
 __all__ = ["ChEBIDownloader", "ChEBIParser"]

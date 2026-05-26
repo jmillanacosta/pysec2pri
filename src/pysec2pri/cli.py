@@ -116,7 +116,7 @@ def _version_base(ms: object, data_version: str | None, prefix: str) -> tuple[st
 
 
 def _emit(ms: object, fmt: str, output: Path | None, base: str) -> None:
-    """Save *ms* and echo a count summary."""
+    """Save ms and echo a count summary."""
     from pysec2pri.api import save
 
     path = save(ms, fmt, output, base_name=base)  # type: ignore[arg-type]
@@ -491,6 +491,48 @@ def wikidata_symbols(
         )
         _, base = _version_base(ms, None, f"wikidata_{etype}_symbols")
         _emit(ms, output_format, output, base)
+
+
+@main.command("list-versions")
+@click.argument(
+    "datasource",
+    type=click.Choice(["chebi", "hgnc", "uniprot"], case_sensitive=False),
+)
+def list_versions(datasource: str) -> None:
+    """List all available archive versions for DATASOURCE.
+
+    Only datasources that maintain a versioned archive are supported:
+    chebi, hgnc, and uniprot.  NCBI and HMDB only provide the latest release.
+
+    Version formats:
+      chebi   - integer release numbers (e.g. 200, 245)
+      hgnc    - ISO dates (e.g. 2023-01-01, 2026-04-07)
+      uniprot - release identifiers (e.g. 2024_01, 2025_03)
+    """
+    from pysec2pri.api import list_versions as _list_versions
+
+    click.echo(f"Fetching available {datasource.upper()} versions...")
+    try:
+        versions = _list_versions(datasource)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not versions:
+        click.echo("No versions found.")
+        return
+
+    click.echo(f"\n{len(versions)} version(s) available for {datasource.upper()}:\n")
+    if datasource.lower() == "chebi":
+        from pysec2pri.parsers.chebi import ChEBIDownloader
+
+        threshold = ChEBIDownloader().new_format_version or 245
+        for v in versions:
+            note = "  (SDF only)" if int(v) < threshold else ""
+            click.echo(f"  {v}{note}")
+        click.echo(f"\n  Note: versions < {threshold} are only available as SDF files.")
+    else:
+        for v in versions:
+            click.echo(f"  {v}")
 
 
 @main.command(name="all")

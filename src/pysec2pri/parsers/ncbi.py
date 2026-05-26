@@ -223,7 +223,6 @@ class NCBIParser(BaseParser):
 
         m_meta = self.get_mapping_metadata()
         fixed = {
-            "predicate_id": "oboInOwl:hasRelatedSynonym",
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
             "object_source": m_meta.get("object_source"),
@@ -253,6 +252,7 @@ class NCBIParser(BaseParser):
                                 "subject_label": pri_symbol_str,
                                 "object_id": curie_id,
                                 "object_label": syn,
+                                "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
                             }
                         )

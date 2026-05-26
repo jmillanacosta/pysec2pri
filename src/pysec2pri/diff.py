@@ -185,15 +185,8 @@ def _read_sssom_to_dataframe(path: Path) -> pl.DataFrame:
         infer_schema_length=10000,
     )
 
-    # Normalize column names for comparison
-    # SSSOM uses subject_id/object_id, we use subject_id/object_id
     if "subject_id" in df.columns and "object_id" in df.columns:
-        df = df.select(
-            [
-                pl.col("subject_id").alias("subject_id"),
-                pl.col("object_id").alias("object_id"),
-            ]
-        )
+        df = df.select(["subject_id", "object_id"])
 
     return df
 
