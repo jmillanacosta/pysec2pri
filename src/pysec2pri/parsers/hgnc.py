@@ -17,6 +17,7 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
+    BaseDownloader,
     BaseParser,
     LabelMappingSet,
     Sec2PriMappingSet,
@@ -438,4 +439,64 @@ class HGNCParser(BaseParser):
         return self.create_mapping_set(mappings, mapping_type)
 
 
-__all__ = ["HGNCParser"]
+class HGNCDownloader(BaseDownloader):
+    """Downloader for HGNC data files from the quarterly archive."""
+
+    datasource_name = "hgnc"
+
+    def get_download_urls(
+        self,
+        version: str | None = None,
+        **kwargs: object,
+    ) -> dict[str, str]:
+        """Get HGNC download URLs for *version* (``YYYY-MM-DD``), or latest."""
+        from pysec2pri.download import _get_hgnc_urls_for_version, check_hgnc_release
+
+        if version:
+            return _get_hgnc_urls_for_version(version)
+        return check_hgnc_release().files
+
+    def download(
+        self,
+        output_dir: Path,
+        version: str | None = None,
+        decompress: bool = True,
+        **kwargs: object,
+    ) -> dict[str, Path]:
+        """Download HGNC files into *output_dir*."""
+        urls = self.get_download_urls(version)
+        return self._download_urls(urls, output_dir, decompress)
+
+    def list_versions(self) -> list[str]:
+        """List all available HGNC quarterly archive versions.
+
+        Queries the Google Cloud Storage API for all complete-set files and
+        returns their dates in ascending order.
+
+        Returns:
+            Sorted list of version strings in ``YYYY-MM-DD`` format.
+        """
+        import re
+
+        import httpx
+
+        gcs_api_url = (
+            "https://storage.googleapis.com/storage/v1/b/public-download-files/o"
+            "?prefix=hgnc/archive/archive/quarterly/tsv/"
+        )
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(gcs_api_url)
+            response.raise_for_status()
+            data = response.json()
+
+        items = data.get("items", [])
+        versions: list[str] = []
+        for item in items:
+            name = item.get("name", "")
+            match = re.search(r"hgnc_complete_set_(\d{4}-\d{2}-\d{2})\.txt$", name)
+            if match:
+                versions.append(match.group(1))
+        return sorted(set(versions))
+
+
+__all__ = ["HGNCDownloader", "HGNCParser"]

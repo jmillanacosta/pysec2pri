@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from tqdm import tqdm
@@ -25,6 +26,7 @@ __all__ = [
     "download_file",
     "get_download_urls",
     "get_latest_release_info",
+    "list_versions",
 ]
 
 _CLOUDFLARE_HINTS = (
@@ -435,6 +437,60 @@ def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
             f"{base}/release-{version}/knowledgebase/knowledgebase-docs-only{version}.tar.gz"
         ),
     }
+
+
+def list_versions(datasource: str) -> Any:
+    """List all available archive versions for a datasource.
+
+    Delegates to the datasource's :class:`~pysec2pri.parsers.base.BaseDownloader`
+    subclass ``list_versions()`` method, which contains all source-specific
+    retrieval logic.
+
+    For datasources that publish versioned archives (ChEBI, HGNC, UniProt),
+    returns all available version strings sorted in ascending order.
+
+    NCBI and HMDB do not maintain versioned archives; calling this function
+    for those datasources raises :class:`ValueError`.
+
+    Args:
+        datasource: Datasource name (``"chebi"``, ``"hgnc"``, or
+            ``"uniprot"``).
+
+    Returns:
+        Sorted list of version strings. Format depends on the datasource:
+
+        - **chebi**: integer release numbers, e.g. ``["200", "201", ..., "245"]``
+        - **hgnc**: ISO dates, e.g. ``["2023-01-01", ..., "2026-04-07"]``
+        - **uniprot**: release identifiers, e.g. ``["2024_01", "2024_02", ...]``
+
+    Raises:
+        ValueError: If the datasource is unknown or has no versioned archive.
+    """
+    lower = datasource.lower()
+
+    if lower not in ALL_DATASOURCES:
+        raise ValueError(
+            f"Unknown datasource: {datasource!r}. Supported: {sorted(ALL_DATASOURCES.keys())}"
+        )
+
+    from pysec2pri.parsers.chebi import ChEBIDownloader
+    from pysec2pri.parsers.hgnc import HGNCDownloader
+    from pysec2pri.parsers.uniprot import UniProtDownloader
+
+    _downloader_map = {
+        "chebi": ChEBIDownloader,
+        "hgnc": HGNCDownloader,
+        "uniprot": UniProtDownloader,
+    }
+
+    cls = _downloader_map.get(lower)
+    if cls is None:
+        # Datasource exists but has no versioned archive
+        raise ValueError(
+            f"{datasource.upper()} does not maintain a versioned archive. "
+            "Only the latest release is available for download."
+        )
+    return cls().list_versions()
 
 
 def get_download_urls(

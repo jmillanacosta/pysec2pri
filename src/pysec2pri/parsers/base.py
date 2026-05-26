@@ -305,6 +305,26 @@ class BaseDownloader(ABC):
 
         return downloaded
 
+    def list_versions(self) -> list[str]:
+        """List all available archive versions for this datasource.
+
+        Subclasses for datasources that publish versioned archives should
+        override this method with source-specific retrieval logic.
+        The base implementation raises :class:`ValueError` because most
+        datasources only provide the latest release.
+
+        Returns:
+            Sorted list of version strings available for download.
+
+        Raises:
+            ValueError: Always, override in a subclass to provide versions.
+        """
+        name = self.datasource_name or type(self).__name__
+        raise ValueError(
+            f"{name.upper()} does not maintain a versioned archive. "
+            "Only the latest release is available for download."
+        )
+
 
 class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
     """A MappingSet for Sec2Pri, with helpers for cardinality and export.
