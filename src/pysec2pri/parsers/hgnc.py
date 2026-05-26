@@ -243,14 +243,18 @@ class HGNCParser(BaseParser):
             raise ValueError(f"Could not find hgnc_id column in {file_path}")
         return {str(val) for val in df[hgnc_id_col].drop_nulls().to_list()}
 
-    def _extract_primary_symbols(self, file_path: Path) -> set[str]:
+    def _extract_primary_symbols(self, file_path: Path) -> dict[str, set[str]]:
         """Extract all current HGNC Symbols from the complete set file.
+
+        Returns a ``dict`` mapping each symbol text to the set of primary HGNC
+        IDs that carry that symbol.  Most symbols map to exactly one ID, but
+        the dict form allows O(1) ambiguity lookups.
 
         Args:
             file_path: Path to the HGNC complete set TSV file.
 
         Returns:
-            Set of all HGNC Symbols present in the complete set.
+            ``dict[symbol, set[hgnc_id]]``
         """
         df = pl.read_csv(
             file_path,
@@ -259,9 +263,18 @@ class HGNCParser(BaseParser):
             null_values=[""],
         )
         hgnc_sym_col = self._find_column(df.columns, "symbol")
+        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
         if hgnc_sym_col is None:
             raise ValueError(f"Could not find hgnc_symbol column in {file_path}")
-        return {str(val) for val in df[hgnc_sym_col].drop_nulls().to_list()}
+        result: dict[str, set[str]] = {}
+        for id_, symbol in (
+            df.filter(pl.col("status") == "Approved")
+            .select([hgnc_id_col, hgnc_sym_col])
+            .drop_nulls()
+            .rows()
+        ):
+            result.setdefault(str(symbol), set()).add(str(id_))
+        return result
 
     def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
         """Parse withdrawn HGNC file for ID-to-ID mappings.

@@ -108,6 +108,60 @@ pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
 pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
 ```
 
+Ambiguous mappings (where a deprecated ID or symbol serves as a recommended for another entity) are not resolved, but flagged for users to solve them manually.
+
+A subset with ambiguous mappings only can be generated like:
+
+```bash
+pysec2pri ambiguous hgnc-symbols
+```
+
+## Mapping types
+
+### Deprecations (IDs)
+
+When an identifier is deprecated it is usually mapped to a single primary
+identifier. Sometimes the deprecated ID appears to recommend multiple
+targets, which introduces ambiguity.
+
+```mermaid
+flowchart LR
+    D[Deprecated ID]
+    P[Primary ID]
+    A[Alternate primary]
+    D -->|IAO:0100001 term replaced by| P
+    D -. oboInOwl:consider .-> A
+```
+
+### Symbols
+
+Symbols can be reused over time. A symbol might resolve unambiguously to a
+single primary entity, or map ambiguously to several candidates.
+
+```mermaid
+flowchart LR
+    S[Symbol]
+    P1[Primary 1]
+    P2[Primary 2]
+    S -->|IAO:0100001 term replaced by| P1
+    S -. oboInOwl:consider .-> P2
+```
+
+### Aliases and synonyms
+
+Aliases/synonyms are alternate names for the same primary entity and are
+typically many-to-one mappings (multiple synonyms -> one primary).
+
+```mermaid
+flowchart LR
+    Syn1[object_label: glucose]
+    Syn2[subject_label: D-glucose]
+    Syn1 -->|oboInOwl:hasExactSynonym| Syn2
+    Syn2 -->|oboInOwl:hasExactSynonym| Syn1
+
+```
+
+
 ## Documentation
 
 Full documentation: <https://pysec2pri.readthedocs.io/>

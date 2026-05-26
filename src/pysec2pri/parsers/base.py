@@ -6,6 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import date
 from importlib import resources as _importlib_resources
 from pathlib import Path
@@ -338,13 +339,14 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
     # Populated by parsers that have access to the full primary ID/symbol list
     # (e.g. HGNCParser when the complete set file is provided).
     _primary_ids: set[str]
-    _primary_symbols: set[str]
+    # Maps label text to set of primary IDs that carry that label.
+    _primary_symbols: dict[str, set[str]]
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initialise the mapping set and the private primary-IDs store."""
         super().__init__(*args, **kwargs)
         object.__setattr__(self, "_primary_ids", set())
-        object.__setattr__(self, "_primary_symbols", set())
+        object.__setattr__(self, "_primary_symbols", {})
 
     # Export helpers
 
@@ -567,6 +569,18 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
         if shared is not None:
             return shared
         raise ValueError(f"Unknown format {fmt!r}. Choose from: json, owl, rdf, sssom")
+
+    def find_ambiguous(self) -> AmbiguousMappingSet:
+        """Find mappings whose subject is also a current primary entry.
+
+        Delegates to :func:`_find_ambiguous`.  See that function for full
+        semantics.
+
+        Returns:
+            :class:`AmbiguousMappingSet` with all conflicting mappings
+            annotated.  Empty when no ambiguities are detected.
+        """
+        return _find_ambiguous(self)
 
     # Cardinality helpers
 
@@ -798,38 +812,49 @@ class LabelMappingSet(Sec2PriMappingSet):
 
         return df
 
-    def to_pri_symbols(self, output_path: Path | str | None = None) -> list[str]:
-        """Return a sorted list of unique primary symbols, optionally writing to TXT.
+    def to_pri_symbols(self, output_path: Path | str | None = None) -> list[tuple[str, str]]:
+        r"""Return a sorted list of unique ``(primary_id, symbol)`` pairs.
 
         When ``_primary_symbols`` is populated (e.g. from the HGNC complete set)
-        that set is used.  Otherwise primary IDs are derived from the unique
-        ``object_label`` values in the mappings.
+        that dict is used.  Otherwise pairs are derived from the unique
+        ``(object_id, object_label)`` values in the mappings.
 
         Args:
-            output_path: If given, the IDs are also written one-per-line to a
-                text file.
+            output_path: If given, the pairs are also written as a two-column
+                TSV file (``id\\tsymbol``).
 
         Returns:
-            Sorted list of unique primary ID strings.
+            Sorted list of ``(primary_id, symbol)`` tuples.
         """
-        private: set[str] = (
+        private: dict[str, set[str]] = (
             object.__getattribute__(self, "_primary_symbols")
             if hasattr(self, "_primary_symbols")
-            else set()
+            else {}
         )
 
         if private:
-            symbols = sorted(private)
+            # Flatten dict[label, set[id]] → sorted list of (id, label) pairs
+            pairs: list[tuple[str, str]] = sorted(
+                (pri_id, label) for label, pri_ids in private.items() for pri_id in pri_ids
+            )
         else:
-            symbols = sorted(
-                {str(getattr(m, "object_id", None) or "") for m in (self.mappings or [])} - {""}
+            pairs = sorted(
+                {
+                    (
+                        str(getattr(m, "object_id", None) or ""),
+                        str(getattr(m, "object_label", None) or ""),
+                    )
+                    for m in (self.mappings or [])
+                }
+                - {("", "")}
             )
         if output_path is not None:
             path = self._resolve_path(output_path, "_pri_symbols.txt")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
+            text = "\n".join(f"{pri_id}\t{label}" for pri_id, label in pairs)
+            path.write_text("id\tsymbol\n" + text + "\n", encoding="utf-8")
 
-        return symbols
+        return pairs
 
     def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
         """Return a name to synonym ``DataFrame``, optionally writing to TSV.
@@ -906,6 +931,358 @@ class LabelMappingSet(Sec2PriMappingSet):
             f"Unknown format {fmt!r}. Choose from: "
             "json, name2synonym, owl, pri_symbols, rdf, sssom, symbol_sec2pri"
         )
+
+
+class AmbiguousMappingSet(Sec2PriMappingSet):
+    """Mapping set of ambiguous IDs or symbols.
+
+    An entry is ambiguous when the same string appears both as a current
+    primary identifier/label (in the datasource's full primary set) and
+    as a secondary identifier/label in the mapping set (i.e. it is also
+    recorded as a previous or alias term that *maps to something else*).
+
+    Because the directionality of the mapping is unclear for such entries,
+    the resolver leaves them blank and warns the user rather than silently
+    overwriting data.
+
+    Attributes:
+        ambiguous_ids: Set of ID strings that are ambiguous.
+        ambiguous_labels: Set of label strings that are ambiguous.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Initialise with empty ambiguous-ID/label stores."""
+        super().__init__(*args, **kwargs)
+        object.__setattr__(self, "ambiguous_ids", set())
+        object.__setattr__(self, "ambiguous_labels", set())
+
+    @property
+    def _ambiguous_ids(self) -> Any:  # Fix type
+        return object.__getattribute__(self, "ambiguous_ids")
+
+    @property
+    def _ambiguous_labels(self) -> Any:  # Fix type
+        return object.__getattribute__(self, "ambiguous_labels")
+
+    def save(
+        self,
+        fmt: str,
+        output_path: Path | str | None = None,
+        **kwargs: object,
+    ) -> Path:
+        """Write to any supported format by name (sssom/rdf/json/owl)."""
+        shared = self._save_shared(fmt, output_path, **kwargs)
+        if shared is not None:
+            return shared
+        raise ValueError(f"Unknown format {fmt!r}. Choose from: json, owl, rdf, sssom")
+
+
+def _build_annotated_mapping(m: Mapping, new_comment: str) -> Mapping:
+    """Return a copy of *m* with *new_comment* set as the ``comment`` field."""
+    m_fields = {
+        k: getattr(m, k, None)
+        for k in (f.name for f in dataclass_fields(m))
+        if getattr(m, k, None) is not None
+    }
+    m_fields["comment"] = new_comment
+    return Mapping(**m_fields)
+
+
+def _annotate_id_mappings(mappings: list[Mapping]) -> list[Mapping]:
+    """Annotate ambiguous id mappings (subject_id is also an active primary ID)."""
+    object_ids: set[str] = {str(getattr(m, "object_id", None) or "") for m in mappings} - {""}
+    result: list[Mapping] = []
+    for m in mappings:
+        subj_id = str(getattr(m, "subject_id", None) or "")
+        obj_id = str(getattr(m, "object_id", None) or "")
+        if subj_id and subj_id in object_ids:
+            existing = str(getattr(m, "comment", None) or "")
+            if existing.startswith("Ambiguous mapping:"):
+                result.append(m)
+                continue
+            new_comment = (
+                f"Ambiguous mapping: subject_id '{subj_id}' is also a current primary ID"
+                + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
+                + "."
+                + (f" Original comment: {existing}" if existing else "")
+            )
+            result.append(_build_annotated_mapping(m, new_comment))
+        else:
+            result.append(m)
+    return result
+
+
+def _annotate_label_mappings(mappings: list[Mapping]) -> list[Mapping]:
+    """Annotate ambiguous label mappings."""
+    label_to_obj_ids: dict[str, set[str]] = {}
+    for m in mappings:
+        lbl = str(getattr(m, "object_label", None) or "")
+        oid = str(getattr(m, "object_id", None) or "")
+        if lbl and oid:
+            label_to_obj_ids.setdefault(lbl, set()).add(oid)
+
+    result: list[Mapping] = []
+    for m in mappings:
+        subj_label = str(getattr(m, "subject_label", None) or "")
+        obj_id = str(getattr(m, "object_id", None) or "")
+        ids_for_label = label_to_obj_ids.get(subj_label) if subj_label else None
+        conflicting_ids = (ids_for_label - {obj_id}) if ids_for_label else set()
+        if conflicting_ids:
+            existing = str(getattr(m, "comment", None) or "")
+            if existing.startswith("Ambiguous mapping:"):
+                result.append(m)
+                continue
+            conflict_list = ", ".join(sorted(conflicting_ids))
+            new_comment = (
+                f"Ambiguous mapping: subject_label '{subj_label}' is also the primary"
+                f" label of {conflict_list}"
+                + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
+                + "."
+                + (f" Original comment: {existing}" if existing else "")
+            )
+            result.append(_build_annotated_mapping(m, new_comment))
+        else:
+            result.append(m)
+    return result
+
+
+def _annotate_ambiguous_mappings(
+    mappings: list[Mapping], mapping_type: str = "id"
+) -> list[Mapping]:
+    """Return a new list where ambiguous mappings carry an explanatory comment.
+
+    For **id** mappings a mapping is ambiguous when its ``subject_id`` also
+    appears as an ``object_id`` in the list (the secondary ID is also a live
+    primary ID).
+
+    For **label** mappings a mapping is ambiguous when its ``subject_label``
+    appears as a primary label for a *different* entity, determined by
+    checking whether the same label text is paired with a different
+    ``object_id`` elsewhere in the list.  This avoids false-positives caused
+    by the fact that label mappings always share ``subject_id == object_id``.
+
+    This function is called automatically by
+    :meth:`BaseParser.create_mapping_set` so that every output format
+    (SSSOM, RDF, JSON, OWL, …) includes the annotation without the caller
+    having to invoke :func:`_find_ambiguous` explicitly.
+
+    Args:
+        mappings: The raw list of :class:`~sssom_schema.Mapping` objects.
+        mapping_type: ``"id"`` or ``"label"``; controls which fields are
+            examined for ambiguity.
+
+    Returns:
+        A new list where ambiguous entries have a ``comment`` prepended;
+        non-ambiguous entries are returned unchanged (same object).
+    """
+    if not mappings:
+        return mappings
+
+    if mapping_type == "id":
+        return _annotate_id_mappings(mappings)
+    return _annotate_label_mappings(mappings)
+
+
+def _get_primary_sets(
+    mapping_set: MappingSet, mappings: list[Mapping]
+) -> tuple[set[str], dict[str, set[str]]]:
+    """Return ``(primary_ids, label_index)`` for the given mapping set.
+
+    ``label_index`` maps each label text to the set of primary IDs that carry
+    that label.
+    """
+    stored_ids: set[str] | None = getattr(mapping_set, "_primary_ids", None)
+    stored_labels: dict[str, set[str]] | None = (
+        getattr(mapping_set, "_primary_symbols", None) or None
+    )  # treat empty dict as missing
+
+    if stored_ids is None:
+        stored_ids = {str(getattr(m, "object_id", None) or "") for m in mappings}
+        stored_ids.discard("")
+    if stored_labels is None:
+        # Build label-index fallback from the mappings themselves.
+        label_index: dict[str, set[str]] = {}
+        for m in mappings:
+            oid = str(getattr(m, "object_id", None) or "")
+            lbl = str(getattr(m, "object_label", None) or "")
+            if oid and lbl:
+                label_index.setdefault(lbl, set()).add(oid)
+        stored_labels = label_index
+
+    return stored_ids, stored_labels
+
+
+def _extract_fields_ambig(m: Mapping) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(getattr(m, "subject_id", None) or ""),
+        str(getattr(m, "subject_label", None) or ""),
+        str(getattr(m, "object_id", None) or ""),
+        str(getattr(m, "object_label", None) or ""),
+        str(getattr(m, "predicate_id", None) or ""),
+        str(getattr(m, "comment", None) or ""),
+    )
+
+
+def _build_conflicts(
+    subj_id: str,
+    subj_label: str,
+    obj_id: str,
+    obj_label: str,
+    pred: str,
+    primary_ids: set[str],
+    primary_labels: dict[str, set[str]],
+    mode: str,
+) -> tuple[list[str], set[str], set[str]]:
+    """Return ``(conflicts, ambiguous_ids, ambiguous_labels)`` for one mapping.
+
+    For **id** mode a conflict is raised when ``subj_id`` is present in
+    ``primary_ids``.
+
+    For labels a conflict is raised only when ``subj_label`` maps to a
+    primary ID *other* than ``obj_id`` in ``primary_labels``.
+    """
+    conflicts = []
+    amb_ids: set[str] = set()
+    amb_labels: set[str] = set()
+    if mode == "id":
+        if subj_id and subj_id in primary_ids:
+            amb_ids.add(subj_id)
+            conflicts.append(
+                f"subject_id '{subj_id}' is also a current primary ID"
+                + (f" (mapping points to '{obj_id}')" if obj_id else "")
+            )
+    if mode == "label":
+        ids_for_label = primary_labels.get(subj_label) if subj_label else None
+        conflicting_ids = (ids_for_label - {obj_id}) if ids_for_label else set()
+        if conflicting_ids:
+            amb_labels.add(subj_label)
+            conflict_list = ", ".join(sorted(conflicting_ids))
+            conflicts.append(
+                f"subject_label '{subj_label}' is also the primary label of {conflict_list}"
+                + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
+            )
+    return conflicts, amb_ids, amb_labels
+
+
+def _make_annotated_mapping(m: Mapping, conflicts: list[str], existing_raw: str) -> Mapping:
+    if existing_raw.startswith("Ambiguous mapping:"):
+        marker = " Original comment: "
+        if marker in existing_raw:
+            existing_raw.split(marker, 1)[1]
+        else:
+            pass
+    else:
+        pass
+
+    str(getattr(m, "subject_id", None) or "")
+    str(getattr(m, "subject_label", None) or "")
+
+    conflict_detail = "; ".join(conflicts)
+
+    new_comment = f"Ambiguous: {conflict_detail}."
+
+    m_fields = {
+        k: getattr(m, k, None)
+        for k in (f.name for f in dataclass_fields(m))
+        if getattr(m, k, None) is not None
+    }
+    m_fields["comment"] = new_comment
+    return Mapping(**m_fields)
+
+
+def _find_ambiguous(mapping_set: Sec2PriMappingSet) -> AmbiguousMappingSet:
+    """Identify mappings whose subject is also a current primary entry.
+
+    Args:
+        mapping_set: Any :class:`Sec2PriMappingSet` (ID or label).
+
+    Returns:
+        :class:`AmbiguousMappingSet` whose mappings each carry a ``comment``
+        explaining which primary terms the subject conflicts with.  The sets
+        ``ambiguous_ids`` and ``ambiguous_labels`` are populated accordingly.
+        Returns an empty :class:`AmbiguousMappingSet` when no ambiguities are
+        found.
+    """
+    mode = "id"
+    if isinstance(mapping_set, LabelMappingSet):
+        mode = "label"
+    mappings = list(mapping_set.mappings or [])
+    primary_ids, primary_labels = _get_primary_sets(mapping_set, mappings)
+
+    ambiguous_mappings = []
+    ambiguous_ids = set()
+    ambiguous_labels = set()
+
+    for m in mappings:
+        subj_id, subj_label, obj_id, obj_label, pred, raw_comment = _extract_fields_ambig(m)
+
+        conflicts, ids, labels = _build_conflicts(
+            subj_id, subj_label, obj_id, obj_label, pred, primary_ids, primary_labels, mode
+        )
+
+        ambiguous_ids |= ids
+        ambiguous_labels |= labels
+
+        if not conflicts:
+            continue
+
+        ambiguous_mappings.append(_make_annotated_mapping(m, conflicts, raw_comment))
+
+    if ambiguous_mappings:
+        annotated_by_subj = {
+            str(getattr(am, "subject_id", None) or ""): am for am in ambiguous_mappings
+        }
+        annotated_by_label = {
+            str(getattr(am, "subject_label", None) or ""): am for am in ambiguous_mappings
+        }
+
+        updated_source = []
+        changed = False
+
+        for m in mappings:
+            subj_id = str(getattr(m, "subject_id", None) or "")
+            subj_label = str(getattr(m, "subject_label", None) or "")
+
+            replacement = annotated_by_subj.get(subj_id) or annotated_by_label.get(subj_label)
+
+            if replacement is not None and replacement is not m:
+                updated_source.append(replacement)
+                changed = True
+            else:
+                updated_source.append(m)
+
+        if changed:
+            mapping_set.mappings = updated_source
+
+    kwargs = {}
+    for attr in (
+        "curie_map",
+        "mapping_set_id",
+        "mapping_set_title",
+        "mapping_set_description",
+        "license",
+        "creator_id",
+        "creator_label",
+        "mapping_provider",
+        "mapping_tool",
+        "mapping_tool_version",
+        "mapping_date",
+        "subject_source",
+        "subject_source_version",
+        "object_source",
+        "object_source_version",
+    ):
+        val = getattr(mapping_set, attr, None)
+        if val is not None:
+            kwargs[attr] = val
+
+    result = AmbiguousMappingSet(mappings=ambiguous_mappings, **kwargs)
+
+    object.__setattr__(result, "ambiguous_ids", ambiguous_ids)
+    object.__setattr__(result, "ambiguous_labels", ambiguous_labels)
+
+    result._compute_cardinalities()
+    return result
 
 
 class BaseParser(ABC):
@@ -1130,7 +1507,7 @@ class BaseParser(ABC):
     def _finalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Resolve ``_label_type`` into predicate fields and remove the key.
 
-        If the row contains a ``_label_type`` entry and does *not* already
+        If the row contains a ``_label_type`` entry and does not already
         have an explicit ``predicate_id``, the appropriate predicate fields
         are injected via :meth:`_label_predicate_for_type`.  The sentinel key
         is always removed before the row is used to construct a
@@ -1343,6 +1720,10 @@ class BaseParser(ABC):
         if self.version and description:
             description = f"{description} Version: {self.version}."
 
+        # Annotate ambiguous mappings (subject also appears as object) with a
+        # comment so every output format carries the information by default.
+        mappings = _annotate_ambiguous_mappings(mappings, mapping_type=mapping_type)
+
         # Create the mapping set with SSSOM metadata
         mapping_set = mapping_set_class(
             mappings=mappings,
@@ -1369,7 +1750,7 @@ class BaseParser(ABC):
             object_preprocessing=_compress(ms_meta.get("object_preprocessing")),
         )
 
-        # Compute cardinalities using Polars vectorised counting
+        # Compute cardinalities
         mapping_set.compute_cardinalities()
 
         return mapping_set
@@ -1378,6 +1759,7 @@ class BaseParser(ABC):
 __all__ = [
     "WITHDRAWN_ENTRY",
     "WITHDRAWN_ENTRY_LABEL",
+    "AmbiguousMappingSet",
     "BaseDownloader",
     "BaseParser",
     "DatasourceConfig",

@@ -106,6 +106,9 @@ mapping:
 download_urls:
   sec_ac: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/sec_ac.txt"
   delac_sp: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/delac_sp.txt"
+  acindex: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/acindex.txt"
+  # Legacy versioned releases expose only the docs/ subdirectory:
+  # https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-{version}/knowledgebase/docs/acindex.txt.gz
 
 primary_file_key: "sec_ac"
 archive_url: "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/"
