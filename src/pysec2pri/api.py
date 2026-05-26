@@ -29,20 +29,27 @@ if TYPE_CHECKING:
     from pysec2pri.diff import MappingDiff
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
-from pysec2pri.parsers.base import IdMappingSet, LabelMappingSet
+from pysec2pri.parsers.base import AmbiguousMappingSet, IdMappingSet, LabelMappingSet
 
 __all__ = [
     "combine_mapping_sets",
+    "find_ambiguous",
     "generate_chebi",
+    "generate_chebi_primary_ids",
+    "generate_chebi_primary_symbols",
     "generate_chebi_synonyms",
     "generate_hgnc",
     "generate_hgnc_primary_ids",
     "generate_hgnc_symbols",
     "generate_hmdb",
+    "generate_hmdb_primary_ids",
     "generate_hmdb_proteins",
     "generate_ncbi",
+    "generate_ncbi_primary_ids",
+    "generate_ncbi_primary_symbols",
     "generate_ncbi_symbols",
     "generate_uniprot",
+    "generate_uniprot_primary_ids",
     "generate_wikidata",
     "generate_wikidata_symbols",
     "list_versions",
@@ -258,6 +265,196 @@ def generate_hgnc_symbols(
 
     parser = HGNCParser(version=version, show_progress=show_progress)
     return parser.parse_symbols(Path(input_path), statuses=statuses)
+
+
+def generate_chebi_primary_ids(
+    input_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+    subset: str = "3star",
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current ChEBI primary IDs.
+
+    Reads ``compounds.tsv`` to extract every current ChEBI compound ID.
+    The returned mapping set has an empty ``mappings`` list; ``_primary_ids``
+    is populated with every current ``CHEBI:<n>`` CURIE.
+
+    Args:
+        input_path: Local ``compounds.tsv`` file or directory containing it.
+            Auto-downloaded if ``None``.
+        version: Release number (e.g. ``"245"``).
+        show_progress: Whether to show progress bars.
+        subset: ``"3star"`` (default) or ``"complete"``.
+    """
+    import tempfile
+
+    from pysec2pri.download import check_chebi_release
+    from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
+
+    if input_path is None:
+        if version is None:
+            version = check_chebi_release().version or "245"
+        downloader = ChEBIDownloader(version=version, subset=subset)
+        tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
+        downloader.download(tmpdir, version=version, keys=["compounds"])
+        input_path = tmpdir
+
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    return parser.parse_primary_ids(Path(input_path))
+
+
+def generate_chebi_primary_symbols(
+    input_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+    subset: str = "3star",
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current ChEBI compound names.
+
+    Reads ``compounds.tsv`` to extract every current compound's canonical name.
+    The returned mapping set has an empty ``mappings`` list; ``_primary_symbols``
+    is populated.
+
+    Args:
+        input_path: Local ``compounds.tsv`` file or directory containing it.
+            Auto-downloaded if ``None``.
+        version: Release number (e.g. ``"245"``).
+        show_progress: Whether to show progress bars.
+        subset: ``"3star"`` (default) or ``"complete"``.
+    """
+    import tempfile
+
+    from pysec2pri.download import check_chebi_release
+    from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
+
+    if input_path is None:
+        if version is None:
+            version = check_chebi_release().version or "245"
+        downloader = ChEBIDownloader(version=version, subset=subset)
+        tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
+        downloader.download(tmpdir, version=version, keys=["compounds"])
+        input_path = tmpdir
+
+    parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    return parser.parse_primary_symbols(Path(input_path))
+
+
+def generate_ncbi_primary_ids(
+    input_path: Path | str | None = None,
+    tax_id: str = "9606",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current NCBI Gene primary IDs.
+
+    Reads ``gene_info`` to extract every current Gene ID for the given taxonomy.
+    The returned mapping set has an empty ``mappings`` list; ``_primary_ids``
+    is populated with every current ``NCBIGene:<id>`` CURIE.
+
+    Args:
+        input_path: Local gene_info file. Auto-downloaded if ``None``.
+        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import NCBIParser
+
+    if input_path is None:
+        input_path = _auto_download("ncbi", version, keys=["gene_info"])["gene_info"]
+
+    parser = NCBIParser(version=version, show_progress=show_progress)
+    return parser.parse_primary_ids(Path(input_path), tax_id=tax_id)
+
+
+def generate_ncbi_primary_symbols(
+    input_path: Path | str | None = None,
+    tax_id: str = "9606",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current NCBI Gene symbols.
+
+    Reads ``gene_info`` to extract every current gene symbol for the given
+    taxonomy.  The returned mapping set has an empty ``mappings`` list;
+    ``_primary_symbols`` is populated.
+
+    Args:
+        input_path: Local gene_info file. Auto-downloaded if ``None``.
+        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import NCBIParser
+
+    if input_path is None:
+        input_path = _auto_download("ncbi", version, keys=["gene_info"])["gene_info"]
+
+    parser = NCBIParser(version=version, show_progress=show_progress)
+    return parser.parse_primary_symbols(Path(input_path), tax_id=tax_id)
+
+
+def generate_hmdb_primary_ids(
+    metabolites_path: Path | str | None = None,
+    proteins_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current HMDB primary IDs.
+
+    Reads one or both of ``hmdb_metabolites.xml`` and ``hmdb_proteins.xml``
+    and collects all primary accession numbers.  The returned mapping set has
+    an empty ``mappings`` list; ``_primary_ids`` is populated with every
+    current ``HMDB:<acc>`` CURIE.
+
+    Args:
+        metabolites_path: Local metabolites XML file. Auto-downloaded if both
+            paths are ``None``.
+        proteins_path: Local proteins XML file (optional).
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.hmdb import HMDBParser
+
+    if metabolites_path is None and proteins_path is None:
+        metabolites_path = _auto_download("hmdb", version, keys=["metabolites"])["metabolites"]
+
+    parser = HMDBParser(version=version, show_progress=show_progress)
+    return parser.parse_primary_ids(
+        metabolites_path=metabolites_path,
+        proteins_path=proteins_path,
+    )
+
+
+def generate_uniprot_primary_ids(
+    acindex_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current UniProt primary ACs.
+
+    Parses ``acindex.txt`` to extract every accession number that currently
+    appears in UniProtKB/Swiss-Prot.  The returned mapping set has an empty
+    ``mappings`` list; ``_primary_ids`` is populated with every current
+    ``UniProtKB:<AC>`` CURIE.
+
+    For versioned (legacy) releases the file is available at::
+
+        https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/
+        release-{version}/knowledgebase/docs/acindex.txt.gz
+
+    Args:
+        acindex_path: Local ``acindex.txt`` (plain or ``.gz``).
+            Auto-downloaded from the current release when ``None``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.uniprot import UniProtParser
+
+    if acindex_path is None:
+        acindex_path = _auto_download("uniprot", version, keys=["acindex"])["acindex"]
+
+    parser = UniProtParser(version=version, show_progress=show_progress)
+    return parser.parse_primary_ids(Path(acindex_path))
 
 
 def generate_ncbi(
@@ -926,3 +1123,28 @@ def list_versions(datasource: str) -> Any:
     from pysec2pri.download import list_versions as _list_versions
 
     return _list_versions(datasource)
+
+
+def find_ambiguous(
+    mapping_set: Sec2PriMappingSet,
+) -> AmbiguousMappingSet:
+    """Find identifiers that are ambiguous in *mapping_set*.
+
+    An identifier is ambiguous when it appears both as a ``subject_id`` (i.e. a
+    secondary/previous term) and as a current primary identifier.  Such
+    entries cannot be automatically resolved without risk of corrupting
+    references that are already current.
+
+    This is a convenience wrapper around
+    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.find_ambiguous`.
+
+    Args:
+        mapping_set: A :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`
+            (e.g. the result of ``generate_hgnc()``).
+
+    Returns:
+        An :class:`~pysec2pri.parsers.base.AmbiguousMappingSet` whose
+        ``mappings`` list contains one entry for each conflicting subject, with a
+        ``comment`` explaining the conflict.
+    """
+    return mapping_set.find_ambiguous()

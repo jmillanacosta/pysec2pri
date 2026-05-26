@@ -35,6 +35,10 @@ Notes
   whitespace) inside a single string are each looked up individually.
 * The mapping look-up is done once against the full set of unique IDs
   to avoid repeated scans of large mapping sets.
+* **Ambiguous identifiers**, those that appear both as a secondary ID
+  in the mapping set and as a current primary ID, are left blank in
+  the resolved output.  A warning is emitted listing every ambiguous
+  token so the user can resolve them manually.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from typing import TYPE_CHECKING, Union, overload
 if TYPE_CHECKING:
     import pandas as pd
 
+from pysec2pri.logging import logger
 from pysec2pri.parsers.base import Sec2PriMappingSet
 
 # Separator pattern: pipe, comma, semicolon, or whitespace
@@ -52,6 +57,9 @@ _SEP = re.compile(r"[|,;\s]+")
 
 # Type alias for the flexible input
 IdsInput = Union[str, list[str], "pd.DataFrame"]
+
+# Sentinel for "this ID is ambiguous, do not replace"
+_AMBIGUOUS = object()
 
 
 # Helpers
@@ -73,26 +81,130 @@ def _build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
     return lookup
 
 
+def build_ambiguous_set(mapping_set: Sec2PriMappingSet) -> set[str]:
+    """Return the set of *ambiguous* subject IDs in *mapping_set*.
+
+    An identifier is ambiguous when it appears both as a ``subject_id``
+    (i.e. a secondary/previous term) and as a current primary
+    identifier, either in the explicitly stored ``_primary_ids`` set or
+    among the ``object_id`` values of the mappings.
+
+    When such overlap exists a naïve replacement could silently corrupt
+    references that already use the current entity, so the resolver
+    intentionally leaves those cells blank.
+
+    Args:
+        mapping_set: Any :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`.
+
+    Returns:
+        Set of ID strings that are both secondary and primary.  Empty set
+        when no ambiguity is detected.
+    """
+    stored: set[str] = (
+        object.__getattribute__(mapping_set, "_primary_ids")
+        if hasattr(mapping_set, "_primary_ids")
+        else set()
+    )
+    primary_ids: set[str] = stored or {
+        str(getattr(m, "object_id", None) or "") for m in (mapping_set.mappings or [])
+    } - {""}
+    subject_ids: set[str] = {
+        str(getattr(m, "subject_id", None) or "") for m in (mapping_set.mappings or [])
+    } - {""}
+    return subject_ids & primary_ids
+
+
+def build_ambiguous_symbols_set(mapping_set: Sec2PriMappingSet) -> set[str]:
+    """Return the set of *ambiguous* subject labels in *mapping_set*.
+
+    Analogous to :func:`build_ambiguous_set` but operates on
+    ``subject_label`` / ``object_label`` (symbol) mappings.
+
+    Args:
+        mapping_set: Any :class:`~pysec2pri.parsers.base.LabelMappingSet`.
+
+    Returns:
+        Set of label strings that are both secondary and primary.  Empty
+        set when no ambiguity is detected.
+    """
+    stored: set[str] = (
+        object.__getattribute__(mapping_set, "_primary_symbols")
+        if hasattr(mapping_set, "_primary_symbols")
+        else set()
+    )
+    primary_labels: set[str] = stored or {
+        str(getattr(m, "object_label", None) or "") for m in (mapping_set.mappings or [])
+    } - {""}
+    subject_labels: set[str] = {
+        str(getattr(m, "subject_label", None) or "") for m in (mapping_set.mappings or [])
+    } - {""}
+    return subject_labels & primary_labels
+
+
+def _warn_ambiguous(ambiguous_found: set[str], kind: str = "ID") -> None:
+    """Emit a structured warning for every ambiguous token encountered.
+
+    Called after a resolver pass to report all tokens that were left blank
+    because their resolution was ambiguous.
+
+    Args:
+        ambiguous_found: Set of token strings that were ambiguous.
+        kind: Human-readable label for the token type (``"ID"`` or
+            ``"symbol"``), used in the warning message.
+    """
+    if not ambiguous_found:
+        return
+    count = len(ambiguous_found)
+    listed = ", ".join(sorted(ambiguous_found))
+    logger.warning(
+        "%d ambiguous %s(s) were left blank in the resolved output because "
+        "the same %s appears both as a current primary %s in this datasource "
+        "AND as a secondary/previous %s that maps to a different entry. "
+        "Automatic replacement would be unsafe, please resolve these manually. "
+        "Ambiguous %s(s): %s",
+        count,
+        kind,
+        kind.lower(),
+        kind.lower(),
+        kind.lower(),
+        kind,
+        listed,
+    )
+
+
 def _split_ids(raw: str) -> list[str]:
     """Split *raw* on common delimiters; strips empty tokens."""
     return [tok for tok in _SEP.split(raw.strip()) if tok]
 
 
-def _resolve_tokens(tokens: list[str], lookup: dict[str, str]) -> list[str]:
-    """Map each token to its primary ID, falling back to the token itself."""
-    return [lookup.get(tok, tok) for tok in tokens]
+def _resolve_tokens(
+    tokens: list[str],
+    lookup: dict[str, str],
+    ambiguous: set[str],
+    ambiguous_found: set[str],
+) -> list[str]:
+    """Map each token to its primary ID, blank for ambiguous, self for unknown."""
+    result: list[str] = []
+    for tok in tokens:
+        if tok in ambiguous:
+            ambiguous_found.add(tok)
+            result.append("")
+        else:
+            result.append(lookup.get(tok, tok))
+    return result
 
 
-def _resolve_string(raw: str, lookup: dict[str, str]) -> str:
-    """Resolve all IDs inside *raw* and rejoin with the original separator.
-
-    The original separator character (first one found) is preserved.  If
-    multiple different separators are used inside *raw* the first one wins.
-    """
+def _resolve_string(
+    raw: str,
+    lookup: dict[str, str],
+    ambiguous: set[str],
+    ambiguous_found: set[str],
+) -> str:
+    """Resolve all IDs inside *raw*, rejoining with the original separator."""
     sep_match = re.search(r"[|,;\s]", raw)
     sep = sep_match.group(0) if sep_match else ""
     tokens = _split_ids(raw)
-    resolved = _resolve_tokens(tokens, lookup)
+    resolved = _resolve_tokens(tokens, lookup, ambiguous, ambiguous_found)
     return sep.join(resolved)
 
 
@@ -115,6 +227,92 @@ def build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
     return _build_lookup(mapping_set)
 
 
+# --- dispatch helpers (keep public functions below C901 threshold) ---
+
+
+def _update_str(
+    ids: str,
+    lkp: dict[str, str],
+    amb: set[str],
+    kind: str,
+) -> dict[str, str]:
+    tokens = _split_ids(ids)
+    unique = dict.fromkeys(tokens)
+    ambiguous_found: set[str] = set()
+    result: dict[str, str] = {}
+    for tok in unique:
+        if tok in amb:
+            ambiguous_found.add(tok)
+            result[tok] = ""
+        else:
+            result[tok] = lkp.get(tok, tok)
+    _warn_ambiguous(ambiguous_found, kind=kind)
+    return result
+
+
+def _update_list(
+    ids: list[str],
+    lkp: dict[str, str],
+    amb: set[str],
+    kind: str,
+) -> dict[str, str]:
+    unique: dict[str, None] = {}
+    for item in ids:
+        for tok in _split_ids(item):
+            unique[tok] = None
+    ambiguous_found: set[str] = set()
+    result: dict[str, str] = {}
+    for tok in unique:
+        if tok in amb:
+            ambiguous_found.add(tok)
+            result[tok] = ""
+        else:
+            result[tok] = lkp.get(tok, tok)
+    _warn_ambiguous(ambiguous_found, kind=kind)
+    return result
+
+
+def _update_dataframe(
+    df: pd.DataFrame,
+    at: str | list[str] | None,
+    suffix: str,
+    lkp: dict[str, str],
+    amb: set[str],
+    kind: str,
+    col_label: str,
+) -> pd.DataFrame:
+    import pandas as pd
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(
+            f"'{col_label}' must be a str, list[str], or pandas.DataFrame, "
+            f"got {type(df).__name__!r}."
+        )
+    if at is None:
+        raise ValueError(
+            f"When '{col_label}' is a DataFrame you must specify 'at' "
+            "(column name or list of names)."
+        )
+    columns: list[str] = [at] if isinstance(at, str) else list(at)
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise KeyError(f"Column(s) not found in DataFrame: {missing}")
+    ambiguous_found: set[str] = set()
+    result = df.copy()
+    for col in columns:
+        result[col + suffix] = (
+            result[col]
+            .astype(str)
+            .map(
+                lambda cell, _lkp=lkp, _amb=amb, _af=ambiguous_found: _resolve_string(
+                    cell, _lkp, _amb, _af
+                )
+            )
+        )
+    _warn_ambiguous(ambiguous_found, kind=kind)
+    return result
+
+
 @overload
 def update_ids(
     ids: str,
@@ -123,8 +321,9 @@ def update_ids(
     at: None = ...,
     suffix: str = ...,
     lookup: dict[str, str] | None = ...,
+    ambiguous: set[str] | None = ...,
 ) -> dict[str, str]:
-    """Overload: string input to ``{id: primary_id}`` dict."""
+    """Update IDs from a string."""
     ...
 
 
@@ -136,8 +335,9 @@ def update_ids(
     at: None = ...,
     suffix: str = ...,
     lookup: dict[str, str] | None = ...,
+    ambiguous: set[str] | None = ...,
 ) -> dict[str, str]:
-    """Overload: list of strings input to ``{id: primary_id}`` dict."""
+    """Update IDs from list[str]."""
     ...
 
 
@@ -149,8 +349,9 @@ def update_ids(
     at: str | list[str],
     suffix: str = ...,
     lookup: dict[str, str] | None = ...,
+    ambiguous: set[str] | None = ...,
 ) -> pd.DataFrame:
-    """Overload: DataFrame input to DataFrame with added primary-ID columns."""
+    """Update IDs from pd.DataFrame."""
     ...
 
 
@@ -161,6 +362,7 @@ def update_ids(
     at: str | list[str] | None = None,
     suffix: str = "_primary",
     lookup: dict[str, str] | None = None,
+    ambiguous: set[str] | None = None,
 ) -> dict[str, str] | pd.DataFrame:
     """Resolve secondary identifiers to primary identifiers.
 
@@ -173,7 +375,7 @@ def update_ids(
           ``|``, ``,``, ``;``, or whitespace.
         * **list[str]**: a list of identifier strings (each may itself
           contain multiple IDs separated by the delimiters above).
-        * **pandas.DataFrame**: a DataFrame; you must also supply at.
+        * **pandas.DataFrame**: a DataFrame; you must also supply *at*.
 
     mapping_set:
         The :class:`~pysec2pri.parsers.base.Sec2PriMappingSet` to look up
@@ -193,91 +395,35 @@ def update_ids(
         result of :func:`build_lookup` to avoid rebuilding on repeated
         calls.
 
+    ambiguous:
+        Pre-built set of ambiguous IDs (see :func:`build_ambiguous_set`).
+        When ``None``, it is computed automatically from *mapping_set*.
+        Pass an explicit set (including an empty one) to skip the
+        computation.
+
     Returns
     -------
     dict[str, str]
         When *ids* is a ``str`` or ``list[str]``: a dictionary mapping
         each **unique** input identifier to its resolved primary ID.
         Identifiers not found in the mapping set are returned unchanged.
+        **Ambiguous identifiers are mapped to an empty string** and a
+        warning is emitted.
 
     pandas.DataFrame
         When *ids* is a ``DataFrame``: a copy of the DataFrame with one
-        new ``<col><suffix>`` column per entry in *at*.
-
-    Examples
-    --------
-    Setup::
-
-        ms = generate_hgnc()
-
-    Single string::
-
-        update_ids("HGNC:1234", ms)
-        # {'HGNC:1234': 'HGNC:9999'}
-
-    Pipe-separated string::
-
-        update_ids("HGNC:1234|HGNC:5678", ms)
-        # {'HGNC:1234': 'HGNC:9999', 'HGNC:5678': 'HGNC:5678'}
-
-    List::
-
-        update_ids(["HGNC:1234", "HGNC:5678", "HGNC:1234"], ms)
-        # {'HGNC:1234': 'HGNC:9999', 'HGNC:5678': 'HGNC:5678'}
-
-    DataFrame::
-
-        import pandas as pd
-
-        df = pd.DataFrame({"gene": ["HGNC:1234", "HGNC:5678"]})
-        update_ids(df, ms, at="gene")
-        #        gene  gene_primary
-        # 0  HGNC:1234  HGNC:9999
-        # 1  HGNC:5678  HGNC:5678
+        new ``<col><suffix>`` column per entry in *at*.  Ambiguous cells
+        are set to ``""``; a warning is emitted after all columns are
+        processed.
     """
     lkp = lookup if lookup is not None else _build_lookup(mapping_set)
+    amb = ambiguous if ambiguous is not None else build_ambiguous_set(mapping_set)
 
-    # a str
     if isinstance(ids, str):
-        tokens = _split_ids(ids)
-        unique = dict.fromkeys(tokens)  # preserves insertion order, deduplicates
-        return {tok: lkp.get(tok, tok) for tok in unique}
-
-    # a list[str]
+        return _update_str(ids, lkp, amb, kind="ID")
     if isinstance(ids, list):
-        # Flatten: each element may itself be a multi-ID string
-        unique_l: dict[str, None] = {}
-        for item in ids:
-            for tok in _split_ids(item):
-                unique_l[tok] = None
-        return {tok: lkp.get(tok, tok) for tok in unique_l}
-
-    # a pd.DataFrame
-    import pandas as pd
-
-    if not isinstance(ids, pd.DataFrame):
-        raise TypeError(
-            f"'ids' must be a str, list[str], or pandas.DataFrame, got {type(ids).__name__!r}."
-        )
-
-    if at is None:
-        raise ValueError(
-            "When 'ids' is a DataFrame you must specify 'at' (column name or list of names)."
-        )
-
-    columns: list[str] = [at] if isinstance(at, str) else list(at)
-    missing = [c for c in columns if c not in ids.columns]
-    if missing:
-        raise KeyError(f"Column(s) not found in DataFrame: {missing}")
-
-    result = ids.copy()
-    for col in columns:
-        new_col = col + suffix
-        result[new_col] = (
-            result[col].astype(str).map(lambda cell, _lkp=lkp: _resolve_string(cell, _lkp))
-        )
-
-    return result
+        return _update_list(ids, lkp, amb, kind="ID")
+    return _update_dataframe(ids, at, suffix, lkp, amb, kind="ID", col_label="ids")
 
 
 def build_symbol_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
@@ -309,6 +455,7 @@ def update_symbols(
     at: str | list[str] | None = None,
     suffix: str = "_current",
     lookup: dict[str, str] | None = None,
+    ambiguous: set[str] | None = None,
 ) -> dict[str, str] | pd.DataFrame:
     """Resolve previous/alias gene symbols to current symbols.
 
@@ -343,60 +490,38 @@ def update_symbols(
         Pass the result of :func:`build_symbol_lookup` to avoid rebuilding
         on repeated calls.
 
+    ambiguous:
+        Pre-built set of ambiguous labels (see
+        :func:`build_ambiguous_symbols_set`).  When ``None``, it is
+        computed automatically from *mapping_set*.
+
     Returns
     -------
     dict[str, str]
         When *symbols* is a ``str`` or ``list[str]``: a dictionary mapping
-        each unique input symbol to its resolved current symbol.
-        Symbols not found in the mapping set are returned unchanged.
+        each unique input symbol to its resolved current symbol.  Symbols
+        not found in the mapping set are returned unchanged.  **Ambiguous
+        symbols are mapped to an empty string** and a warning is emitted.
 
     pandas.DataFrame
         When *symbols* is a ``DataFrame``: a copy of the DataFrame with one
-        new ``<col><suffix>`` column per entry in *at*.
+        new ``<col><suffix>`` column per entry in *at*.  Ambiguous cells
+        are set to ``""``; a warning is emitted after all columns are
+        processed.
     """
     lkp = lookup if lookup is not None else build_symbol_lookup(mapping_set)
+    amb = ambiguous if ambiguous is not None else build_ambiguous_symbols_set(mapping_set)
 
     if isinstance(symbols, str):
-        tokens = _split_ids(symbols)
-        unique = dict.fromkeys(tokens)
-        return {tok: lkp.get(tok, tok) for tok in unique}
-
+        return _update_str(symbols, lkp, amb, kind="symbol")
     if isinstance(symbols, list):
-        unique_l: dict[str, None] = {}
-        for item in symbols:
-            for tok in _split_ids(item):
-                unique_l[tok] = None
-        return {tok: lkp.get(tok, tok) for tok in unique_l}
-
-    import pandas as pd
-
-    if not isinstance(symbols, pd.DataFrame):
-        raise TypeError(
-            f"'symbols' must be a str, list[str], or pandas.DataFrame, "
-            f"got {type(symbols).__name__!r}."
-        )
-
-    if at is None:
-        raise ValueError(
-            "When 'symbols' is a DataFrame you must specify 'at' (column name or list of names)."
-        )
-
-    columns: list[str] = [at] if isinstance(at, str) else list(at)
-    missing = [c for c in columns if c not in symbols.columns]
-    if missing:
-        raise KeyError(f"Column(s) not found in DataFrame: {missing}")
-
-    result = symbols.copy()
-    for col in columns:
-        new_col = col + suffix
-        result[new_col] = (
-            result[col].astype(str).map(lambda cell, _lkp=lkp: _resolve_string(cell, _lkp))
-        )
-
-    return result
+        return _update_list(symbols, lkp, amb, kind="symbol")
+    return _update_dataframe(symbols, at, suffix, lkp, amb, kind="symbol", col_label="symbols")
 
 
 __all__ = [
+    "build_ambiguous_set",
+    "build_ambiguous_symbols_set",
     "build_lookup",
     "build_symbol_lookup",
     "update_ids",

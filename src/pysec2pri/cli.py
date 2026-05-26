@@ -493,6 +493,89 @@ def wikidata_symbols(
         _emit(ms, output_format, output, base)
 
 
+@main.command("ambiguous")
+@click.argument(
+    "datasource",
+    type=click.Choice(
+        [
+            "chebi-ids",
+            "chebi-synonyms",
+            "hgnc-ids",
+            "hgnc-symbols",
+            "hmdb-proteins",
+            "hmdb-metabolites",
+            "ncbi",
+            "uniprot",
+            "wikidata",
+        ]
+    ),
+)
+@_opt_output
+@_opt_version
+@_opt_no_progress
+def ambiguous_cmd(
+    datasource: str,
+    output: Path | None,
+    data_version: str | None,
+    no_progress: bool,
+) -> None:
+    """Find ambiguous mappings for DATASOURCE and save as SSSOM.
+
+    An identifier is ambiguous when it appears both as a current primary
+    entry in the datasource and as a subject (secondary/previous) of a
+    mapping that points to a different entry.  Automated replacement of such
+    identifiers is unsafe.
+
+    The output is an SSSOM TSV with one row per conflicting identifier.
+    Each row has a ``comment`` field that explains the conflict.
+    When --output is omitted the SSSOM text is printed to stdout.
+    """
+    from pysec2pri.api import (
+        find_ambiguous,
+        generate_chebi,
+        generate_hgnc,
+        generate_hgnc_symbols,
+        generate_hmdb,
+        generate_hmdb_proteins,
+        generate_ncbi,
+        generate_uniprot,
+        generate_wikidata,
+    )
+
+    _generators = {
+        "chebi-ids": lambda: generate_chebi(version=data_version, show_progress=not no_progress),
+        "chebi-synonyms": lambda: generate_chebi(
+            version=data_version, show_progress=not no_progress, mapping_sets="synonyms"
+        ),
+        "hgnc-ids": lambda: generate_hgnc(version=data_version, show_progress=not no_progress),
+        "hgnc-symbols": lambda: generate_hgnc_symbols(
+            version=data_version, show_progress=not no_progress
+        ),
+        "hmdb-proteins": lambda: generate_hmdb_proteins(
+            version=data_version, show_progress=not no_progress
+        ),
+        "hmdb-metabolites": lambda: generate_hmdb(
+            version=data_version, show_progress=not no_progress
+        ),
+        "ncbi": lambda: generate_ncbi(version=data_version, show_progress=not no_progress),
+        "uniprot": lambda: generate_uniprot(version=data_version, show_progress=not no_progress),
+        "wikidata": lambda: generate_wikidata(version=data_version, show_progress=not no_progress),
+    }
+
+    click.echo(f"Loading {datasource.upper()} mappings...")
+    ms = _generators[datasource]()
+    click.echo("Detecting ambiguous identifiers...")
+    amb = find_ambiguous(ms)
+    count = len(amb.mappings or [])
+    if count == 0:
+        click.echo("No ambiguous identifiers found.")
+        return
+    click.echo(f"Found {count} ambiguous identifier(s) or symbol(s).")
+    dest = output or Path(f"{datasource}_ambiguous.sssom.tsv")
+    amb.save("sssom", dest)
+    click.echo(f"Wrote ambiguous mappings to {dest}")
+
+
 @main.command("list-versions")
 @click.argument(
     "datasource",
@@ -633,7 +716,7 @@ def update_ids_cmd(
     Identifiers not found in the mapping are kept unchanged.
 
     Pass --mapping to skip downloading/regenerating the mapping set and use
-    an existing sec2pri TSV file instead.
+    an existing sec2pri file instead.
 
     Example::
 

@@ -171,12 +171,18 @@ class HMDBParser(BaseParser):
             "license": m_meta.get("license"),
         }
         rows_data: list[dict[str, str]] = []
+        primary_ids_found: set[str] = set()
 
         try:
             context = DefusedET.iterparse(xml_content, events=("end",))
             for _event, elem in self._progress(context, desc=desc):
                 tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
                 if tag == element_tag:
+                    accession_elem = elem.find("hmdb:accession", HMDB_NS)
+                    if accession_elem is None:
+                        accession_elem = elem.find("accession")
+                    if accession_elem is not None and accession_elem.text:
+                        primary_ids_found.add(f"{prefix}:{accession_elem.text.strip()}")
                     rows_data.extend(self._process_record(elem, prefix, secondary_normaliser))
                     elem.clear()
         except DefusedET.ParseError:
@@ -185,7 +191,10 @@ class HMDBParser(BaseParser):
         mappings = self._build_mappings(
             rows_data, fixed, desc="Building HMDB mappings", total=len(rows_data)
         )
-        return self._create_mapping_set(mappings)
+        ms = self._create_mapping_set(mappings)
+        if primary_ids_found:
+            object.__setattr__(ms, "_primary_ids", primary_ids_found)
+        return ms
 
     def _process_record(
         self,
@@ -288,6 +297,43 @@ class HMDBParser(BaseParser):
     ) -> Sec2PriMappingSet:
         """Delegate to base class method."""
         return self.create_mapping_set(mappings, mapping_type)
+
+    def parse_primary_ids(
+        self,
+        metabolites_path: Path | str | None = None,
+        proteins_path: Path | str | None = None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current HMDB primary IDs.
+
+        Reads one or both of ``hmdb_metabolites.xml`` and ``hmdb_proteins.xml``
+        and collects all primary accession numbers.  The returned mapping set
+        has an empty ``mappings`` list; ``_primary_ids`` is populated with every
+        current ``HMDB:<acc>`` CURIE.
+
+        Args:
+            metabolites_path: Path to ``hmdb_metabolites.xml`` (or zip/gz).
+            proteins_path: Path to ``hmdb_proteins.xml`` (or zip/gz).
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.IdMappingSet` with ``_primary_ids``
+            populated.  At least one of the two path arguments must be supplied.
+        """
+        if metabolites_path is None and proteins_path is None:
+            raise ValueError("At least one of metabolites_path or proteins_path must be supplied.")
+
+        primary_ids: set[str] = set()
+
+        if metabolites_path is not None:
+            ms_m = self.parse(metabolites_path)
+            primary_ids |= object.__getattribute__(ms_m, "_primary_ids")
+
+        if proteins_path is not None:
+            ms_p = self.parse_proteins(proteins_path)
+            primary_ids |= object.__getattribute__(ms_p, "_primary_ids")
+
+        ms = self._create_mapping_set([], mapping_type="id")
+        object.__setattr__(ms, "_primary_ids", primary_ids)
+        return ms
 
 
 __all__ = ["HMDBParser"]

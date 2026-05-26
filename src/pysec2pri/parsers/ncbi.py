@@ -95,7 +95,70 @@ class NCBIParser(BaseParser):
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
+        # Populate full primary symbol set from the same file
+        object.__setattr__(
+            mapping_set, "_primary_symbols", self._extract_primary_symbols(gene_info_path, tax_id)
+        )
+        object.__setattr__(
+            mapping_set, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id)
+        )
         return mapping_set
+
+    def parse_primary_ids(
+        self,
+        gene_info_path: Path | str | None,
+        tax_id: str = "9606",
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current NCBI Gene primary IDs.
+
+        Reads ``gene_info`` to extract every current Gene ID for the given
+        taxonomy.  The returned mapping set has an empty ``mappings`` list;
+        ``_primary_ids`` is populated with every current ``NCBIGene:<id>`` CURIE.
+
+        Args:
+            gene_info_path: Path to the gene_info file (can be .gz compressed).
+            tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.IdMappingSet` with ``_primary_ids``
+            populated.
+        """
+        if gene_info_path is None:
+            raise ValueError("gene_info_path must not be None")
+        gene_info_path = Path(gene_info_path)
+        self._resolve_version(gene_info_path)
+        ms = self._create_mapping_set([], mapping_type="id")
+        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id))
+        return ms
+
+    def parse_primary_symbols(
+        self,
+        gene_info_path: Path | str | None,
+        tax_id: str = "9606",
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current NCBI Gene symbols.
+
+        Reads ``gene_info`` to extract every current gene symbol for the given
+        taxonomy.  The returned mapping set has an empty ``mappings`` list;
+        ``_primary_symbols`` is populated.
+
+        Args:
+            gene_info_path: Path to the gene_info file (can be .gz compressed).
+            tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.LabelMappingSet` with
+            ``_primary_symbols`` populated.
+        """
+        if gene_info_path is None:
+            raise ValueError("gene_info_path must not be None")
+        gene_info_path = Path(gene_info_path)
+        self._resolve_version(gene_info_path)
+        ms = self._create_mapping_set([], mapping_type="label")
+        object.__setattr__(
+            ms, "_primary_symbols", self._extract_primary_symbols(gene_info_path, tax_id)
+        )
+        return ms
 
     def parse_all(
         self,
@@ -269,6 +332,57 @@ class NCBIParser(BaseParser):
         Delegates to BaseParser.create_mapping_set().
         """
         return self.create_mapping_set(mappings, mapping_type)
+
+    def _extract_primary_ids(self, file_path: Path, tax_id: str) -> set[str]:
+        """Extract all current NCBI Gene IDs from gene_info for a given taxonomy.
+
+        Args:
+            file_path: Path to the gene_info file.
+            tax_id: Taxonomy ID string (e.g. ``"9606"``).
+
+        Returns:
+            Set of ``NCBIGene:<id>`` CURIEs.
+        """
+        df = (
+            pl.scan_csv(
+                file_path,
+                separator="\t",
+                infer_schema_length=10000,
+                null_values=["-"],
+            )
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .collect()
+        )
+        return {f"NCBIGene:{v}" for v in df["GeneID"].drop_nulls().cast(pl.Utf8).to_list()}
+
+    def _extract_primary_symbols(self, file_path: Path, tax_id: str) -> dict[str, set[str]]:
+        """Extract all current gene symbols from gene_info for a given taxonomy.
+
+        Returns a ``dict`` mapping each symbol text to the set of primary
+        ``NCBIGene:<GeneID>`` IDs that carry it.
+
+        Args:
+            file_path: Path to the gene_info file.
+            tax_id: Taxonomy ID string (e.g. ``"9606"``).
+
+        Returns:
+            ``dict[symbol, set[NCBIGene:<id>]]``
+        """
+        df = (
+            pl.scan_csv(
+                file_path,
+                separator="\t",
+                infer_schema_length=10000,
+                null_values=["-"],
+            )
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .select(["GeneID", "Symbol"])
+            .collect()
+        )
+        result: dict[str, set[str]] = {}
+        for gene_id, symbol in df.drop_nulls().rows():
+            result.setdefault(str(symbol), set()).add(f"NCBIGene:{gene_id}")
+        return result
 
 
 __all__ = ["NCBIParser"]

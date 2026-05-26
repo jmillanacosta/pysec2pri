@@ -207,6 +207,74 @@ class UniProtParser(BaseParser):
         """Delegate to base class method."""
         return self.create_mapping_set(mappings, mapping_type)
 
+    def parse_primary_ids(
+        self,
+        acindex_path: Path | str | None = None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current UniProt primary ACs.
+
+        Parses ``acindex.txt`` (or a gzip-compressed variant) to extract every
+        accession number that currently appears in UniProtKB/Swiss-Prot.  The
+        file lists one AC per row (after the ``__________`` separator line);
+        only the first whitespace-delimited token of each data line is taken.
+
+        For versioned (legacy) releases the file can be found at::
+
+            https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/
+            release-{version}/knowledgebase/docs/acindex.txt.gz
+
+        Args:
+            acindex_path: Local path to ``acindex.txt`` (plain or ``.gz``).
+                Auto-downloaded from the current release when ``None``.
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.IdMappingSet` with no mappings and
+            ``_primary_ids`` populated with all current ``UniProtKB:<AC>`` CURIEs.
+        """
+        if acindex_path is None:
+            from pysec2pri.api import _auto_download
+
+            acindex_path = _auto_download("uniprot", None, keys=["acindex"])["acindex"]
+        acindex_path = Path(str(acindex_path))
+        self._resolve_version(acindex_path)
+
+        primary_ids = self._extract_primary_ids_from_acindex(acindex_path)
+        ms = self._create_mapping_set([], mapping_type="id")
+        object.__setattr__(ms, "_primary_ids", primary_ids)
+        return ms
+
+    def _extract_primary_ids_from_acindex(self, file_path: Path) -> set[str]:
+        """Parse ``acindex.txt`` and return the set of all AC numbers.
+
+        Skips the header block (everything up to and including the ``__________``
+        separator line) and extracts the first whitespace-delimited token of
+        each subsequent non-empty line.
+
+        Args:
+            file_path: Path to ``acindex.txt`` (plain or ``.gz``).
+
+        Returns:
+            Set of ``UniProtKB:<AC>`` CURIEs.
+        """
+        import gzip
+
+        opener = gzip.open if file_path.suffix == ".gz" else open
+        primary_ids: set[str] = set()
+        in_data = False
+        with opener(file_path, "rt", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not in_data:
+                    if stripped.startswith("__"):
+                        in_data = True
+                    continue
+                if not stripped:
+                    continue
+                token = stripped.split()[0]
+                if token:
+                    primary_ids.add(f"UniProtKB:{token}")
+        return primary_ids
+
 
 class UniProtDownloader(BaseDownloader):
     """Downloader for UniProt data files."""

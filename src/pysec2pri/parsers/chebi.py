@@ -122,7 +122,11 @@ class ChEBIParser(BaseParser):
             raise ValueError("Must provide input_path (SDF or TSV dir) or secondary_ids_path")
 
         mappings = self._build_id_mappings(raw_mappings)
-        return self._create_mapping_set(mappings, mapping_type="id")
+        ms = self._create_mapping_set(mappings, mapping_type="id")
+        # Populate primary IDs when compound data is available
+        if cpd_path is not None and cpd_path.exists():
+            object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(cpd_path))
+        return ms
 
     def parse_synonyms(
         self,
@@ -170,7 +174,78 @@ class ChEBIParser(BaseParser):
             raise ValueError("Must provide input_path (SDF or TSV dir) or names_path")
 
         mappings = self._build_label_mappings(raw_mappings)
-        return self._create_mapping_set(mappings, mapping_type="label")
+        ms = self._create_mapping_set(mappings, mapping_type="label")
+        # Populate primary symbols when compound data is available
+        if cpd_path is not None and cpd_path.exists():
+            object.__setattr__(ms, "_primary_symbols", self._extract_primary_symbols(cpd_path))
+        return ms
+
+    def parse_primary_ids(
+        self,
+        input_path: Path | str | None = None,
+        *,
+        compounds_path: Path | str | None = None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current ChEBI primary IDs.
+
+        Reads ``compounds.tsv`` (TSV releases >= 245) to extract every current
+        ChEBI compound ID.  The returned mapping set has an empty ``mappings``
+        list; its ``_primary_ids`` store is populated with every current ChEBI
+        ID (CHEBI: prefixed) so that ``to_pri_ids()`` produces the authoritative
+        complete list.
+
+        Args:
+            input_path: Path to a directory containing ``compounds.tsv``, or
+                directly to ``compounds.tsv`` itself.
+            compounds_path: Explicit path to ``compounds.tsv`` (overrides
+                ``input_path``).
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.IdMappingSet` with no mappings and
+            ``_primary_ids`` populated with all current ChEBI IDs.
+        """
+        cpd_path = self._resolve_compounds_path(input_path, compounds_path)
+        if cpd_path is None or not cpd_path.exists():
+            raise ValueError(
+                "Could not locate compounds.tsv. Pass input_path (directory or file) "
+                "or compounds_path."
+            )
+        self._resolve_version(cpd_path)
+        ms = self._create_mapping_set([], mapping_type="id")
+        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(cpd_path))
+        return ms
+
+    def parse_primary_symbols(
+        self,
+        input_path: Path | str | None = None,
+        *,
+        compounds_path: Path | str | None = None,
+    ) -> Sec2PriMappingSet:
+        """Return a mapping set containing the full list of current ChEBI compound names.
+
+        Reads ``compounds.tsv`` to extract every current compound's canonical
+        name.  The returned mapping set has an empty ``mappings`` list; its
+        ``_primary_symbols`` store is populated.
+
+        Args:
+            input_path: Path to a directory containing ``compounds.tsv``, or
+                directly to ``compounds.tsv`` itself.
+            compounds_path: Explicit path to ``compounds.tsv``.
+
+        Returns:
+            :class:`~pysec2pri.parsers.base.LabelMappingSet` with no mappings
+            and ``_primary_symbols`` populated.
+        """
+        cpd_path = self._resolve_compounds_path(input_path, compounds_path)
+        if cpd_path is None or not cpd_path.exists():
+            raise ValueError(
+                "Could not locate compounds.tsv. Pass input_path (directory or file) "
+                "or compounds_path."
+            )
+        self._resolve_version(cpd_path)
+        ms = self._create_mapping_set([], mapping_type="label")
+        object.__setattr__(ms, "_primary_symbols", self._extract_primary_symbols(cpd_path))
+        return ms
 
     # Internal helpers
 
@@ -246,6 +321,74 @@ class ChEBIParser(BaseParser):
         Delegates to BaseParser.create_mapping_set().
         """
         return self.create_mapping_set(mappings, mapping_type)
+
+    def _resolve_compounds_path(
+        self,
+        input_path: Path | str | None,
+        compounds_path: Path | str | None,
+    ) -> Path | None:
+        """Resolve compounds.tsv path from either a directory or explicit path."""
+        if compounds_path is not None:
+            return Path(compounds_path)
+        if input_path is not None:
+            p = Path(input_path)
+            if p.is_dir():
+                candidate = p / "compounds.tsv"
+                return candidate if candidate.exists() else None
+            # Treat as direct path to compounds.tsv
+            if p.name.startswith("compounds"):
+                return p
+        return None
+
+    def _extract_primary_ids(self, compounds_path: Path) -> set[str]:
+        """Extract all current ChEBI IDs from compounds.tsv.
+
+        Reads the ``id`` column and returns a set of ``CHEBI:<n>`` CURIEs.
+        When ``subset == "3star"`` only 3-star compounds are included.
+
+        Args:
+            compounds_path: Path to ``compounds.tsv``.
+
+        Returns:
+            Set of ``CHEBI:<id>`` strings.
+        """
+        cols = ["id", "stars"] if self.subset == "3star" else ["id"]
+        df = pl.read_csv(
+            compounds_path,
+            separator="\t",
+            columns=cols,
+            schema_overrides={"id": pl.Int64},
+        )
+        if self.subset == "3star" and "stars" in df.columns:
+            df = df.filter(pl.col("stars") == 3)
+        return {f"CHEBI:{v}" for v in df["id"].drop_nulls().to_list()}
+
+    def _extract_primary_symbols(self, compounds_path: Path) -> dict[str, set[str]]:
+        """Extract all current ChEBI compound names from compounds.tsv.
+
+        Returns a ``dict`` mapping each name to the set of primary
+        ``CHEBI:<id>`` IDs that carry it.  When ``subset == "3star"`` only
+        3-star compounds are included.
+
+        Args:
+            compounds_path: Path to ``compounds.tsv``.
+
+        Returns:
+            ``dict[name, set[CHEBI:<id>]]``
+        """
+        cols = ["id", "name", "stars"] if self.subset == "3star" else ["id", "name"]
+        df = pl.read_csv(
+            compounds_path,
+            separator="\t",
+            columns=cols,
+            schema_overrides={"id": pl.Int64},
+        )
+        if self.subset == "3star" and "stars" in df.columns:
+            df = df.filter(pl.col("stars") == 3)
+        result: dict[str, set[str]] = {}
+        for chebi_id, name in df.select(["id", "name"]).drop_nulls().rows():
+            result.setdefault(str(name), set()).add(f"CHEBI:{chebi_id}")
+        return result
 
 
 # TSV parsing functions (new format >= 245)
