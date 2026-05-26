@@ -108,7 +108,8 @@ pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
 pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
 ```
 
-Ambiguous mappings (where a deprecated ID or symbol serves as a recommended for another entity) are not resolved, but flagged for users to solve them manually.
+Ambiguous mappings (where a deprecated ID or symbol serves as a recommended for
+another entity) are not resolved, but flagged for users to solve them manually.
 
 A subset with ambiguous mappings only can be generated like:
 
@@ -121,8 +122,8 @@ pysec2pri ambiguous hgnc-symbols
 ### Deprecations (IDs)
 
 When an identifier is deprecated it is usually mapped to a single primary
-identifier. Sometimes the deprecated ID appears to recommend multiple
-targets, which introduces ambiguity.
+identifier. Sometimes the deprecated ID appears to recommend multiple targets,
+which introduces ambiguity.
 
 ```mermaid
 flowchart LR
@@ -160,7 +161,6 @@ flowchart LR
     Syn2 -->|oboInOwl:hasExactSynonym| Syn1
 
 ```
-
 
 ## Documentation
 
