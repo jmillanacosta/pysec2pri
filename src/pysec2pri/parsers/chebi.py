@@ -220,7 +220,6 @@ class ChEBIParser(BaseParser):
         """Build Mapping objects for label/synonym mappings."""
         m_meta = self.get_mapping_metadata()
         fixed = {
-            "predicate_id": "oboInOwl:hasRelatedSynonym",
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
             "object_source": m_meta.get("object_source"),
@@ -228,7 +227,13 @@ class ChEBIParser(BaseParser):
             "license": m_meta.get("license"),
         }
         rows = [
-            {"subject_id": sid, "subject_label": pname, "object_id": sid, "object_label": syn}
+            {
+                "subject_id": sid,
+                "subject_label": pname,
+                "object_id": sid,
+                "object_label": syn,
+                "_label_type": "alias",
+            }
             for sid, pname, syn in raw_name_mappings
         ]
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))

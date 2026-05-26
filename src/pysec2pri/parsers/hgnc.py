@@ -18,6 +18,7 @@ from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
     BaseParser,
+    LabelMappingSet,
     Sec2PriMappingSet,
 )
 
@@ -174,7 +175,7 @@ class HGNCParser(BaseParser):
         self,
         complete_set_path: Path | str | None,
         statuses: list[str] | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> LabelMappingSet:
         """Parse HGNC complete set for symbol (label) mappings.
 
         Args:
@@ -195,6 +196,7 @@ class HGNCParser(BaseParser):
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
+        # Set of all primary symbols
         object.__setattr__(
             mapping_set,
             "_primary_symbols",
@@ -379,7 +381,6 @@ class HGNCParser(BaseParser):
 
         m_meta = self.get_mapping_metadata()
         fixed = {
-            "predicate_id": "oboInOwl:hasRelatedSynonym",
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
             "object_source": m_meta.get("object_source"),
@@ -396,8 +397,8 @@ class HGNCParser(BaseParser):
 
             alias_str = row.get(alias_col) if alias_col else None
             prev_str = row.get(prev_col) if prev_col else None
-            aliases = self._split_symbols(alias_str) if alias_str else []
-            prev_symbols = self._split_symbols(prev_str) if prev_str else []
+            aliases = self._split_symbols(symbols_str=alias_str) if alias_str else []
+            prev_symbols = self._split_symbols(symbols_str=prev_str) if prev_str else []
 
             for alias in aliases:
                 rows_data.append(
@@ -406,6 +407,7 @@ class HGNCParser(BaseParser):
                         "subject_label": alias,
                         "object_id": hgnc_id,
                         "object_label": symbol,
+                        "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
                     }
                 )
@@ -417,6 +419,7 @@ class HGNCParser(BaseParser):
                         "subject_label": prev,
                         "object_id": hgnc_id,
                         "object_label": symbol,
+                        "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
                     }
                 )
