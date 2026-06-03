@@ -176,7 +176,19 @@ class TestNCBIParser:
         assert isinstance(result, Sec2PriMappingSet)
         assert len(result.mappings) > 0
 
-    def test_parse_symbols(self, ncbi_info_path: Path) -> None:
+    def test_parse_with_gene_info_populates_primary_ids(
+        self, ncbi_history_path: Path, ncbi_info_path: Path
+    ) -> None:
+        """Passing gene_info_path should populate _primary_ids with all current IDs."""
+        parser = NCBIParser(show_progress=False)
+        result = parser.parse(ncbi_history_path, tax_id="9606", gene_info_path=ncbi_info_path)
+        assert isinstance(result, Sec2PriMappingSet)
+        pri_ids = result.to_pri_ids()
+        # _primary_ids comes from gene_info, so it should include IDs even for
+        # genes that have no secondary in gene_history
+        assert len(pri_ids) > 0
+        assert all(id_.startswith("NCBIGene:") for id_ in pri_ids)
+
         """Test parsing output for NCBI symbols."""
         parser = NCBIParser(show_progress=False)
         result = parser.parse_symbols(ncbi_info_path, tax_id="9606")
