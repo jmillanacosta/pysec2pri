@@ -10,6 +10,7 @@ Uses SSSOM-compliant IdMappingSet with cardinality computation.
 from __future__ import annotations
 
 import gzip
+import io
 import re
 import zipfile
 from collections.abc import Callable
@@ -275,7 +276,7 @@ class HMDBParser(BaseParser):
                 with zipfile.ZipFile(file_path, "r") as zf:
                     xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
                     if xml_files:
-                        return zf.open(xml_files[0])
+                        return io.BytesIO(zf.read(xml_files[0]))
             except Exception as e:
                 logger.warning("Failed to read zip file %s: %s", file_path, e)
             return None
