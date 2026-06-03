@@ -148,6 +148,16 @@ class TestHMDBParser:
         # HMDBP00003 has no secondary accessions
         assert "HMDB:HMDBP00003" not in subjects
 
+    def test_parse_populates_primary_ids_including_no_secondary(self, hmdb_xml_path: Path) -> None:
+        """_primary_ids includes ALL metabolites, even those with no secondaries."""
+        parser = HMDBParser(show_progress=False)
+        result = parser.parse(hmdb_xml_path)
+        pri_ids = result.to_pri_ids()
+        # fake file has 3 metabolites; HMDB0000003 has no secondaries but must appear
+        assert "HMDB:HMDB0000001" in pri_ids
+        assert "HMDB:HMDB0000002" in pri_ids
+        assert "HMDB:HMDB0000003" in pri_ids
+
 
 class TestHGNCParser:
     """Tests for HGNC parser."""
