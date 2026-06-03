@@ -459,27 +459,40 @@ def generate_uniprot_primary_ids(
 
 def generate_ncbi(
     input_path: Path | str | None = None,
+    gene_info_path: Path | str | None = None,
     tax_id: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
     """Return NCBI Gene secondary to primary ID mappings.
 
-    Downloads the gene history file automatically when ``input_path`` is omitted.
+    Downloads the gene_history file automatically when ``input_path`` is
+    omitted.  When ``gene_info_path`` is supplied (or auto-downloaded), the
+    full list of current primary IDs is read from ``gene_info`` and stored in
+    ``_primary_ids``, so that :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids`
+    returns the authoritative complete set rather than only the subset of
+    primaries that happen to appear in ``gene_history``.
 
     Args:
         input_path: Local gene_history file. Auto-downloaded if ``None``.
+        gene_info_path: Local gene_info file used to populate the full primary
+            ID list. Auto-downloaded together with ``input_path`` when both
+            are ``None``.
         tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
     from pysec2pri.parsers import NCBIParser
 
-    if input_path is None:
-        input_path = _auto_download("ncbi", version)["gene_history"]
+    if input_path is None or gene_info_path is None:
+        files = _auto_download("ncbi", version)
+        if input_path is None:
+            input_path = files["gene_history"]
+        if gene_info_path is None:
+            gene_info_path = files["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
-    return parser.parse(Path(input_path), tax_id=tax_id)
+    return parser.parse(Path(input_path), tax_id=tax_id, gene_info_path=Path(gene_info_path))
 
 
 def generate_ncbi_symbols(

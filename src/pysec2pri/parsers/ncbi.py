@@ -49,12 +49,18 @@ class NCBIParser(BaseParser):
         self,
         input_path: Path | str | None = None,
         tax_id: str = "9606",
+        gene_info_path: Path | str | None = None,
     ) -> Sec2PriMappingSet:
         """Parse NCBI gene_history file into an IdMappingSet.
 
         Args:
             input_path: Path to gene_history file (can be .gz compressed).
             tax_id: Taxonomy ID to filter by (default: "9606" for human).
+            gene_info_path: Optional path to the gene_info file.  When
+                supplied, ``_primary_ids`` on the returned mapping set is
+                populated with every current ``NCBIGene:<id>`` CURIE for the
+                given taxonomy, not just those that appear as ``object_id`` in
+                a discontinued-to-primary mapping.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
@@ -69,6 +75,15 @@ class NCBIParser(BaseParser):
 
         # Create IdMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
+
+        # Populate the full primary ID set when gene_info is available
+        if gene_info_path is not None:
+            object.__setattr__(
+                mapping_set,
+                "_primary_ids",
+                self._extract_primary_ids(Path(gene_info_path), tax_id),
+            )
+
         return mapping_set
 
     def parse_symbols(
@@ -176,7 +191,7 @@ class NCBIParser(BaseParser):
         Returns:
             Tuple of (IdMappingSet, LabelMappingSet).
         """
-        id_mappings = self.parse(gene_history_path, tax_id)
+        id_mappings = self.parse(gene_history_path, tax_id, gene_info_path=gene_info_path)
         label_mappings = self.parse_symbols(gene_info_path, tax_id)
         return id_mappings, label_mappings
 
