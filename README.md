@@ -143,7 +143,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["A (secondary)"] -->|term replaced by| B["B (primary)"]
+    A["A (primary of C and secondary of B)"] -->|term replaced by| B["B (primary)"]
     C["C (secondary)"] -->|term replaced by| A
 ```
 
