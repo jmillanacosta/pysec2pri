@@ -962,6 +962,8 @@ def resolve_ids(
     output_path: Path | str | None = None,
     suffix: str = "_primary",
     sep: str | None = None,
+    synonyms: str | None = None,
+    label_mapping_set: Sec2PriMappingSet | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve secondary IDs to primary IDs.
 
@@ -970,8 +972,8 @@ def resolve_ids(
     returns the resolved primary ID(s).  *at*, *output_path*, *suffix*, and
     *sep* are ignored in this mode::
 
-        resolve_ids("HMDB00001", hmdb_ms)  # → "HMDB:HMDB0000001"
-        resolve_ids(["HMDB00001", "HMDB00002"], hmdb_ms)  # → ["...", "..."]
+        resolve_ids("HMDB00001", hmdb_ms)  # -> "HMDB:HMDB0000001"
+        resolve_ids(["HMDB00001", "HMDB00002"], hmdb_ms)  # -> ["...", "..."]
 
     DataFrame mode: when *input_path* points to an existing TSV/CSV
     file, *at* is required.  The file is read with
@@ -1022,7 +1024,15 @@ def resolve_ids(
 
     df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
     lkp = build_lookup(mapping_set)
-    result = pd.DataFrame(update_ids(df, mapping_set, at=at, suffix=suffix, lookup=lkp))
+    result = update_ids(
+        df,
+        mapping_set,
+        at=at,
+        suffix=suffix,
+        lookup=lkp,
+        synonyms=synonyms,
+        label_mapping_set=label_mapping_set,
+    )
 
     if output_path is not None:
         output_path = Path(output_path)
@@ -1040,6 +1050,7 @@ def resolve_symbols(
     output_path: Path | str | None = None,
     suffix: str = "_current",
     sep: str | None = None,
+    synonyms: str | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve previous/alias symbols to current symbols.
 
@@ -1048,8 +1059,8 @@ def resolve_symbols(
     returns the resolved current symbol(s).  *at*, *output_path*, *suffix*,
     and *sep* are ignored in this mode::
 
-        resolve_symbols("Ibuprofen", chebi_ms)  # → "ibuprofen"
-        resolve_symbols(["Ibuprofen", "Glucose"], chebi_ms)  # → ["...", "..."]
+        resolve_symbols("Ibuprofen", chebi_ms)  # -> "ibuprofen"
+        resolve_symbols(["Ibuprofen", "Glucose"], chebi_ms)  # -> ["...", "..."]
 
     DataFrame mode: when *input_path* points to an existing TSV/CSV
     file, *at* is required.  For each column named in *at* a new
@@ -1099,7 +1110,9 @@ def resolve_symbols(
 
     df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
     lkp = build_symbol_lookup(mapping_set)
-    result = pd.DataFrame(update_symbols(df, mapping_set, at=at, suffix=suffix, lookup=lkp))
+    result = pd.DataFrame(
+        update_symbols(df, mapping_set, at=at, suffix=suffix, lookup=lkp, synonyms=synonyms)
+    )
 
     if output_path is not None:
         output_path = Path(output_path)

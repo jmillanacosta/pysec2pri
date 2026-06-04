@@ -12,6 +12,8 @@ import click
 if TYPE_CHECKING:
     import pandas as pd
 
+    from pysec2pri.parsers.base import Sec2PriMappingSet
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="sssom")
 
 PathType = click.Path(path_type=Path)  # type: ignore[type-var]
@@ -132,28 +134,68 @@ def _emit(ms: object, fmt: str, output: Path | None, base: str) -> None:
 
 def _resolve_and_print(
     input_file: Path,
-    ms: object,
-    resolve_fn: Callable[..., pd.DataFrame | str | list[str]],
-    columns: tuple[str, ...],
+    ms: Sec2PriMappingSet,
+    col_syn_pairs: list[tuple[str, str | None]],
     output_path: Path | None,
     suffix: str,
     sep: str | None,
+    label_ms: Sec2PriMappingSet | None = None,
+    *,
+    mode: str = "ids",
 ) -> None:
-    """Compute ``at``, call *resolve_fn*, then print or write results."""
-    at: str | list[str] = list(columns) if len(columns) > 1 else columns[0]
-    click.echo(f"Resolving in column(s): {', '.join(columns)}")
-    df = resolve_fn(input_file, ms, at=at, output_path=output_path, suffix=suffix, sep=sep)
-    assert not isinstance(df, (str, list)), "Expected DataFrame in CLI mode"
-    if output_path:
-        click.echo(f"Wrote {len(df)} rows to {output_path}")
+    """Read *input_file* once, then resolve each (column, synonym_col) pair.
+
+    *mode* selects ``"ids"`` (calls :func:`update_ids`) or ``"symbols"``
+    (calls :func:`update_symbols`).
+    For each pair the new columns are merged into a single result DataFrame.
+    """
+    import pandas as pd
+
+    from pysec2pri.update_ids import update_ids, update_symbols
+
+    inferred_sep = "\t" if input_file.suffix.lower() == ".tsv" else ","
+    read_sep = sep if sep is not None else inferred_sep
+    df = pd.read_csv(input_file, sep=read_sep, dtype=str)
+    assert isinstance(df, pd.DataFrame)
+    result: pd.DataFrame = df.copy()
+    col_names = [col for col, _ in col_syn_pairs]
+    click.echo(f"Resolving in column(s): {', '.join(col_names)}")
+    for col, syn_col in col_syn_pairs:
+        hint_note = f" (hints from '{syn_col}')" if syn_col else ""
+        click.echo(f"  Processing '{col}'{hint_note}")
+        if mode == "ids":
+            partial: pd.DataFrame = update_ids(
+                result,
+                ms,
+                at=col,
+                suffix=suffix,
+                synonyms=syn_col,
+                label_mapping_set=label_ms,
+            )
+        else:
+            partial = update_symbols(
+                result,
+                ms,
+                at=col,
+                suffix=suffix,
+                synonyms=syn_col,
+            )
+        for new_col in partial.columns:
+            if new_col not in result.columns:
+                result[new_col] = partial[new_col]
+    if output_path is not None:
+        out_sep = "\t" if output_path.suffix.lower() == ".tsv" else ","
+        result.to_csv(output_path, sep=out_sep, index=False)
+        click.echo(f"Wrote {len(result)} rows to {output_path}")
     else:
-        click.echo(df.to_csv(sep="\t" if (sep or "\t") == "\t" else ",", index=False))
+        out_sep = "\t" if (sep or "\t") == "\t" else ","
+        click.echo(result.to_csv(sep=out_sep, index=False))
 
 
 @click.group()
 @click.version_option()
 def main() -> None:
-    """pysec2pri: Secondary to Primary ID mapping tool."""
+    """pysec2pri: Secondary to Primary ID and name mapping tool."""
 
 
 @main.command()
@@ -639,7 +681,6 @@ def export_all(output_dir: Path, datasources: str) -> None:
         save,
     )
     from pysec2pri.download import CloudflareBlockedError
-    from pysec2pri.parsers.base import Sec2PriMappingSet
 
     _generators: dict[str, Callable[[], Sec2PriMappingSet]] = {
         "chebi": generate_chebi,
@@ -696,6 +737,30 @@ def export_all(output_dir: Path, datasources: str) -> None:
     default=None,
     help="Pre-built sec2pri TSV mapping file to use instead of regenerating.",
 )
+@click.option(
+    "--synonyms",
+    "synonyms_cols",
+    default=None,
+    multiple=True,
+    metavar="COLUMN",
+    help=(
+        "Column containing alias hint strings for the corresponding --at column. "
+        "Repeat to pair with each --at column in order: "
+        "--at id1 --synonyms syn1 --at id2 --synonyms syn2. "
+        "Trailing --at columns without a matching --synonyms have no hint resolution."
+    ),
+)
+@click.option(
+    "--synonyms-mapping",
+    "synonyms_mapping_file",
+    type=ExistingPathType,
+    default=None,
+    help=(
+        "Pre-built label/symbol mapping file to use as the alias index source "
+        "(overrides auto-loading the symbol mapping for the datasource). "
+        "Accepts both sec2pri and label-mapping TSV files."
+    ),
+)
 @_opt_version
 @_opt_no_progress
 def update_ids_cmd(
@@ -706,6 +771,8 @@ def update_ids_cmd(
     suffix: str,
     sep: str | None,
     mapping_file: Path | None,
+    synonyms_cols: tuple[str, ...],
+    synonyms_mapping_file: Path | None,
     data_version: str | None,
     no_progress: bool,
 ) -> None:
@@ -718,6 +785,15 @@ def update_ids_cmd(
     Pass --mapping to skip downloading/regenerating the mapping set and use
     an existing sec2pri file instead.
 
+    Use --synonyms to pair a hint column with each --at column for ambiguity
+    resolution.  Pair them positionally::
+
+        pysec2pri update-ids f.tsv hgnc --at id --synonyms sym
+        pysec2pri update-ids f.tsv hgnc --at id1 --synonyms sym1 --at id2 --synonyms sym2
+
+    Pass --synonyms-mapping to supply a pre-built alias mapping file instead of
+    auto-loading the symbol mapping for the datasource.
+
     Example::
 
         pysec2pri update-ids my_genes.tsv hgnc --at gene_id -o my_genes_updated.tsv
@@ -725,13 +801,16 @@ def update_ids_cmd(
     """
     from pysec2pri.api import (
         generate_chebi,
+        generate_chebi_synonyms,
         generate_hgnc,
+        generate_hgnc_symbols,
         generate_hmdb,
         generate_ncbi,
+        generate_ncbi_symbols,
         generate_uniprot,
         generate_wikidata,
+        load_label_mapping,
         load_mapping,
-        resolve_ids,
     )
 
     if mapping_file is not None:
@@ -752,7 +831,48 @@ def update_ids_cmd(
         }
         click.echo(f"Loading {datasource.upper()} mappings...")
         ms = _generators[datasource]()
-    _resolve_and_print(input_file, ms, resolve_ids, columns, output_path, suffix, sep)
+
+    # Build alias-index mapping set when any --synonyms column is supplied.
+    label_ms = None
+    if synonyms_cols:
+        if synonyms_mapping_file is not None:
+            click.echo(f"Loading synonym mappings from {synonyms_mapping_file}...")
+            try:
+                label_ms = load_label_mapping(synonyms_mapping_file)
+            except Exception:
+                label_ms = load_mapping(synonyms_mapping_file)
+        else:
+            _sym_generators = {
+                "chebi": lambda: generate_chebi_synonyms(
+                    version=data_version, show_progress=not no_progress
+                ),
+                "hgnc": lambda: generate_hgnc_symbols(
+                    version=data_version, show_progress=not no_progress
+                ),
+                "ncbi": lambda: generate_ncbi_symbols(
+                    version=data_version, show_progress=not no_progress
+                ),
+            }
+            if datasource in _sym_generators:
+                click.echo(f"Loading {datasource.upper()} symbol mappings for alias resolution...")
+                label_ms = _sym_generators[datasource]()
+            else:
+                click.echo(
+                    f"Warning: --synonyms hint resolution is not supported for datasource "
+                    f"'{datasource}' (no symbol mapping available). "
+                    "Ambiguous IDs will remain blank.",
+                    err=True,
+                )
+
+    # Pair each --at column with the corresponding --synonyms column (or None).
+    padded_syns: list[str | None] = list(synonyms_cols) + [None] * max(
+        0, len(columns) - len(synonyms_cols)
+    )
+    col_syn_pairs = list(zip(columns, padded_syns[: len(columns)], strict=False))
+
+    _resolve_and_print(
+        input_file, ms, col_syn_pairs, output_path, suffix, sep, label_ms, mode="ids"
+    )
 
 
 @main.command("update-symbols")
@@ -776,6 +896,28 @@ def update_ids_cmd(
     default=None,
     help="Pre-built symbol2prev TSV mapping file to use instead of regenerating.",
 )
+@click.option(
+    "--synonyms",
+    "synonyms_cols",
+    default=None,
+    multiple=True,
+    metavar="COLUMN",
+    help=(
+        "Column containing alias hint strings for the corresponding --at column. "
+        "Repeat to pair with each --at column in order: "
+        "--at sym1 --synonyms syn1 --at sym2 --synonyms syn2."
+    ),
+)
+@click.option(
+    "--synonyms-mapping",
+    "synonyms_mapping_file",
+    type=ExistingPathType,
+    default=None,
+    help=(
+        "Pre-built mapping file to use as the alias index source for hint resolution "
+        "(overrides auto-loading). Accepts sec2pri or label-mapping TSV files."
+    ),
+)
 @_opt_tax_id
 @_opt_entity_type
 @_opt_subset
@@ -789,6 +931,8 @@ def update_symbols_cmd(
     suffix: str,
     sep: str | None,
     mapping_file: Path | None,
+    synonyms_cols: tuple[str, ...],
+    synonyms_mapping_file: Path | None,
     tax_id: str,
     entity_type: str | None,
     subset: str,
@@ -804,6 +948,10 @@ def update_symbols_cmd(
     Pass --mapping to skip downloading/regenerating the mapping set and use
     an existing symbol2prev TSV file instead.
 
+    Use --synonyms to pair a hint column with each --at column for ambiguity
+    resolution.  Pass --synonyms-mapping to supply a pre-built alias mapping
+    file (e.g. an ID mapping set) instead of auto-loading.
+
     Example::
 
         pysec2pri update-symbols my_genes.tsv hgnc --at symbol -o my_genes_updated.tsv
@@ -811,11 +959,13 @@ def update_symbols_cmd(
     """
     from pysec2pri.api import (
         generate_chebi_synonyms,
+        generate_hgnc,
         generate_hgnc_symbols,
+        generate_ncbi,
         generate_ncbi_symbols,
         generate_wikidata_symbols,
         load_label_mapping,
-        resolve_symbols,
+        load_mapping,
     )
 
     if mapping_file is not None:
@@ -837,7 +987,42 @@ def update_symbols_cmd(
             ms = generate_wikidata_symbols(
                 entity_type=entity_type, version=data_version, show_progress=not no_progress
             )
-    _resolve_and_print(input_file, ms, resolve_symbols, columns, output_path, suffix, sep)
+
+    # Build alias-index mapping set when any --synonyms column is supplied.
+    label_ms = None
+    if synonyms_cols:
+        if synonyms_mapping_file is not None:
+            click.echo(f"Loading synonym mappings from {synonyms_mapping_file}...")
+            try:
+                label_ms = load_label_mapping(synonyms_mapping_file)
+            except Exception:
+                label_ms = load_mapping(synonyms_mapping_file)
+        else:
+            # For update-symbols the natural alias source is the ID mapping set.
+            _id_generators: dict[str, Callable[[], Sec2PriMappingSet]] = {
+                "hgnc": lambda: generate_hgnc(version=data_version, show_progress=not no_progress),
+                "ncbi": lambda: generate_ncbi(version=data_version, show_progress=not no_progress),
+            }
+            if datasource in _id_generators:
+                click.echo(f"Loading {datasource.upper()} ID mappings for alias resolution...")
+                label_ms = _id_generators[datasource]()
+            else:
+                click.echo(
+                    f"Warning: --synonyms hint resolution is not supported for datasource "
+                    f"'{datasource}' (no ID mapping available). "
+                    "Ambiguous symbols will remain blank.",
+                    err=True,
+                )
+
+    # Pair each --at column with the corresponding --synonyms column (or None).
+    padded_syns: list[str | None] = list(synonyms_cols) + [None] * max(
+        0, len(columns) - len(synonyms_cols)
+    )
+    col_syn_pairs = list(zip(columns, padded_syns[: len(columns)], strict=False))
+
+    _resolve_and_print(
+        input_file, ms, col_syn_pairs, output_path, suffix, sep, label_ms, mode="symbols"
+    )
 
 
 if __name__ == "__main__":
