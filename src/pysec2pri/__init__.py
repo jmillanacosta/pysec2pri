@@ -39,7 +39,15 @@ from pysec2pri.parsers.base import (
     LabelMappingSet,
     Sec2PriMappingSet,
 )
-from pysec2pri.update_ids import build_lookup, build_symbol_lookup, update_ids, update_symbols
+from pysec2pri.update_ids import (
+    build_alias_index,
+    build_lookup,
+    build_primary_token_to_id,
+    build_symbol_lookup,
+    resolve_ambiguous_with_hints,
+    update_ids,
+    update_symbols,
+)
 
 __all__ = [
     # Sentinel values
@@ -51,7 +59,9 @@ __all__ = [
     "LabelMappingSet",
     "Sec2PriMappingSet",
     # ID resolution
+    "build_alias_index",
     "build_lookup",
+    "build_primary_token_to_id",
     "build_symbol_lookup",
     "find_ambiguous",
     # generate_* (download + parse in one call)
@@ -68,6 +78,7 @@ __all__ = [
     "generate_wikidata",
     "generate_wikidata_symbols",
     "list_versions",
+    "resolve_ambiguous_with_hints",
     "resolve_ids",
     "resolve_symbols",
     "update_ids",

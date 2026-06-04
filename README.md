@@ -110,6 +110,13 @@ pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.t
 
 Ambiguous mappings (where a deprecated ID or symbol serves as a recommended for
 another entity) are not resolved, but flagged for users to solve them manually.
+If the input file has a column of known aliases or synonyms for each row, pass
+it as a hint to resolve ambiguous names automatically:
+
+```bash
+pysec2pri update-ids data.tsv hgnc --at gene_id --synonyms gene_aliases
+# Pairs gene_aliases hints with gene_id; repeat --at X--synonyms Y for more columns.
+```
 
 A subset with ambiguous mappings only can be generated like:
 
@@ -121,45 +128,68 @@ pysec2pri ambiguous hgnc-symbols
 
 ### Deprecations (IDs)
 
-When an identifier is deprecated it is usually mapped to a single primary
-identifier. Sometimes the deprecated ID appears to recommend multiple targets,
-which introduces ambiguity.
+A deprecated ID is mapped to its replacement via `IAO:0100001` ("term replaced
+by"). Each row is 1-to-1: one secondary `subject_id` → one primary `object_id`.
 
 ```mermaid
 flowchart LR
-    D[Deprecated ID]
-    P[Primary ID]
-    A[Alternate primary]
-    D -->|IAO:0100001 term replaced by| P
-    D -. oboInOwl:consider .-> A
+    D["subject_id (deprecated)"]
+    P["object_id (primary)"]
+    D -->|"term replaced by"| P
+```
+
+**Ambiguity** happens when the same ID appears as both a `subject_id`
+(secondary) and an `object_id` (primary) across different mappings.
+
+```mermaid
+flowchart LR
+    A["A (secondary)"] -->|term replaced by| B["B (primary)"]
+    C["C (secondary)"] -->|term replaced by| A
 ```
 
 ### Symbols
 
-Symbols can be reused over time. A symbol might resolve unambiguously to a
-single primary entity, or map ambiguously to several candidates.
+The same 1-to-1 pattern applies to symbol (label) mappings: a previous or alias
+symbol (`subject_label`) maps to the current symbol (`object_label`) of the same
+entity via `IAO:0100001`.
+
+**Ambiguity** appears when the same symbol is both a `subject_label` (previous
+name, secondary) and an `object_label` (current name, primary) across different
+mappings.
+
+### Aliases / synonyms
+
+Alias mappings use `oboInOwl:hasExactSynonym`. The alias is the `subject_label`
+and the authoritative name is the `object_label`/`object_id`.
 
 ```mermaid
 flowchart LR
-    S[Symbol]
-    P1[Primary 1]
-    P2[Primary 2]
-    S -->|IAO:0100001 term replaced by| P1
-    S -. oboInOwl:consider .-> P2
+    A["subject_label (alias / synonym)"]
+    P["object_label/object_id (primary)"]
+    A -->|"oboInOwl:hasExactSynonym"| P
 ```
 
-### Aliases and synonyms
+### Resolving ambiguity with alias hints
 
-Aliases/synonyms are alternate names for the same primary entity and are
-typically many-to-one mappings (multiple synonyms -> one primary).
+When a name is ambiguous, alias mappings are used as evidence. For each
+candidate interpretation the resolver checks whether any user-supplied hint
+matches a known alias of that candidate's primary entity. A hit on the secondary
+candidate's target confirms the name is being used as a previous name; a hit on
+the primary candidate's own aliases confirms it is already current.
 
 ```mermaid
-flowchart LR
-    Syn1[object_label: glucose]
-    Syn2[subject_label: D-glucose]
-    Syn1 -->|oboInOwl:hasExactSynonym| Syn2
-    Syn2 -->|oboInOwl:hasExactSynonym| Syn1
-
+flowchart TD
+    Name["ambiguous name"]
+    Hint["Alias hint"]
+    Check{"Hint matches alias of…"}
+    SecPath["Replacement target: replace"]
+    PriPath["Name itself: keep"]
+    Blank["Neither: flag for manual review"]
+    Name --> Check
+    Hint -.-> Check
+    Check -->|secondary candidate| SecPath
+    Check -->|primary candidate| PriPath
+    Check -->|no match| Blank
 ```
 
 ## Documentation
