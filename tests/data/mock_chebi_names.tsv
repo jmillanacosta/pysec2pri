@@ -1,0 +1,9 @@
+id	compound_id	name	type	status_id	adapted	language_code	ascii_name
+1	10001	alpha-glucose	SYNONYM	1	false	en	alpha-glucose
+2	10001	glucose	SYNONYM	1	false	en	glucose
+3	10001	D-glucose	SYNONYM	1	false	en	D-glucose
+4	10002	beta-glucose	SYNONYM	1	false	en	beta-glucose
+5	10002	B-glucose	SYNONYM	1	false	en	B-glucose
+6	10003	water	SYNONYM	1	false	en	water
+7	10003	H2O	SYNONYM	1	false	en	H2O
+8	10003	dihydrogen oxide	IUPAC NAME	1	false	en	dihydrogen oxide

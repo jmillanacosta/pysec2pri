@@ -327,9 +327,9 @@ class NCBIParser(BaseParser):
                         rows_data.append(
                             {
                                 "subject_id": curie_id,
-                                "subject_label": pri_symbol_str,
+                                "subject_label": syn,  # synonym = secondary : subject
                                 "object_id": curie_id,
-                                "object_label": syn,
+                                "object_label": pri_symbol_str,  # current symbol = primary : object
                                 "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
                             }

@@ -36,11 +36,11 @@ Quick Start
     from pysec2pri import load_mapping, load_label_mapping
 
     ms = generate_hgnc()
-    resolve_ids("HGNC:131", ms)              # → "HGNC:145"
-    resolve_ids(["HGNC:131", "HGNC:2"], ms)  # → ["HGNC:145", ...]
+    resolve_ids("HGNC:131", ms)              # : "HGNC:145"
+    resolve_ids(["HGNC:131", "HGNC:2"], ms)  # : ["HGNC:145", ...]
 
     lms = generate_hgnc_symbols()
-    resolve_symbols("BRCA1_OLD", lms)        # → "BRCA1"
+    resolve_symbols("BRCA1_OLD", lms)        # : "BRCA1"
 
     # load from a saved sec2pri / SSSOM file
     ms = load_mapping("hgnc_sec2pri.tsv")

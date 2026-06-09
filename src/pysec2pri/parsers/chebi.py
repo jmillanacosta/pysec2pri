@@ -304,9 +304,9 @@ class ChEBIParser(BaseParser):
         rows = [
             {
                 "subject_id": sid,
-                "subject_label": pname,
+                "subject_label": syn,  # synonym = secondary : subject
                 "object_id": sid,
-                "object_label": syn,
+                "object_label": pname,  # primary name : object
                 "_label_type": "alias",
             }
             for sid, pname, syn in raw_name_mappings
@@ -471,45 +471,76 @@ def _parse_names_tsv(
 
     Format: id|compound_id|name|type|status_id|adapted|language_code|ascii_name
 
-    For each compound, the name with the smallest id is considered the primary
-    name, and all other names are synonyms.
+    The authoritative primary (canonical) name for each compound is taken from
+    the ``name`` column of ``compounds.tsv``: the same value displayed on the
+    ChEBI website and stored as the top-level label in the ChEBI ontology.
+    Every entry in ``names.tsv`` that differs from that canonical name is
+    treated as a synonym.
+
+    ``compounds_path`` is required because there is no source-authorised way
+    to identify the primary name from ``names.tsv`` alone.
 
     Args:
         names_path: Path to names.tsv file.
-        compounds_path: Path to compounds.tsv for 3-star filtering.
+        compounds_path: Path to compounds.tsv.  Required for primary-name
+            resolution and, when subset=="3star", for star-count filtering.
         subset: "3star" or "complete".
-        show_progress: Whether to show progress.
+        show_progress: Unused; kept for API compatibility.
 
     Returns:
-        List of (subject_curie, primary_name, synonym) tuples.
+        List of ``(subject_curie, primary_name, synonym)`` tuples where
+        ``primary_name`` is the canonical name from ``compounds.tsv`` and
+        ``synonym`` is the alternative name from ``names.tsv``.
+
+    Raises:
+        ValueError: When ``compounds_path`` is not provided.
     """
+    if compounds_path is None:
+        raise ValueError(
+            "compounds_path is required by _parse_names_tsv to resolve primary names. "
+            "Pass the path to compounds.tsv."
+        )
+
+    # Load canonical names from compounds.tsv (ChEBI-authoritative primary label)
+    cpd_cols = ["id", "name", "stars"] if subset == "3star" else ["id", "name"]
+    cpd_df = pl.read_csv(
+        compounds_path,
+        separator="\t",
+        columns=cpd_cols,
+        schema_overrides={"id": pl.Int64, "name": pl.Utf8},
+        null_values=[""],
+    )
+    if subset == "3star" and "stars" in cpd_df.columns:
+        cpd_df = cpd_df.filter(pl.col("stars") == 3)
+
+    # Rename for the join: compounds.id : compound_id, compounds.name : primary_name
+    cpd_df = cpd_df.select(
+        [
+            pl.col("id").alias("compound_id"),
+            pl.col("name").alias("primary_name"),
+        ]
+    ).drop_nulls()
+
+    # Load all alternative name entries from names.tsv
     df = pl.read_csv(
         names_path,
         separator="\t",
-        columns=["id", "compound_id", "name"],
-        schema_overrides={"id": pl.Int64, "compound_id": pl.Int64, "name": pl.Utf8},
+        columns=["compound_id", "name"],
+        schema_overrides={"compound_id": pl.Int64, "name": pl.Utf8},
     )
 
-    # Filter to 3-star compounds if requested
-    if subset == "3star" and compounds_path is not None:
-        three_star_ids = _get_3star_compound_ids(compounds_path, show_progress)
+    # Restrict to 3-star compounds (those present in cpd_df after star filtering)
+    if subset == "3star":
+        three_star_ids = set(cpd_df["compound_id"].to_list())
         df = df.filter(pl.col("compound_id").is_in(three_star_ids))
 
-    # For each compound, find the primary name (smallest id)
-    # and all other names as synonyms
-    primary_names = df.group_by("compound_id").agg(
-        [
-            pl.col("name").sort_by("id").first().alias("primary_name"),
-        ]
-    )
+    # Join to attach the canonical primary name from compounds.tsv
+    df_with_primary = df.join(cpd_df, on="compound_id")
 
-    # Join to get primary name for each row
-    df_with_primary = df.join(primary_names, on="compound_id")
-
-    # Filter to only synonym rows (where name != primary_name)
+    # Exclude trivial self-mappings (name in names.tsv == canonical name)
     synonyms_df = df_with_primary.filter(pl.col("name") != pl.col("primary_name"))
 
-    # Build mapping tuples
+    # Build mapping tuples: (subject_curie, primary_name, synonym)
     mappings: list[tuple[str, str, str]] = synonyms_df.select(
         [
             (pl.lit("CHEBI:") + pl.col("compound_id").cast(pl.Utf8)).alias("subject_id"),

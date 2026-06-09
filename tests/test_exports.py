@@ -83,7 +83,8 @@ class TestWriteSec2Pri:
 
             # Header + 2 data rows
             assert len(lines) == 3
-            assert "subject_id" in lines[0]
+            # header now uses primary_id and secondary_id
+            assert "primary_id" in lines[0]
             assert "CHEBI:10001" in lines[1]
 
 
@@ -102,7 +103,8 @@ class TestWriteName2Synonym:
 
             # Header + 2 data rows
             assert len(lines) == 3
-            assert "subject_label" in lines[0]
+            # header now uses name/synonym with primary_id
+            assert "name" in lines[0]
 
 
 class TestWriteSymbol2Prev:
@@ -119,4 +121,6 @@ class TestWriteSymbol2Prev:
             lines = content.strip().split("\n")
 
             assert len(lines) == 3
+            # header includes mapping_cardinality and uses primary_symbol
             assert "mapping_cardinality" in lines[0]
+            assert "primary_symbol" in lines[0]

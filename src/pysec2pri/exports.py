@@ -272,14 +272,16 @@ def write_sec2pri(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    columns = ["subject_id", "object_id", "predicate_id", "mapping_cardinality"]
+    # Use explicit primary/secondary column names for clarity
+    # Columns: primary_id (object_id), secondary_id (subject_id), predicate_id, mapping_cardinality
+    columns = ["primary_id", "secondary_id", "predicate_id", "mapping_cardinality"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
         for m in mapping_set.mappings or []:  # type: ignore[has-type]
             values = [
-                str(getattr(m, "subject_id", "") or ""),
                 str(getattr(m, "object_id", "") or ""),
+                str(getattr(m, "subject_id", "") or ""),
                 str(getattr(m, "predicate_id", "") or ""),
                 str(getattr(m, "mapping_cardinality", "") or ""),
             ]
@@ -307,7 +309,9 @@ def write_name2synonym(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    columns = ["subject_id", "subject_label", "object_label"]
+    # For name2synonym, write primary/secondary label columns as name|synonym
+    # Columns: primary_id, name, synonym
+    columns = ["primary_id", "name", "synonym"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
@@ -315,10 +319,11 @@ def write_name2synonym(
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
+                # object_label is the primary (name), subject_label is the synonym
                 values = [
-                    str(getattr(m, "subject_id", "") or ""),
-                    str(subject_label or ""),
+                    str(getattr(m, "object_id", "") or ""),
                     str(object_label or ""),
+                    str(subject_label or ""),
                 ]
                 f.write("\t".join(values) + "\n")
 
@@ -345,7 +350,9 @@ def write_symbol2prev(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    columns = ["subject_id", "subject_label", "object_label", "mapping_cardinality"]
+    # Symbol previous mappings: primary and previous symbol labels
+    # Columns: primary_id, primary_symbol, previous_symbol, mapping_cardinality
+    columns = ["primary_id", "primary_symbol", "previous_symbol", "mapping_cardinality"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
@@ -353,10 +360,11 @@ def write_symbol2prev(
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
+                # object_label is the primary symbol, subject_label is the previous symbol
                 values = [
-                    str(getattr(m, "subject_id", "") or ""),
-                    str(subject_label or ""),
+                    str(getattr(m, "object_id", "") or ""),
                     str(object_label or ""),
+                    str(subject_label or ""),
                     str(getattr(m, "mapping_cardinality", "") or ""),
                 ]
                 f.write("\t".join(values) + "\n")
