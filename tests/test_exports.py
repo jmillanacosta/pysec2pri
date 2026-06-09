@@ -165,6 +165,6 @@ class TestWriteSymbol2Prev:
             output_path = Path(tmpdir) / "test.tsv"
             write_symbol2prev(label_mapping_set, output_path)
             lines = output_path.read_text().strip().split("\n")
-            # Only the header row — no synonym rows should appear
+            # Only the header row: no synonym rows should appear
             assert len(lines) == 1
             assert "primary_symbol" in lines[0]

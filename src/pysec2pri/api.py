@@ -32,25 +32,40 @@ if TYPE_CHECKING:
 from pysec2pri.parsers.base import AmbiguousMappingSet, IdMappingSet, LabelMappingSet
 
 __all__ = [
+    # Utilities
     "combine_mapping_sets",
     "find_ambiguous",
+    # Need to remove at some point the old functions
+    # (see aliased functions at the bottom)
     "generate_chebi",
+    # Core
+    "generate_chebi_ids",
+    "generate_chebi_labels",
     "generate_chebi_primary_ids",
     "generate_chebi_primary_symbols",
     "generate_chebi_synonyms",
     "generate_hgnc",
+    "generate_hgnc_ids",
+    "generate_hgnc_labels",
     "generate_hgnc_primary_ids",
     "generate_hgnc_symbols",
     "generate_hmdb",
+    "generate_hmdb_ids",
     "generate_hmdb_primary_ids",
     "generate_hmdb_proteins",
+    "generate_hmdb_proteins_ids",
     "generate_ncbi",
+    "generate_ncbi_ids",
+    "generate_ncbi_labels",
     "generate_ncbi_primary_ids",
     "generate_ncbi_primary_symbols",
     "generate_ncbi_symbols",
     "generate_uniprot",
+    "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
     "generate_wikidata",
+    "generate_wikidata_ids",
+    "generate_wikidata_labels",
     "generate_wikidata_symbols",
     "list_versions",
     "load_label_mapping",
@@ -918,9 +933,15 @@ def load_mapping(path: Path | str) -> IdMappingSet:
 def load_label_mapping(path: Path | str) -> LabelMappingSet:
     """Load a label/symbol mapping set from a pysec2pri TSV file.
 
-    Accepts the ``symbol2prev`` TSV format (columns ``subject_id``,
-    ``subject_label``, ``object_label``, ``mapping_cardinality``) and the
-    full SSSOM TSV format (comment-prefixed metadata lines are skipped).
+    Accepts two column-name conventions:
+
+    - **New** (``symbol_sec2pri`` tabular output): ``secondary_id``,
+      ``secondary_symbol``, ``primary_id``, ``primary_symbol``,
+      ``predicate_id``, ``mapping_cardinality``.
+    - **Legacy** (SSSOM or old tabular output): ``subject_id``,
+      ``subject_label``, ``object_id``, ``object_label``, ``predicate_id``.
+
+    Full SSSOM TSV (comment-prefixed metadata lines) is also accepted.
 
     Args:
         path: Path to the TSV file to load.
@@ -938,16 +959,25 @@ def load_label_mapping(path: Path | str) -> LabelMappingSet:
         mapping_set_id=str(path),
         license="https://creativecommons.org/licenses/by/4.0/",
     )
+
+    def _col(row: pd.Series, *names: str) -> str | None:
+        for name in names:
+            val = row.get(name)
+            if val and str(val).strip():
+                return str(val).strip()
+        return None
+
     mappings: list[Mapping] = []
     for _, row in df.iterrows():
         m = Mapping(
-            subject_id=row.get("subject_id") or "",
-            subject_label=row.get("subject_label") or None,
-            object_label=row.get("object_label") or None,
-            predicate_id=row.get("predicate_id") or "",
-            mapping_justification=row.get("mapping_justification")
+            subject_id=_col(row, "secondary_id", "subject_id") or "",
+            subject_label=_col(row, "secondary_symbol", "subject_label"),
+            object_id=_col(row, "primary_id", "object_id") or "",
+            object_label=_col(row, "primary_symbol", "object_label"),
+            predicate_id=_col(row, "predicate_id") or "",
+            mapping_justification=_col(row, "mapping_justification")
             or "semapv:BackgroundKnowledgeBasedMatching",
-            mapping_cardinality=row.get("mapping_cardinality") or None,
+            mapping_cardinality=_col(row, "mapping_cardinality"),
         )
         mappings.append(m)
     ms.mappings = mappings
@@ -1174,3 +1204,18 @@ def find_ambiguous(
         ``comment`` explaining the conflict.
     """
     return mapping_set.find_ambiguous()
+
+
+# The functions here use old names, remove at some point
+
+generate_chebi_ids = generate_chebi
+generate_chebi_labels = generate_chebi_synonyms
+generate_hgnc_ids = generate_hgnc
+generate_hgnc_labels = generate_hgnc_symbols
+generate_ncbi_ids = generate_ncbi
+generate_ncbi_labels = generate_ncbi_symbols
+generate_hmdb_ids = generate_hmdb
+generate_hmdb_proteins_ids = generate_hmdb_proteins
+generate_uniprot_ids = generate_uniprot
+generate_wikidata_ids = generate_wikidata
+generate_wikidata_labels = generate_wikidata_symbols

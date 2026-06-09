@@ -1,5 +1,10 @@
 # Datasource metadata
+config_id: "ncbi"
+datasource_id: "ncbi"
 name: "NCBI Gene"
+parser_class: "NCBIParser"
+parse_options:
+  default_taxonomy_id: 9606
 prefix: "NCBIGene"
 curie_base_url: "http://identifiers.org/ncbigene/"
 
@@ -112,12 +117,17 @@ archive_url: null
 id_pattern: "^NCBIGene:\\d+$"
 default_output_filename: "ncbi_sec2pri.sssom.tsv"
 
-available_outputs:
-  - sssom
-  - priIDs
-  - secID2priID
-  - symbol2prev
-  - secIDs
+mapping_sets:
+  ids:
+    method: parse
+    primary_input: gene_history
+    required_inputs: [gene_history, gene_info]
+    formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
+  labels:
+    method: parse_symbols
+    primary_input: gene_info
+    required_inputs: [gene_info]
+    formats: [sssom, symbol_sec2pri, name2synonym, pri_symbols, rdf, json, owl, all]
 
 input_file_types:
   - gene_info.gz
@@ -126,6 +136,3 @@ input_file_types:
 source: "NCBI Gene"
 homepage: "https://www.ncbi.nlm.nih.gov/gene"
 data_license: "https://www.ncbi.nlm.nih.gov/home/about/policies/"
-
-# Taxonomy-specific settings
-default_taxonomy_id: 9606

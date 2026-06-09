@@ -112,11 +112,9 @@ archive_url: null
 id_pattern: "^HMDB[P]?\\d+$"
 default_output_filename: "hmdb_sec2pri.sssom.tsv"
 
-available_outputs:
-  - sssom
-  - priIDs
-  - secID2priID
-  - secIDs
+mapping_sets:
+  ids:
+    formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
 input_file_types:
   - hmdb_metabolites.zip
   - hmdb_metabolites.xml

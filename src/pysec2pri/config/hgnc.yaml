@@ -1,5 +1,8 @@
 # Datasource metadata
+config_id: "hgnc"
+datasource_id: "hgnc"
 name: "HGNC"
+parser_class: "HGNCParser"
 prefix: "HGNC"
 curie_base_url: "http://identifiers.org/hgnc/"
 
@@ -112,12 +115,17 @@ archive_url: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/
 id_pattern: "^HGNC:\\d+$"
 default_output_filename: "hgnc_sec2pri.sssom.tsv"
 
-available_outputs:
-  - sssom
-  - priIDs
-  - secID2priID
-  - symbol2prev
-  - secIDs
+mapping_sets:
+  ids:
+    method: parse
+    primary_input: withdrawn
+    required_inputs: [withdrawn, complete]
+    formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
+  labels:
+    method: parse_symbols
+    primary_input: complete
+    required_inputs: [complete]
+    formats: [sssom, symbol_sec2pri, name2synonym, pri_symbols, rdf, json, owl, all]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

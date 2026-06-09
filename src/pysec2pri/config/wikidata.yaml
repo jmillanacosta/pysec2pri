@@ -1,5 +1,10 @@
 # Datasource metadata
+config_id: "wikidata"
+datasource_id: "wikidata"
 name: "Wikidata"
+parser_class: "WikidataParser"
+parse_options:
+  entity_types: [metabolites, genes, proteins]
 prefix: "WD"
 curie_base_url: "http://www.wikidata.org/entity/"
 
@@ -109,11 +114,18 @@ archive_url: null
 id_pattern: "^Q\\d+$"
 default_output_filename: "wikidata_sec2pri.sssom.tsv"
 
-available_outputs:
-  - sssom
-  - priIDs
-  - secID2priID
-  - secIDs
+mapping_sets:
+  ids:
+    method: parse_all
+    primary_input: null
+    required_inputs: []
+    formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
+  labels:
+    method: parse_symbols
+    primary_input: null
+    required_inputs: []
+    # name2synonym excluded: Wikidata uses oboInOwl:consider, not hasExactSynonym
+    formats: [sssom, symbol_sec2pri, pri_symbols, rdf, json, owl, all]
 input_file_types:
   - sparql
 
