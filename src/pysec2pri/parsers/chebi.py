@@ -93,7 +93,7 @@ class ChEBIParser(BaseParser):
           (and optionally ``compounds.tsv``) inside it (TSV format >= 245).
         - ``input_path`` is an **SDF file**: legacy format (< 245).
         - Keyword args ``secondary_ids_path`` / ``compounds_path``: explicit
-          TSV paths (kept for backwards compatibility).
+          TSV paths.
 
         Args:
             input_path: Path to an SDF file, or a directory of TSV files.
@@ -772,26 +772,20 @@ class ChEBIDownloader(BaseDownloader):
         use_tsv = self.is_new_format(v) and not use_sdf
 
         if use_tsv:
-            # New TSV format (>= 245)
-            new_urls: dict[str, str] = download_urls.get("new", {})
+            # New TSV format (>= 245): flat keys in chebi.yaml
             return {
-                "secondary_ids": new_urls["secondary_ids"].format(version=v),
-                "names": new_urls["names"].format(version=v),
-                "compounds": new_urls["compounds"].format(version=v),
+                "secondary_ids": download_urls["secondary_ids"].format(version=v),
+                "names": download_urls["names"].format(version=v),
+                "compounds": download_urls["compounds"].format(version=v),
             }
         else:
-            # SDF format (< 245 legacy OR >= 245 with --use-sdf)
+            # SDF format: keys live in chebi_sdf.yaml
+            from pysec2pri.parsers.base import get_datasource_config
+
+            sdf_config = get_datasource_config("chebi_sdf")
+            sdf_urls = sdf_config.download_urls
             sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-
-            if not self.is_new_format(v):
-                # Legacy releases (< 245): use legacy URLs
-                legacy_urls: dict[str, str] = download_urls.get("legacy", {})
-                url = legacy_urls[sdf_key].format(version=v)
-            else:
-                # New releases (>= 245) with --use-sdf: use new SDF URLs
-                new_urls = download_urls.get("new", {})
-                url = new_urls[sdf_key].format(version=v)
-
+            url = sdf_urls[sdf_key].format(version=v)
             return {"sdf": url}
 
     def download(

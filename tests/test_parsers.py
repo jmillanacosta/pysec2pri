@@ -248,17 +248,17 @@ class TestHGNCParser:
         result = parser.parse_symbols(hgnc_complete_path)
 
         df = result.to_name2synonym()
-        synonym_subjects = set(df["subject_label"].tolist())
+        synonyms = set(df["synonym"].tolist())
         # Aliases (hasExactSynonym) must appear in name2synonym
-        assert "BRCC1" in synonym_subjects
-        assert "RNF53" in synonym_subjects
-        assert "P53" in synonym_subjects
-        assert "LFS1" in synonym_subjects
-        assert "c-Myc" in synonym_subjects
+        assert "BRCC1" in synonyms
+        assert "RNF53" in synonyms
+        assert "P53" in synonyms
+        assert "LFS1" in synonyms
+        assert "c-Myc" in synonyms
         # Previous symbols (IAO:0100001) must NOT appear in name2synonym
-        assert "PSCP" not in synonym_subjects
-        assert "tumor_p53" not in synonym_subjects
-        assert "v-myc" not in synonym_subjects
+        assert "PSCP" not in synonyms
+        assert "tumor_p53" not in synonyms
+        assert "v-myc" not in synonyms
 
     def test_symbol_sec2pri_contains_previous_symbols(self, hgnc_complete_path: Path) -> None:
         """to_symbol_sec2pri contains all label mappings including previous symbols."""
@@ -266,12 +266,13 @@ class TestHGNCParser:
         result = parser.parse_symbols(hgnc_complete_path)
 
         df = result.to_symbol_sec2pri()
-        all_subjects = set(df["subject_label"].tolist())
+        # Column is now "secondary_symbol" (was subject_label)
+        all_secondary = set(df["secondary_symbol"].tolist())
         # Both aliases and previous symbols must appear in the full symbol mapping
-        assert "BRCC1" in all_subjects
-        assert "PSCP" in all_subjects
-        assert "tumor_p53" in all_subjects
-        assert "v-myc" in all_subjects
+        assert "BRCC1" in all_secondary
+        assert "PSCP" in all_secondary
+        assert "tumor_p53" in all_secondary
+        assert "v-myc" in all_secondary
 
 
 class TestNCBIParser:

@@ -407,18 +407,20 @@ def _get_chebi_urls_for_version(
     release_num = int(version)
 
     if release_num >= new_format_version:
-        # New TSV format (>= 245)
-        new_urls: dict[str, str] = download_urls.get("new", {})
+        # New TSV format (>= 245): flat keys in chebi.yaml download_urls
         return {
-            "secondary_ids": new_urls["secondary_ids"].format(version=version),
-            "names": new_urls["names"].format(version=version),
-            "compounds": new_urls["compounds"].format(version=version),
+            "secondary_ids": download_urls["secondary_ids"].format(version=version),
+            "names": download_urls["names"].format(version=version),
+            "compounds": download_urls["compounds"].format(version=version),
         }
     else:
-        # Legacy SDF format (< 245)
-        legacy_urls: dict[str, str] = download_urls.get("legacy", {})
+        # Legacy SDF format (< 245): keys live in chebi_sdf.yaml
+        from pysec2pri.parsers.base import get_datasource_config
+
+        sdf_config = get_datasource_config("chebi_sdf")
+        sdf_urls = sdf_config.download_urls
         sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-        url = legacy_urls[sdf_key].format(version=version)
+        url = sdf_urls[sdf_key].format(version=version)
         return {"sdf": url}
 
 

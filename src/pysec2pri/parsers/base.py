@@ -43,8 +43,15 @@ class DatasourceConfig:
     name: str
     prefix: str
     curie_base_url: str
-    default_output_filename: str = ""
+    # Proper schema fields
+    config_id: str = ""
+    datasource_id: str = ""
+    parser_class: str = ""
+    parse_options: dict[str, Any] = field(default_factory=dict)
+    mapping_sets: dict[str, Any] = field(default_factory=dict)
+    # Old field, remove at some point
     available_outputs: list[str] = field(default_factory=list)
+    default_output_filename: str = ""
     download_urls: dict[str, Any] = field(default_factory=dict)
     primary_file_key: str = ""
     id_pattern: str = ""
@@ -62,6 +69,17 @@ class DatasourceConfig:
     # Full metadata from YAML
     mappingset_metadata: dict[str, Any] = field(default_factory=dict)
     mapping_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def formats_for(self, kind: str) -> Any:
+        """Return the list of supported output formats for a mapping-set kind.
+
+        Args:
+            kind: Mapping-set key, e.g. ``"ids"`` or ``"labels"``.
+
+        Returns:
+            List of format strings, or an empty list when the kind is absent.
+        """
+        return self.mapping_sets.get(kind, {}).get("formats", [])
 
 
 def load_config(datasource_name: str) -> dict[str, Any]:
@@ -115,11 +133,16 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         name = datasource_name.upper()
 
     return DatasourceConfig(
-        name=name,
-        prefix=prefix,
-        curie_base_url=curie_base_url,
-        default_output_filename=raw.get("default_output_filename", ""),
+        name=raw.get("name") or name,
+        prefix=raw.get("prefix") or prefix,
+        curie_base_url=raw.get("curie_base_url") or curie_base_url,
+        config_id=raw.get("config_id", ""),
+        datasource_id=raw.get("datasource_id", ""),
+        parser_class=raw.get("parser_class", ""),
+        parse_options=raw.get("parse_options") or {},
+        mapping_sets=raw.get("mapping_sets") or {},
         available_outputs=raw.get("available_outputs", []),
+        default_output_filename=raw.get("default_output_filename", ""),
         download_urls=raw.get("download_urls", {}),
         primary_file_key=raw.get("primary_file_key", ""),
         id_pattern=raw.get("id_pattern", ""),
@@ -755,8 +778,15 @@ class IdMappingSet(Sec2PriMappingSet):
             self.to_pri_ids(output_path)
             return self._resolve_path(output_path, "_pri_ids.txt")
 
+        if fmt == "secondary":
+            from pysec2pri.exports import write_secondary
+
+            write_secondary(self, self._resolve_path(output_path, "_secondary_ids.txt"))
+            return self._resolve_path(output_path, "_secondary_ids.txt")
+
         raise ValueError(
-            f"Unknown format {fmt!r}. Choose from: json, owl, pri_ids, rdf, sec2pri, sssom"
+            f"Unknown format {fmt!r}."
+            "Choose from: json, owl, pri_ids, rdf, sec2pri, secondary, sssom"
         )
 
 
@@ -770,8 +800,9 @@ class LabelMappingSet(Sec2PriMappingSet):
     def to_symbol_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
         """Return a ``DataFrame`` of previous/alias symbol to current symbol mappings.
 
-        Columns: ``subject_id``, ``subject_label`` (secondary/previous symbol),
-        ``object_id``, ``object_label`` (primary/current symbol),
+        Columns: ``secondary_id`` (subject_id), ``secondary_symbol``
+        (subject_label: alias or previous symbol), ``primary_id`` (object_id),
+        ``primary_symbol`` (object_label: current approved symbol),
         ``predicate_id``, ``mapping_cardinality``.
 
         Args:
@@ -784,10 +815,10 @@ class LabelMappingSet(Sec2PriMappingSet):
 
         rows = [
             {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "subject_label": str(getattr(m, "subject_label", "") or ""),
-                "object_id": str(getattr(m, "object_id", "") or ""),
-                "object_label": str(getattr(m, "object_label", "") or ""),
+                "secondary_id": str(getattr(m, "subject_id", "") or ""),
+                "secondary_symbol": str(getattr(m, "subject_label", "") or ""),
+                "primary_id": str(getattr(m, "object_id", "") or ""),
+                "primary_symbol": str(getattr(m, "object_label", "") or ""),
                 "predicate_id": str(getattr(m, "predicate_id", "") or ""),
                 "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
             }
@@ -796,10 +827,10 @@ class LabelMappingSet(Sec2PriMappingSet):
         df = pd.DataFrame(
             rows,
             columns=[
-                "subject_id",
-                "subject_label",
-                "object_id",
-                "object_label",
+                "secondary_id",
+                "secondary_symbol",
+                "primary_id",
+                "primary_symbol",
                 "predicate_id",
                 "mapping_cardinality",
             ],
@@ -859,16 +890,16 @@ class LabelMappingSet(Sec2PriMappingSet):
     def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
         """Return a name to synonym ``DataFrame``, optionally writing to TSV.
 
-        Columns: ``subject_id``, ``subject_label`` (synonym / secondary name),
-        ``object_label`` (primary / canonical name).
+        Columns: ``primary_id``, ``name`` (primary / canonical name),
+        ``synonym`` (secondary / alternative name).
 
         Only ``oboInOwl:hasExactSynonym`` rows are included.  Rows with
         ``IAO:0100001`` (``"term replaced by"``) are deprecation mappings and
         belong in the ``symbol_sec2pri`` output, not here.
 
-        The direction follows the sec:pri convention used throughout the
-        codebase: the secondary (synonym/alternative) term is the subject and
-        the primary (canonical) term is the object.
+        The direction follows the sec:pri structure, where the secondary
+        (synonym/alternative) term is the subject and the primary (canonical)
+        term is the object.
 
         Args:
             output_path: If given, the DataFrame is also written as a TSV file.
@@ -880,15 +911,15 @@ class LabelMappingSet(Sec2PriMappingSet):
 
         rows = [
             {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "subject_label": str(getattr(m, "subject_label", "") or ""),
-                "object_label": str(getattr(m, "object_label", "") or ""),
+                "primary_id": str(getattr(m, "object_id", "") or ""),
+                "name": str(getattr(m, "object_label", "") or ""),
+                "synonym": str(getattr(m, "subject_label", "") or ""),
             }
             for m in (self.mappings or [])
             if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym"
             and (getattr(m, "subject_label", None) or getattr(m, "object_label", None))
         ]
-        df = pd.DataFrame(rows, columns=["subject_id", "subject_label", "object_label"])
+        df = pd.DataFrame(rows, columns=["primary_id", "name", "synonym"])
 
         if output_path is not None:
             path = self._resolve_path(output_path, "_name2synonym.tsv")
