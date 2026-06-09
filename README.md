@@ -129,7 +129,7 @@ pysec2pri ambiguous hgnc-symbols
 ### Deprecations (IDs)
 
 A deprecated ID is mapped to its replacement via `IAO:0100001` ("term replaced
-by"). Each row is 1-to-1: one secondary `subject_id` → one primary `object_id`.
+by"). Each row is 1-to-1: one secondary `subject_id` : one primary `object_id`.
 
 ```mermaid
 flowchart LR

@@ -1,0 +1,4 @@
+id	name	status_id	source	parent_id	merge_type	chebi_accession	definition	ascii_name	stars	modified_on	release_date
+10001	alpha-glucose	1	ChEBI			CHEBI:10001	A cyclic monosaccharide.	alpha-glucose	3		
+10002	beta-glucose	1	ChEBI			CHEBI:10002		beta-glucose	3		
+10003	water	1	ChEBI			CHEBI:10003		water	3		

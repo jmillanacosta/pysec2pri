@@ -20,49 +20,61 @@ TEST_DATA_DIR = Path(__file__).parent / "data"
 @pytest.fixture
 def chebi_sdf_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_chebi.sdf"
+    return TEST_DATA_DIR / "mock_chebi.sdf"
+
+
+@pytest.fixture
+def chebi_names_tsv_path() -> Path:
+    """Fake ChEBI names.tsv test data."""
+    return TEST_DATA_DIR / "mock_chebi_names.tsv"
+
+
+@pytest.fixture
+def chebi_compounds_tsv_path() -> Path:
+    """Fake ChEBI compounds.tsv test data."""
+    return TEST_DATA_DIR / "mock_chebi_compounds.tsv"
 
 
 @pytest.fixture
 def hmdb_xml_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_hmdb.xml"
+    return TEST_DATA_DIR / "mock_hmdb.xml"
 
 
 @pytest.fixture
 def hmdb_proteins_xml_path() -> Path:
     """Fake HMDB proteins XML test data."""
-    return TEST_DATA_DIR / "fake_hmdb_proteins.xml"
+    return TEST_DATA_DIR / "mock_hmdb_proteins.xml"
 
 
 @pytest.fixture
 def hgnc_withdrawn_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_hgnc_withdrawn.tsv"
+    return TEST_DATA_DIR / "mock_hgnc_withdrawn.tsv"
 
 
 @pytest.fixture
 def hgnc_complete_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_hgnc_complete.tsv"
+    return TEST_DATA_DIR / "mock_hgnc_complete.tsv"
 
 
 @pytest.fixture
 def ncbi_history_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_gene_history.tsv"
+    return TEST_DATA_DIR / "mock_gene_history.tsv"
 
 
 @pytest.fixture
 def ncbi_info_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_gene_info.tsv"
+    return TEST_DATA_DIR / "mock_gene_info.tsv"
 
 
 @pytest.fixture
 def uniprot_sec_ac_path() -> Path:
     """Test data directory."""
-    return TEST_DATA_DIR / "fake_sec_ac.txt"
+    return TEST_DATA_DIR / "mock_sec_ac.txt"
 
 
 class TestChEBIParser:
@@ -80,6 +92,51 @@ class TestChEBIParser:
         parser = ChEBIParser(show_progress=False)
         result = parser.parse_synonyms(chebi_sdf_path)
         assert isinstance(result, Sec2PriMappingSet)
+
+    def test_parse_synonyms_direction(self, chebi_sdf_path: Path) -> None:
+        """Synonym mappings must be sec:pri: synonym is subject, primary name is object."""
+        parser = ChEBIParser(show_progress=False)
+        result = parser.parse_synonyms(chebi_sdf_path)
+        mappings = result.mappings or []
+        assert len(mappings) > 0
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        # mock_chebi.sdf: CHEBI:10001 has primary name "alpha-glucose"
+        # and synonyms "glucose", "D-glucose": synonyms must be subjects
+        assert "glucose" in subject_labels
+        assert "D-glucose" in subject_labels
+        assert "alpha-glucose" in object_labels
+        # the primary/canonical name must never appear as a subject_label
+        assert "alpha-glucose" not in subject_labels
+
+    def test_parse_synonyms_tsv_direction(
+        self,
+        chebi_names_tsv_path: Path,
+        chebi_compounds_tsv_path: Path,
+    ) -> None:
+        """TSV path: primary name comes from compounds.tsv, NOT from a names.tsv heuristic."""
+        parser = ChEBIParser(show_progress=False, subset="3star")
+        result = parser.parse_synonyms(
+            names_path=chebi_names_tsv_path,
+            compounds_path=chebi_compounds_tsv_path,
+        )
+        mappings = result.mappings or []
+        assert len(mappings) > 0
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        # "alpha-glucose" is the compounds.tsv canonical name for CHEBI:10001
+        # : must be object_label only; its names.tsv entry is excluded as self-mapping
+        assert "alpha-glucose" in object_labels
+        assert "alpha-glucose" not in subject_labels
+        # All other names.tsv entries are synonyms : subject_label
+        assert "glucose" in subject_labels
+        assert "D-glucose" in subject_labels
+        # Same logic for CHEBI:10002 and CHEBI:10003
+        assert "beta-glucose" in object_labels
+        assert "B-glucose" in subject_labels
+        assert "water" in object_labels
+        assert "H2O" in subject_labels
+        assert "dihydrogen oxide" in subject_labels
 
 
 class TestHMDBParser:
@@ -203,6 +260,22 @@ class TestNCBIParser:
         parser = NCBIParser(show_progress=False)
         result = parser.parse_symbols(ncbi_info_path, tax_id="9606")
         assert isinstance(result, Sec2PriMappingSet)
+
+    def test_parse_symbols_direction(self, ncbi_info_path: Path) -> None:
+        """Symbol mappings must be sec:pri: synonym is subject, primary symbol is object."""
+        parser = NCBIParser(show_progress=False)
+        result = parser.parse_symbols(ncbi_info_path, tax_id="9606")
+        mappings = result.mappings or []
+        assert len(mappings) > 0
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        # mock_gene_info.tsv: GENE1 has synonyms ALT_SYM1 and ALT_SYM2
+        # synonyms must be subjects; current Symbol must be the object
+        assert "ALT_SYM1" in subject_labels
+        assert "ALT_SYM2" in subject_labels
+        assert "GENE1" in object_labels
+        # the current primary symbol must never appear as a subject_label
+        assert "GENE1" not in subject_labels
 
 
 class TestUniProtParser:

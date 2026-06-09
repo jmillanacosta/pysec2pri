@@ -833,7 +833,7 @@ class LabelMappingSet(Sec2PriMappingSet):
         )
 
         if private:
-            # Flatten dict[label, set[id]] → sorted list of (id, label) pairs
+            # Flatten dict[label, set[id]] : sorted list of (id, label) pairs
             pairs: list[tuple[str, str]] = sorted(
                 (pri_id, label) for label, pri_ids in private.items() for pri_id in pri_ids
             )
@@ -859,8 +859,12 @@ class LabelMappingSet(Sec2PriMappingSet):
     def to_name2synonym(self, output_path: Path | str | None = None) -> pd.DataFrame:
         """Return a name to synonym ``DataFrame``, optionally writing to TSV.
 
-        Columns: ``subject_id``, ``subject_label`` (primary name),
-        ``object_label`` (synonym/previous name).
+        Columns: ``subject_id``, ``subject_label`` (synonym / secondary name),
+        ``object_label`` (primary / canonical name).
+
+        The direction follows the sec:pri convention used throughout the
+        codebase: the secondary (synonym/alternative) term is the subject and
+        the primary (canonical) term is the object.
 
         Args:
             output_path: If given, the DataFrame is also written as a TSV file.
