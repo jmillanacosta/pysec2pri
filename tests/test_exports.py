@@ -68,6 +68,36 @@ def label_mapping_set() -> LabelMappingSet:
     return ms
 
 
+@pytest.fixture
+def prev_label_mapping_set() -> LabelMappingSet:
+    """LabelMappingSet with IAO:0100001 (previous-symbol / deprecation) rows."""
+    mappings = [
+        Mapping(
+            subject_id="HGNC:1",
+            subject_label="PSCP",
+            object_id="HGNC:1",
+            object_label="BRCA1",
+            predicate_id="IAO:0100001",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+        Mapping(
+            subject_id="HGNC:2",
+            subject_label="tumor_p53",
+            object_id="HGNC:2",
+            object_label="TP53",
+            predicate_id="IAO:0100001",
+            mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+        ),
+    ]
+    ms = LabelMappingSet(
+        mapping_set_id="https://example.com/test",
+        license="https://creativecommons.org/publicdomain/zero/1.0/",
+        mappings=mappings,
+    )
+    ms.compute_cardinalities()
+    return ms
+
+
 class TestWriteSec2Pri:
     """Tests for write_sec2pri function."""
 
@@ -110,11 +140,15 @@ class TestWriteName2Synonym:
 class TestWriteSymbol2Prev:
     """Tests for write_symbol2prev function."""
 
-    def test_write_symbol2prev(self, label_mapping_set: LabelMappingSet) -> None:
-        """Test writing symbol2prev mappings to TSV file."""
+    def test_write_symbol2prev(self, prev_label_mapping_set: LabelMappingSet) -> None:
+        """Test writing symbol2prev mappings to TSV file.
+
+        Uses a mapping set with IAO:0100001 rows only; write_symbol2prev
+        must skip hasExactSynonym rows and emit only deprecation rows.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.tsv"
-            result = write_symbol2prev(label_mapping_set, output_path)
+            result = write_symbol2prev(prev_label_mapping_set, output_path)
 
             assert result.exists()
             content = result.read_text()
@@ -123,4 +157,14 @@ class TestWriteSymbol2Prev:
             assert len(lines) == 3
             # header includes mapping_cardinality and uses primary_symbol
             assert "mapping_cardinality" in lines[0]
+            assert "primary_symbol" in lines[0]
+
+    def test_write_symbol2prev_skips_synonyms(self, label_mapping_set: LabelMappingSet) -> None:
+        """write_symbol2prev emits only the header when all rows are hasExactSynonym."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test.tsv"
+            write_symbol2prev(label_mapping_set, output_path)
+            lines = output_path.read_text().strip().split("\n")
+            # Only the header row — no synonym rows should appear
+            assert len(lines) == 1
             assert "primary_symbol" in lines[0]

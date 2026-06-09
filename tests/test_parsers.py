@@ -232,6 +232,47 @@ class TestHGNCParser:
         result = parser.parse_symbols(hgnc_complete_path)
         assert isinstance(result, Sec2PriMappingSet)
 
+    def test_name2synonym_excludes_previous_symbols(self, hgnc_complete_path: Path) -> None:
+        """to_name2synonym must only contain hasExactSynonym rows (alias symbols).
+
+        Previous symbols carry IAO:0100001 and are deprecation mappings, not
+        synonyms.  They must appear in to_symbol_sec2pri but never in
+        to_name2synonym.
+
+        mock_hgnc_complete.tsv:
+          BRCA1  alias: BRCC1, RNF53   prev: PSCP
+          TP53   alias: P53, LFS1      prev: tumor_p53
+          MYC    alias: c-Myc          prev: v-myc
+        """
+        parser = HGNCParser(show_progress=False)
+        result = parser.parse_symbols(hgnc_complete_path)
+
+        df = result.to_name2synonym()
+        synonym_subjects = set(df["subject_label"].tolist())
+        # Aliases (hasExactSynonym) must appear in name2synonym
+        assert "BRCC1" in synonym_subjects
+        assert "RNF53" in synonym_subjects
+        assert "P53" in synonym_subjects
+        assert "LFS1" in synonym_subjects
+        assert "c-Myc" in synonym_subjects
+        # Previous symbols (IAO:0100001) must NOT appear in name2synonym
+        assert "PSCP" not in synonym_subjects
+        assert "tumor_p53" not in synonym_subjects
+        assert "v-myc" not in synonym_subjects
+
+    def test_symbol_sec2pri_contains_previous_symbols(self, hgnc_complete_path: Path) -> None:
+        """to_symbol_sec2pri contains all label mappings including previous symbols."""
+        parser = HGNCParser(show_progress=False)
+        result = parser.parse_symbols(hgnc_complete_path)
+
+        df = result.to_symbol_sec2pri()
+        all_subjects = set(df["subject_label"].tolist())
+        # Both aliases and previous symbols must appear in the full symbol mapping
+        assert "BRCC1" in all_subjects
+        assert "PSCP" in all_subjects
+        assert "tumor_p53" in all_subjects
+        assert "v-myc" in all_subjects
+
 
 class TestNCBIParser:
     """Tests for NCBI parser."""

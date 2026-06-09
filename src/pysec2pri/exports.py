@@ -296,8 +296,9 @@ def write_name2synonym(
 ) -> Path:
     """Write name to synonym mappings to a TSV file.
 
-    Only rows where at least one of ``subject_label`` or ``object_label`` is set are
-    written.  Columns: ``subject_id``, ``subject_label``, ``object_label``.
+    Only ``oboInOwl:hasExactSynonym`` rows are written; deprecation rows
+    (``IAO:0100001``) are excluded because they belong in the
+    ``symbol2prev`` output.  Columns: ``primary_id``, ``name``, ``synonym``.
 
     Args:
         mapping_set: The mapping set to write.
@@ -309,13 +310,15 @@ def write_name2synonym(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # For name2synonym, write primary/secondary label columns as name|synonym
-    # Columns: primary_id, name, synonym
+    # Columns: primary_id (object), name (object_label/primary), synonym (subject_label)
     columns = ["primary_id", "name", "synonym"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
         for m in mapping_set.mappings or []:  # type: ignore[has-type]
+            # Only emit synonym rows; skip deprecation (IAO:0100001) rows
+            if getattr(m, "predicate_id", None) != "oboInOwl:hasExactSynonym":
+                continue
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
@@ -334,11 +337,12 @@ def write_symbol2prev(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write symbol to previous symbol mappings to a TSV file.
+    """Write symbol to previous (deprecated) symbol mappings to a TSV file.
 
-    Only rows where at least one of ``subject_label`` or ``object_label`` is set are
-    written.  Columns: ``subject_id``, ``subject_label``, ``object_label``,
-    ``mapping_cardinality``.
+    Only ``IAO:0100001`` (``"term replaced by"``) rows are written; synonym
+    rows (``oboInOwl:hasExactSynonym``) are excluded because they belong in
+    the ``name2synonym`` output.  Columns: ``primary_id``, ``primary_symbol``,
+    ``previous_symbol``, ``mapping_cardinality``.
 
     Args:
         mapping_set: The mapping set to write.
@@ -350,13 +354,15 @@ def write_symbol2prev(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Symbol previous mappings: primary and previous symbol labels
-    # Columns: primary_id, primary_symbol, previous_symbol, mapping_cardinality
+    # Columns: primary_id (object), primary_symbol (object_label), previous_symbol (subject_label)
     columns = ["primary_id", "primary_symbol", "previous_symbol", "mapping_cardinality"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
         for m in mapping_set.mappings or []:  # type: ignore[has-type]
+            # Only emit deprecation rows; skip synonym (hasExactSynonym) rows
+            if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym":
+                continue
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
