@@ -862,6 +862,10 @@ class LabelMappingSet(Sec2PriMappingSet):
         Columns: ``subject_id``, ``subject_label`` (synonym / secondary name),
         ``object_label`` (primary / canonical name).
 
+        Only ``oboInOwl:hasExactSynonym`` rows are included.  Rows with
+        ``IAO:0100001`` (``"term replaced by"``) are deprecation mappings and
+        belong in the ``symbol_sec2pri`` output, not here.
+
         The direction follows the sec:pri convention used throughout the
         codebase: the secondary (synonym/alternative) term is the subject and
         the primary (canonical) term is the object.
@@ -870,7 +874,7 @@ class LabelMappingSet(Sec2PriMappingSet):
             output_path: If given, the DataFrame is also written as a TSV file.
 
         Returns:
-            :class:`pandas.DataFrame` with label mapping rows.
+            :class:`pandas.DataFrame` with synonym-only label mapping rows.
         """
         import pandas as pd
 
@@ -881,7 +885,8 @@ class LabelMappingSet(Sec2PriMappingSet):
                 "object_label": str(getattr(m, "object_label", "") or ""),
             }
             for m in (self.mappings or [])
-            if getattr(m, "subject_label", None) or getattr(m, "object_label", None)
+            if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym"
+            and (getattr(m, "subject_label", None) or getattr(m, "object_label", None))
         ]
         df = pd.DataFrame(rows, columns=["subject_id", "subject_label", "object_label"])
 

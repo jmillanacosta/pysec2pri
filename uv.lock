@@ -1963,7 +1963,7 @@ wheels = [
 
 [[package]]
 name = "pysec2pri"
-version = "0.0.8"
+version = "0.0.9"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
