@@ -22,7 +22,7 @@
 </p>
 
 Create and use mapping files for secondary (retired/withdrawn) biological
-database identifiers and symbols to primary (current) identifiers and symbols.
+database identifiers and labels to primary (current) identifiers and labels.
 
 Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subjects
 are secondary, objects are primary.
@@ -68,14 +68,14 @@ pysec2pri chebi --help
 The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
 (Simple Standard for Sharing Ontology Mappings) TSV format.
 
-### Updating IDs and symbols
+### Updating IDs and labels
 
-A generated mapping set can be used to update IDs and symbols in Python:
+A generated mapping set can be used to update IDs and labels in Python:
 
 ```python
-from pysec2pri import generate_chebi_synonyms, resolve_symbols
+from pysec2pri import generate_chebi_synonyms, resolve_labels
 cs = generate_chebi_synonyms()
-resolve_symbols(["Glucose", "ATP", "Guanine"], cs)
+resolve_labels(["Glucose", "ATP", "Guanine"], cs)
 ```
 
 Or from the command line, given a TSV file `gene_ex.tsv`:
@@ -94,8 +94,8 @@ pysec2pri update-ids gene_ex.tsv hgnc --at gene -o gene_ex_primary.tsv
 # HGNC:131    3.5     HGNC:145
 ```
 
-The same pattern works for symbols with `update-symbols`, and multiple columns
-can be resolved by repeating `--at`:
+The same pattern works for labels with `update-labels`, and multiple columns can
+be resolved by repeating `--at`:
 
 ```bash
 pysec2pri update-ids data.tsv hgnc --at gene_id --at related_gene_id
@@ -108,7 +108,7 @@ pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
 pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
 ```
 
-Ambiguous mappings (where a deprecated ID or symbol serves as a recommended for
+Ambiguous mappings (where a deprecated ID or label serves as a recommended for
 another entity) are not resolved, but flagged for users to solve them manually.
 If the input file has a column of known aliases or synonyms for each row, pass
 it as a hint to resolve ambiguous names automatically:
@@ -121,7 +121,7 @@ pysec2pri update-ids data.tsv hgnc --at gene_id --synonyms gene_aliases
 A subset with ambiguous mappings only can be generated like:
 
 ```bash
-pysec2pri ambiguous hgnc-symbols
+pysec2pri ambiguous hgnc-labels
 ```
 
 ## Mapping types
@@ -147,13 +147,13 @@ flowchart LR
     C["C (secondary)"] -->|term replaced by| A
 ```
 
-### Symbols
+### Labels
 
-The same 1-to-1 pattern applies to symbol (label) mappings: a previous or alias
-symbol (`subject_label`) maps to the current symbol (`object_label`) of the same
-entity via `IAO:0100001`.
+The same 1-to-1 pattern applies to label (or symbol) mappings: a previous or
+alias label (`subject_label`) maps to the current label (`object_label`) of the
+same entity via `IAO:0100001`.
 
-**Ambiguity** appears when the same symbol is both a `subject_label` (previous
+**Ambiguity** appears when the same label is both a `subject_label` (previous
 name, secondary) and an `object_label` (current name, primary) across different
 mappings.
 
@@ -169,7 +169,7 @@ flowchart LR
     A -->|"oboInOwl:hasExactSynonym"| P
 ```
 
-### Resolving ambiguity with alias hints
+### Resolving ambiguity with alias/synonym hints
 
 When a name is ambiguous, alias mappings are used as evidence. For each
 candidate interpretation the resolver checks whether any user-supplied hint

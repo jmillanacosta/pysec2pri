@@ -20,7 +20,7 @@ from pysec2pri.exports import (
     write_sssom,
 )
 from pysec2pri.exports import (
-    write_symbol2prev as write_symbol_sec2pri,
+    write_label2prev as write_label_sec2pri,
 )
 
 if TYPE_CHECKING:
@@ -42,13 +42,13 @@ __all__ = [
     "generate_chebi_ids",
     "generate_chebi_labels",
     "generate_chebi_primary_ids",
-    "generate_chebi_primary_symbols",
+    "generate_chebi_primary_labels",
     "generate_chebi_synonyms",
     "generate_hgnc",
     "generate_hgnc_ids",
     "generate_hgnc_labels",
+    "generate_hgnc_labels",
     "generate_hgnc_primary_ids",
-    "generate_hgnc_symbols",
     "generate_hmdb",
     "generate_hmdb_ids",
     "generate_hmdb_primary_ids",
@@ -57,32 +57,32 @@ __all__ = [
     "generate_ncbi",
     "generate_ncbi_ids",
     "generate_ncbi_labels",
+    "generate_ncbi_labels",
     "generate_ncbi_primary_ids",
-    "generate_ncbi_primary_symbols",
-    "generate_ncbi_symbols",
+    "generate_ncbi_primary_labels",
     "generate_uniprot",
     "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
     "generate_wikidata",
     "generate_wikidata_ids",
     "generate_wikidata_labels",
-    "generate_wikidata_symbols",
+    "generate_wikidata_labels",
     "list_versions",
     "load_label_mapping",
     "load_mapping",
     "resolve_ids",
-    "resolve_symbols",
+    "resolve_labels",
     "save",
     "write_all_formats",
     "write_diff_output",
     "write_json",
+    "write_label_sec2pri",
     "write_name2synonym",
     "write_output",
     "write_owl",
     "write_rdf",
     "write_sec2pri",
     "write_sssom",
-    "write_symbol_sec2pri",
 ]
 
 
@@ -230,7 +230,7 @@ def generate_hgnc_primary_ids(
     return parser.parse_primary_ids(Path(input_path))
 
 
-def generate_hgnc_primary_symbols(
+def generate_hgnc_primary_labels(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
@@ -238,8 +238,8 @@ def generate_hgnc_primary_symbols(
     """Return a mapping set containing the full list of current HGNC primary Symbols.
 
     Only the HGNC complete set file is downloaded/read.  The returned mapping
-    set has an empty ``mappings`` list; its ``_primary_symbols`` store is
-    populated with every current HGNC Symbol so that ``to_pri_symbols()`` produces
+    set has an empty ``mappings`` list; its ``_primary_labels`` store is
+    populated with every current HGNC Symbol so that ``to_pri_labels()`` produces
     the authoritative complete list, not just the subset of primaries that
     happen to have an associated secondary.
 
@@ -254,16 +254,16 @@ def generate_hgnc_primary_symbols(
         input_path = _auto_download("hgnc", version, keys=["complete"])["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
-    return parser.parse_primary_symbols(Path(input_path))
+    return parser.parse_primary_labels(Path(input_path))
 
 
-def generate_hgnc_symbols(
+def generate_hgnc_labels(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
     statuses: list[str] | None = None,
 ) -> Sec2PriMappingSet:
-    """Return HGNC symbol to previous-symbol mappings.
+    """Return HGNC label to previous-label mappings.
 
     Downloads the complete set file automatically when ``input_path`` is omitted.
 
@@ -279,7 +279,7 @@ def generate_hgnc_symbols(
         input_path = _auto_download("hgnc", version)["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
-    return parser.parse_symbols(Path(input_path), statuses=statuses)
+    return parser.parse_labels(Path(input_path), statuses=statuses)
 
 
 def generate_chebi_primary_ids(
@@ -318,7 +318,7 @@ def generate_chebi_primary_ids(
     return parser.parse_primary_ids(Path(input_path))
 
 
-def generate_chebi_primary_symbols(
+def generate_chebi_primary_labels(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
@@ -327,7 +327,7 @@ def generate_chebi_primary_symbols(
     """Return a mapping set containing the full list of current ChEBI compound names.
 
     Reads ``compounds.tsv`` to extract every current compound's canonical name.
-    The returned mapping set has an empty ``mappings`` list; ``_primary_symbols``
+    The returned mapping set has an empty ``mappings`` list; ``_primary_labels``
     is populated.
 
     Args:
@@ -351,7 +351,7 @@ def generate_chebi_primary_symbols(
         input_path = tmpdir
 
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
-    return parser.parse_primary_symbols(Path(input_path))
+    return parser.parse_primary_labels(Path(input_path))
 
 
 def generate_ncbi_primary_ids(
@@ -381,17 +381,17 @@ def generate_ncbi_primary_ids(
     return parser.parse_primary_ids(Path(input_path), tax_id=tax_id)
 
 
-def generate_ncbi_primary_symbols(
+def generate_ncbi_primary_labels(
     input_path: Path | str | None = None,
     tax_id: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
-    """Return a mapping set containing the full list of current NCBI Gene symbols.
+    """Return a mapping set containing the full list of current NCBI Gene labels.
 
-    Reads ``gene_info`` to extract every current gene symbol for the given
+    Reads ``gene_info`` to extract every current gene label for the given
     taxonomy.  The returned mapping set has an empty ``mappings`` list;
-    ``_primary_symbols`` is populated.
+    ``_primary_labels`` is populated.
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
@@ -405,7 +405,7 @@ def generate_ncbi_primary_symbols(
         input_path = _auto_download("ncbi", version, keys=["gene_info"])["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
-    return parser.parse_primary_symbols(Path(input_path), tax_id=tax_id)
+    return parser.parse_primary_labels(Path(input_path), tax_id=tax_id)
 
 
 def generate_hmdb_primary_ids(
@@ -511,13 +511,13 @@ def generate_ncbi(
     return parser.parse(Path(input_path), tax_id=tax_id, gene_info_path=Path(gene_info_path))
 
 
-def generate_ncbi_symbols(
+def generate_ncbi_labels(
     input_path: Path | str | None = None,
     tax_id: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
-    """Return NCBI Gene symbol to previous-symbol mappings.
+    """Return NCBI Gene label to previous-label mappings.
 
     Downloads the gene_info file automatically when ``input_path`` is omitted.
 
@@ -533,7 +533,7 @@ def generate_ncbi_symbols(
         input_path = _auto_download("ncbi", version)["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
-    return parser.parse_symbols(Path(input_path), tax_id=tax_id)
+    return parser.parse_labels(Path(input_path), tax_id=tax_id)
 
 
 def generate_uniprot(
@@ -656,7 +656,7 @@ def generate_wikidata(
     return parser.parse()
 
 
-def generate_wikidata_symbols(
+def generate_wikidata_labels(
     input_path: Path | str | None = None,
     entity_type: str | None = None,
     version: str | None = None,
@@ -695,7 +695,7 @@ def generate_wikidata_symbols(
             endpoint=endpoint,
             test_subset=test_subset,
         )
-        sets.append(parser.parse_symbols(Path(input_path) if input_path else None))
+        sets.append(parser.parse_labels(Path(input_path) if input_path else None))
 
     if len(sets) == 1:
         return sets[0]
@@ -769,7 +769,7 @@ def save(
     Args:
         mapping_set: The mapping set to write.
         output_format: One of ``sssom``, ``sec2pri``, ``pri_ids``,
-            ``name2synonym``, ``symbol_sec2pri``, ``pri_symbols``,
+            ``name2synonym``, ``label_sec2pri``, ``pri_labels``,
             ``rdf``, ``json``, ``owl``, or ``all``.
         output: Explicit output path or directory.  When ``None``, a
             default name derived from *base_name* is used.
@@ -824,7 +824,7 @@ def write_all_formats(
         write_pri_ids(mapping_set, output_dir / f"{base_name}_pri_ids.txt")
 
     if isinstance(mapping_set, LabelMappingSet):
-        write_symbol_sec2pri(mapping_set, output_dir / f"{base_name}_symbol_sec2pri.tsv")
+        write_label_sec2pri(mapping_set, output_dir / f"{base_name}_label_sec2pri.tsv")
         if include_name2synonym:
             write_name2synonym(mapping_set, output_dir / f"{base_name}_name2synonym.tsv")
 
@@ -932,12 +932,12 @@ def load_mapping(path: Path | str) -> IdMappingSet:
 
 
 def load_label_mapping(path: Path | str) -> LabelMappingSet:
-    """Load a label/symbol mapping set from a pysec2pri TSV file.
+    """Load a label/label mapping set from a pysec2pri TSV file.
 
     Accepts two column-name conventions:
 
-    - **New** (``symbol_sec2pri`` tabular output): ``secondary_id``,
-      ``secondary_symbol``, ``primary_id``, ``primary_symbol``,
+    - **New** (``label_sec2pri`` tabular output): ``secondary_id``,
+      ``secondary_label``, ``primary_id``, ``primary_label``,
       ``predicate_id``, ``mapping_cardinality``.
     - **Legacy** (SSSOM or old tabular output): ``subject_id``,
       ``subject_label``, ``object_id``, ``object_label``, ``predicate_id``.
@@ -949,7 +949,7 @@ def load_label_mapping(path: Path | str) -> LabelMappingSet:
 
     Returns:
         A :class:`~pysec2pri.parsers.base.LabelMappingSet` populated from
-        the file, ready to pass to :func:`resolve_symbols`.
+        the file, ready to pass to :func:`resolve_labels`.
     """
     import pandas as pd
     from sssom_schema import Mapping
@@ -972,9 +972,9 @@ def load_label_mapping(path: Path | str) -> LabelMappingSet:
     for _, row in df.iterrows():
         m = Mapping(
             subject_id=_col(row, "secondary_id", "subject_id") or "",
-            subject_label=_col(row, "secondary_symbol", "subject_label"),
+            subject_label=_col(row, "secondary_label", "subject_label"),
             object_id=_col(row, "primary_id", "object_id") or "",
-            object_label=_col(row, "primary_symbol", "object_label"),
+            object_label=_col(row, "primary_label", "object_label"),
             predicate_id=_col(row, "predicate_id") or "",
             mapping_justification=_col(row, "mapping_justification")
             or "semapv:BackgroundKnowledgeBasedMatching",
@@ -1073,7 +1073,7 @@ def resolve_ids(
     return result
 
 
-def resolve_symbols(
+def resolve_labels(
     input_path: Path | str | list[str],
     mapping_set: Sec2PriMappingSet,
     at: str | list[str] | None = None,
@@ -1083,26 +1083,26 @@ def resolve_symbols(
     sep: str | None = None,
     synonyms: str | None = None,
 ) -> pd.DataFrame | str | list[str]:
-    r"""Resolve previous/alias symbols to current symbols.
+    r"""Resolve previous/alias labels to current labels.
 
-    Direct lookup: when *input_path* is a plain symbol string or a list
-    of symbol strings (i.e. not a path to an existing file), the function
-    returns the resolved current symbol(s).  *at*, *output_path*, *suffix*,
+    Direct lookup: when *input_path* is a plain label string or a list
+    of label strings (i.e. not a path to an existing file), the function
+    returns the resolved current label(s).  *at*, *output_path*, *suffix*,
     and *sep* are ignored in this mode::
 
-        resolve_symbols("Ibuprofen", chebi_ms)  # -> "ibuprofen"
-        resolve_symbols(["Ibuprofen", "Glucose"], chebi_ms)  # -> ["...", "..."]
+        resolve_labels("Ibuprofen", chebi_ms)  # -> "ibuprofen"
+        resolve_labels(["Ibuprofen", "Glucose"], chebi_ms)  # -> ["...", "..."]
 
     DataFrame mode: when *input_path* points to an existing TSV/CSV
     file, *at* is required.  For each column named in *at* a new
     column ``<col><suffix>`` is appended containing the resolved current
-    symbols.  Symbols not present in *mapping_set* are kept unchanged.
+    labels.  Symbols not present in *mapping_set* are kept unchanged.
 
     Args:
-        input_path: A symbol string, a list of symbol strings, or the path
+        input_path: A label string, a list of label strings, or the path
             to a TSV/CSV file.
         mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`
-            (e.g. the result of ``generate_hgnc_symbols()``).
+            (e.g. the result of ``generate_hgnc_labels()``).
         at: Column name(s) to resolve.  Required in DataFrame mode;
             ignored in direct-lookup mode.
         output_path: If given, the resulting DataFrame is written to this
@@ -1113,36 +1113,36 @@ def resolve_symbols(
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
 
     Returns:
-        A resolved symbol string, a list of resolved strings (direct-lookup
+        A resolved label string, a list of resolved strings (direct-lookup
         mode), or a :class:`pandas.DataFrame` with one additional column per
         entry in *at* (DataFrame mode).
     """
     import pandas as pd
 
-    from pysec2pri.update_ids import build_symbol_lookup, update_symbols
+    from pysec2pri.update_ids import build_label_lookup, update_labels
 
     # list direct-lookup mode
     if isinstance(input_path, list):
-        lkp = build_symbol_lookup(mapping_set)
+        lkp = build_label_lookup(mapping_set)
         return [lkp.get(v, v) for v in input_path]
 
     # single-value direct-lookup mode
     input_path_obj = Path(input_path)
     if not input_path_obj.exists():
-        lkp = build_symbol_lookup(mapping_set)
+        lkp = build_label_lookup(mapping_set)
         return lkp.get(str(input_path), str(input_path))
 
     # DataFrame mode
     if at is None:
-        raise TypeError("resolve_symbols() requires 'at' when input_path is a file")
+        raise TypeError("resolve_labels() requires 'at' when input_path is a file")
 
     if sep is None:
         sep = "\t" if input_path_obj.suffix.lower() == ".tsv" else ","
 
     df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
-    lkp = build_symbol_lookup(mapping_set)
+    lkp = build_label_lookup(mapping_set)
     result = pd.DataFrame(
-        update_symbols(df, mapping_set, at=at, suffix=suffix, lookup=lkp, synonyms=synonyms)
+        update_labels(df, mapping_set, at=at, suffix=suffix, lookup=lkp, synonyms=synonyms)
     )
 
     if output_path is not None:
@@ -1212,11 +1212,11 @@ def find_ambiguous(
 generate_chebi_ids = generate_chebi
 generate_chebi_labels = generate_chebi_synonyms
 generate_hgnc_ids = generate_hgnc
-generate_hgnc_labels = generate_hgnc_symbols
+generate_hgnc_labels = generate_hgnc_labels
 generate_ncbi_ids = generate_ncbi
-generate_ncbi_labels = generate_ncbi_symbols
+generate_ncbi_labels = generate_ncbi_labels
 generate_hmdb_ids = generate_hmdb
 generate_hmdb_proteins_ids = generate_hmdb_proteins
 generate_uniprot_ids = generate_uniprot
 generate_wikidata_ids = generate_wikidata
-generate_wikidata_labels = generate_wikidata_symbols
+generate_wikidata_labels = generate_wikidata_labels

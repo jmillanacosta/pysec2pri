@@ -269,12 +269,12 @@ class WikidataParser(BaseParser):
 
         return self._create_mapping_set(mappings, version)
 
-    def parse_symbols(self, input_path: Path | str | None = None) -> LabelMappingSet:
+    def parse_labels(self, input_path: Path | str | None = None) -> LabelMappingSet:
         """Return a LabelMappingSet of previous-label  to current-label mappings.
 
         Queries the SPARQL endpoint (or reads *input_path*) exactly like
         :meth:`parse`, but wraps the result in a :class:`LabelMappingSet`
-        so label-specific exports (``symbol_sec2pri``, ``pri_symbols``) work.
+        so label-specific exports (``label_sec2pri``, ``pri_labels``) work.
 
         Args:
             input_path: Pre-downloaded TSV file. Queries SPARQL if ``None``.

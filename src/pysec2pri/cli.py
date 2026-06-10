@@ -91,9 +91,9 @@ def _emit(ms: object, fmt: str, output: Path | None, base: str) -> None:
     elif fmt == "pri_ids":
         n = len(getattr(ms, "_primary_ids", None) or set())
         click.echo(f"Wrote {n} primary IDs -> {path}")
-    elif fmt == "pri_symbols":
-        n = len(getattr(ms, "_primary_symbols", None) or set())
-        click.echo(f"Wrote {n} primary symbols -> {path}")
+    elif fmt == "pri_labels":
+        n = len(getattr(ms, "_primary_labels", None) or set())
+        click.echo(f"Wrote {n} primary labels -> {path}")
     else:
         n = len(getattr(ms, "mappings", None) or [])
         click.echo(f"Wrote {n} mappings -> {path}")
@@ -113,7 +113,7 @@ def _resolve_and_print(
     """Read *input_file* and resolve each (column, synonym_col) pair."""
     import pandas as pd
 
-    from pysec2pri.update_ids import update_ids, update_symbols
+    from pysec2pri.update_ids import update_ids, update_labels
 
     inferred_sep = "\t" if input_file.suffix.lower() == ".tsv" else ","
     read_sep = sep if sep is not None else inferred_sep
@@ -129,7 +129,7 @@ def _resolve_and_print(
                 result, ms, at=col, suffix=suffix, synonyms=syn_col, label_mapping_set=label_ms
             )
             if mode == "ids"
-            else update_symbols(result, ms, at=col, suffix=suffix, synonyms=syn_col)
+            else update_labels(result, ms, at=col, suffix=suffix, synonyms=syn_col)
         )
         for new_col in partial.columns:
             if new_col not in result.columns:
@@ -467,7 +467,7 @@ _LABEL_GENERATORS_FOR_IDS: dict[str, str] = {
     "synonyms_mapping_file",
     type=ExistingPathType,
     default=None,
-    help="Pre-built label/symbol mapping file for alias resolution.",
+    help="Pre-built label/label mapping file for alias resolution.",
 )
 @_opt_version
 @_opt_no_progress
@@ -489,7 +489,7 @@ def update_ids_cmd(
     Examples::
 
         pysec2pri update-ids genes.tsv hgnc --at gene_id -o out.tsv
-        pysec2pri update-ids genes.tsv hgnc --at gene_id --synonyms symbol
+        pysec2pri update-ids genes.tsv hgnc --at gene_id --synonyms label
     """
     from pysec2pri.api import load_label_mapping, load_mapping
 
@@ -537,7 +537,7 @@ def update_ids_cmd(
     )
 
 
-# update-symbols
+# update-labels
 
 _LABELS_DATASOURCES = sorted(cfg for cfg, kind in _build_registry() if kind == "labels")
 _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
@@ -546,7 +546,7 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
 }
 
 
-@main.command("update-symbols")
+@main.command("update-labels")
 @click.argument("input_file", type=ExistingPathType)
 @click.argument("datasource", type=click.Choice(_LABELS_DATASOURCES))
 @click.option(
@@ -565,7 +565,7 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
     "mapping_file",
     type=ExistingPathType,
     default=None,
-    help="Pre-built symbol2prev TSV file (skips download).",
+    help="Pre-built label2prev TSV file (skips download).",
 )
 @click.option(
     "--synonyms",
@@ -587,7 +587,7 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
 @_opt_subset
 @_opt_version
 @_opt_no_progress
-def update_symbols_cmd(
+def update_labels_cmd(
     input_file: Path,
     datasource: str,
     columns: tuple[str, ...],
@@ -607,8 +607,8 @@ def update_symbols_cmd(
 
     Examples::
 
-        pysec2pri update-symbols genes.tsv hgnc --at symbol -o out.tsv
-        pysec2pri update-symbols genes.tsv hgnc --at symbol --mapping labels.tsv
+        pysec2pri update-labels genes.tsv hgnc --at label -o out.tsv
+        pysec2pri update-labels genes.tsv hgnc --at label --mapping labels.tsv
     """
     from pysec2pri.api import (
         generate_chebi_labels,
@@ -668,7 +668,7 @@ def update_symbols_cmd(
         suffix,
         sep,
         label_ms,
-        mode="symbols",
+        mode="labels",
     )
 
 

@@ -175,9 +175,9 @@ class ChEBIParser(BaseParser):
 
         mappings = self._build_label_mappings(raw_mappings)
         ms = self._create_mapping_set(mappings, mapping_type="label")
-        # Populate primary symbols when compound data is available
+        # Populate primary labels when compound data is available
         if cpd_path is not None and cpd_path.exists():
-            object.__setattr__(ms, "_primary_symbols", self._extract_primary_symbols(cpd_path))
+            object.__setattr__(ms, "_primary_labels", self._extract_primary_labels(cpd_path))
         return ms
 
     def parse_primary_ids(
@@ -215,7 +215,7 @@ class ChEBIParser(BaseParser):
         object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(cpd_path))
         return ms
 
-    def parse_primary_symbols(
+    def parse_primary_labels(
         self,
         input_path: Path | str | None = None,
         *,
@@ -225,7 +225,7 @@ class ChEBIParser(BaseParser):
 
         Reads ``compounds.tsv`` to extract every current compound's canonical
         name.  The returned mapping set has an empty ``mappings`` list; its
-        ``_primary_symbols`` store is populated.
+        ``_primary_labels`` store is populated.
 
         Args:
             input_path: Path to a directory containing ``compounds.tsv``, or
@@ -234,7 +234,7 @@ class ChEBIParser(BaseParser):
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with no mappings
-            and ``_primary_symbols`` populated.
+            and ``_primary_labels`` populated.
         """
         cpd_path = self._resolve_compounds_path(input_path, compounds_path)
         if cpd_path is None or not cpd_path.exists():
@@ -244,7 +244,7 @@ class ChEBIParser(BaseParser):
             )
         self._resolve_version(cpd_path)
         ms = self._create_mapping_set([], mapping_type="label")
-        object.__setattr__(ms, "_primary_symbols", self._extract_primary_symbols(cpd_path))
+        object.__setattr__(ms, "_primary_labels", self._extract_primary_labels(cpd_path))
         return ms
 
     # Internal helpers
@@ -363,7 +363,7 @@ class ChEBIParser(BaseParser):
             df = df.filter(pl.col("stars") == 3)
         return {f"CHEBI:{v}" for v in df["id"].drop_nulls().to_list()}
 
-    def _extract_primary_symbols(self, compounds_path: Path) -> dict[str, set[str]]:
+    def _extract_primary_labels(self, compounds_path: Path) -> dict[str, set[str]]:
         """Extract all current ChEBI compound names from compounds.tsv.
 
         Returns a ``dict`` mapping each name to the set of primary

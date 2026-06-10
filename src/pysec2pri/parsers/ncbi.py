@@ -86,12 +86,12 @@ class NCBIParser(BaseParser):
 
         return mapping_set
 
-    def parse_symbols(
+    def parse_labels(
         self,
         gene_info_path: Path | str | None,
         tax_id: str = "9606",
     ) -> Sec2PriMappingSet:
-        """Parse NCBI gene_info file for symbol (label) mappings.
+        """Parse NCBI gene_info file for label (label) mappings.
 
         Args:
             gene_info_path: Path to gene_info file.
@@ -112,7 +112,7 @@ class NCBIParser(BaseParser):
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
         # Populate full primary symbol set from the same file
         object.__setattr__(
-            mapping_set, "_primary_symbols", self._extract_primary_symbols(gene_info_path, tax_id)
+            mapping_set, "_primary_labels", self._extract_primary_labels(gene_info_path, tax_id)
         )
         object.__setattr__(
             mapping_set, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id)
@@ -146,16 +146,16 @@ class NCBIParser(BaseParser):
         object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id))
         return ms
 
-    def parse_primary_symbols(
+    def parse_primary_labels(
         self,
         gene_info_path: Path | str | None,
         tax_id: str = "9606",
     ) -> Sec2PriMappingSet:
-        """Return a mapping set containing the full list of current NCBI Gene symbols.
+        """Return a mapping set containing the full list of current NCBI Gene labels.
 
-        Reads ``gene_info`` to extract every current gene symbol for the given
+        Reads ``gene_info`` to extract every current gene label for the given
         taxonomy.  The returned mapping set has an empty ``mappings`` list;
-        ``_primary_symbols`` is populated.
+        ``_primary_labels`` is populated.
 
         Args:
             gene_info_path: Path to the gene_info file (can be .gz compressed).
@@ -163,7 +163,7 @@ class NCBIParser(BaseParser):
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with
-            ``_primary_symbols`` populated.
+            ``_primary_labels`` populated.
         """
         if gene_info_path is None:
             raise ValueError("gene_info_path must not be None")
@@ -171,7 +171,7 @@ class NCBIParser(BaseParser):
         self._resolve_version(gene_info_path)
         ms = self._create_mapping_set([], mapping_type="label")
         object.__setattr__(
-            ms, "_primary_symbols", self._extract_primary_symbols(gene_info_path, tax_id)
+            ms, "_primary_labels", self._extract_primary_labels(gene_info_path, tax_id)
         )
         return ms
 
@@ -192,7 +192,7 @@ class NCBIParser(BaseParser):
             Tuple of (IdMappingSet, LabelMappingSet).
         """
         id_mappings = self.parse(gene_history_path, tax_id, gene_info_path=gene_info_path)
-        label_mappings = self.parse_symbols(gene_info_path, tax_id)
+        label_mappings = self.parse_labels(gene_info_path, tax_id)
         return id_mappings, label_mappings
 
     def _parse_gene_history(
@@ -236,7 +236,7 @@ class NCBIParser(BaseParser):
         for row in df.iter_rows(named=True):
             subject_id = str(row.get("GeneID") or "")
             object_id = str(row.get("Discontinued_GeneID") or "")
-            sec_symbol = row.get("Discontinued_Symbol")
+            sec_label = row.get("Discontinued_Symbol")
             disc_date = row.get("Discontinue_Date")
 
             if not object_id:
@@ -249,7 +249,7 @@ class NCBIParser(BaseParser):
                     {
                         "subject_id": f"NCBIGene:{object_id}",
                         "object_id": WITHDRAWN_ENTRY,
-                        "subject_label": str(sec_symbol) if sec_symbol else "",
+                        "subject_label": str(sec_label) if sec_label else "",
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
@@ -260,7 +260,7 @@ class NCBIParser(BaseParser):
                     {
                         "subject_id": f"NCBIGene:{object_id}",
                         "object_id": f"NCBIGene:{subject_id}",
-                        "subject_label": str(sec_symbol) if sec_symbol else "",
+                        "subject_label": str(sec_label) if sec_label else "",
                         "predicate_id": m_meta["predicate_id"],
                         "predicate_label": m_meta.get("predicate_label"),
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,
@@ -311,13 +311,13 @@ class NCBIParser(BaseParser):
         rows_data: list[dict[str, str | None]] = []
         for row in df.iter_rows(named=True):
             gene_id = str(row.get("GeneID") or "")
-            pri_symbol = row.get("Symbol")
+            pri_label = row.get("Symbol")
             synonyms = row.get("Synonyms")
 
-            if not gene_id or not pri_symbol:
+            if not gene_id or not pri_label:
                 continue
 
-            pri_symbol_str = str(pri_symbol)
+            pri_label_str = str(pri_label)
             curie_id = f"NCBIGene:{gene_id}"
 
             if synonyms:
@@ -329,7 +329,7 @@ class NCBIParser(BaseParser):
                                 "subject_id": curie_id,
                                 "subject_label": syn,  # synonym = secondary : subject
                                 "object_id": curie_id,
-                                "object_label": pri_symbol_str,  # current symbol = primary : object
+                                "object_label": pri_label_str,  # current label = primary : object
                                 "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
                             }
@@ -370,7 +370,7 @@ class NCBIParser(BaseParser):
         )
         return {f"NCBIGene:{v}" for v in df["GeneID"].drop_nulls().cast(pl.Utf8).to_list()}
 
-    def _extract_primary_symbols(self, file_path: Path, tax_id: str) -> dict[str, set[str]]:
+    def _extract_primary_labels(self, file_path: Path, tax_id: str) -> dict[str, set[str]]:
         """Extract all current gene symbols from gene_info for a given taxonomy.
 
         Returns a ``dict`` mapping each symbol text to the set of primary
@@ -381,7 +381,7 @@ class NCBIParser(BaseParser):
             tax_id: Taxonomy ID string (e.g. ``"9606"``).
 
         Returns:
-            ``dict[symbol, set[NCBIGene:<id>]]``
+            ``dict[label, set[NCBIGene:<id>]]``
         """
         df = (
             pl.scan_csv(
@@ -395,8 +395,8 @@ class NCBIParser(BaseParser):
             .collect()
         )
         result: dict[str, set[str]] = {}
-        for gene_id, symbol in df.drop_nulls().rows():
-            result.setdefault(str(symbol), set()).add(f"NCBIGene:{gene_id}")
+        for gene_id, label in df.drop_nulls().rows():
+            result.setdefault(str(label), set()).add(f"NCBIGene:{gene_id}")
         return result
 
 

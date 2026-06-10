@@ -2,7 +2,7 @@
 
 This parser extracts:
 1. ID-to-ID mappings: withdrawn/merged HGNC IDs -> current HGNC IDs
-2. Label-to-label mappings: previous/alias symbols -> current symbols
+2. Label-to-label mappings: previous/alias labels -> current labels
 
 Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
@@ -84,7 +84,7 @@ class HGNCParser(BaseParser):
         Args:
             input_path: Path to the withdrawn HGNC TSV file.
             complete_set_path: Optional path to the HGNC complete set TSV.
-                When supplied, ``all_primary_ids|symbols`` on the returned mapping set
+                When supplied, ``all_primary_ids|labels`` on the returned mapping set
                 is populated with every current HGNC ID, not just those that
                 appear as ``object_id`` in a withdrawn to primary mapping.
 
@@ -111,22 +111,22 @@ class HGNCParser(BaseParser):
             )
         return mapping_set
 
-    def parse_primary_symbols(
+    def parse_primary_labels(
         self,
         complete_set_path: Path | str | None,
     ) -> Sec2PriMappingSet:
         """Return a mapping set whose only content is the full primary Symbol list.
 
         Reads the HGNC complete set to extract every current HGNC Symbol and
-        stores it in ``_primary_symbols``.  The ``mappings`` list is intentionally
-        left empty, this mapping set exists only to drive ``to_pri_symbols()``.
+        stores it in ``_primary_labels``.  The ``mappings`` list is intentionally
+        left empty, this mapping set exists only to drive ``to_pri_labels()``.
 
         Args:
             complete_set_path: Path to the HGNC complete set TSV file.
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with no mappings and
-            ``_primary_symbols`` populated with all current HGNC symbols.
+            ``_primary_labels`` populated with all current HGNC labels.
         """
         if complete_set_path is None:
             raise ValueError("complete_set_path must not be None")
@@ -134,10 +134,10 @@ class HGNCParser(BaseParser):
         self._resolve_version(complete_set_path)
 
         mapping_set = self._create_mapping_set([], mapping_type="label")
-        complete_pri_sym = self._extract_primary_symbols(complete_set_path)
+        complete_pri_sym = self._extract_primary_labels(complete_set_path)
         object.__setattr__(
             mapping_set,
-            "_primary_symbols",
+            "_primary_labels",
             complete_pri_sym,
         )
         return mapping_set
@@ -172,7 +172,7 @@ class HGNCParser(BaseParser):
         )
         return mapping_set
 
-    def parse_symbols(
+    def parse_labels(
         self,
         complete_set_path: Path | str | None,
         statuses: list[str] | None = None,
@@ -200,8 +200,8 @@ class HGNCParser(BaseParser):
         # Set of all primary symbols
         object.__setattr__(
             mapping_set,
-            "_primary_symbols",
-            self._extract_primary_symbols(Path(complete_set_path)),
+            "_primary_labels",
+            self._extract_primary_labels(Path(complete_set_path)),
         )
         return mapping_set
 
@@ -220,7 +220,7 @@ class HGNCParser(BaseParser):
             Tuple of (IdMappingSet, LabelMappingSet).
         """
         id_mappings = self.parse(withdrawn_path)
-        label_mappings = self.parse_symbols(complete_set_path)
+        label_mappings = self.parse_labels(complete_set_path)
         return id_mappings, label_mappings
 
     def _extract_primary_ids(self, file_path: Path) -> set[str]:
@@ -243,7 +243,7 @@ class HGNCParser(BaseParser):
             raise ValueError(f"Could not find hgnc_id column in {file_path}")
         return {str(val) for val in df[hgnc_id_col].drop_nulls().to_list()}
 
-    def _extract_primary_symbols(self, file_path: Path) -> dict[str, set[str]]:
+    def _extract_primary_labels(self, file_path: Path) -> dict[str, set[str]]:
         """Extract all current HGNC Symbols from the complete set file.
 
         Returns a ``dict`` mapping each symbol text to the set of primary HGNC
@@ -253,7 +253,7 @@ class HGNCParser(BaseParser):
             file_path: Path to the HGNC complete set TSV file.
 
         Returns:
-            ``dict[symbol, set[hgnc_id]]``
+            ``dict[label, set[hgnc_id]]``
         """
         df = pl.read_csv(
             file_path,
@@ -261,18 +261,18 @@ class HGNCParser(BaseParser):
             infer_schema_length=10000,
             null_values=[""],
         )
-        hgnc_sym_col = self._find_column(df.columns, "symbol")
+        hgnc_sym_col = self._find_column(df.columns, SYMBOL)
         hgnc_id_col = self._find_column(df.columns, HGNC_ID)
         if hgnc_sym_col is None:
             raise ValueError(f"Could not find hgnc_symbol column in {file_path}")
         result: dict[str, set[str]] = {}
-        for id_, symbol in (
+        for id_, label in (
             df.filter(pl.col("status") == "Approved")
             .select([hgnc_id_col, hgnc_sym_col])
             .drop_nulls()
             .rows()
         ):
-            result.setdefault(str(symbol), set()).add(str(id_))
+            result.setdefault(str(label), set()).add(str(id_))
         return result
 
     def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
@@ -300,7 +300,7 @@ class HGNCParser(BaseParser):
             raise ValueError(f"Could not find hgnc_id column in {file_path}")
 
         status_col = self._find_column(df.columns, STATUS)
-        symbol_col = self._find_column(df.columns, SYMBOL)
+        label_col = self._find_column(df.columns, SYMBOL)
 
         m_meta = self.get_mapping_metadata()
         fixed = {
@@ -319,7 +319,7 @@ class HGNCParser(BaseParser):
 
             merged_info = row.get(merged_col)
             status = row.get(status_col) if status_col else None
-            symbol = row.get(symbol_col) if symbol_col else None
+            label = row.get(label_col) if label_col else None
 
             # Case 1: Withdrawn with no replacement
             if not merged_info and status and "Entry Withdrawn" in str(status):
@@ -327,7 +327,7 @@ class HGNCParser(BaseParser):
                     {
                         "subject_id": hgnc_id,
                         "object_id": WITHDRAWN_ENTRY,
-                        "subject_label": symbol or "",
+                        "subject_label": label or "",
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
@@ -339,13 +339,13 @@ class HGNCParser(BaseParser):
             if merged_info:
                 parsed = self._parse_merged_info(merged_info)
                 if parsed:
-                    target_id, target_symbol = parsed
+                    target_id, target_label = parsed
                     rows_data.append(
                         {
                             "subject_id": hgnc_id,
                             "object_id": target_id,
-                            "subject_label": symbol or "",
-                            "object_label": target_symbol or "",
+                            "subject_label": label or "",
+                            "object_label": target_label or "",
                             "predicate_id": m_meta["predicate_id"],
                             "predicate_label": m_meta.get("predicate_label"),
                         }
@@ -366,7 +366,7 @@ class HGNCParser(BaseParser):
                 If ``None`` (default), all entries are included.
 
         Returns:
-            List of SSSOM Mapping objects for symbol mappings.
+            List of SSSOM Mapping objects for label mappings.
         """
         df = pl.read_csv(
             file_path,
@@ -377,14 +377,14 @@ class HGNCParser(BaseParser):
 
         status_col = self._find_column(df.columns, STATUS)
         hgnc_id_col = self._find_column(df.columns, HGNC_ID)
-        symbol_col = self._find_column(df.columns, SYMBOL)
+        label_col = self._find_column(df.columns, SYMBOL)
         alias_col = self._find_column(df.columns, ALIAS_SYMBOL)
         prev_col = self._find_column(df.columns, PREV_SYMBOL)
 
-        if not all([status_col, hgnc_id_col, symbol_col]):
+        if not all([status_col, hgnc_id_col, label_col]):
             raise ValueError(f"Missing required columns in {file_path}")
         assert hgnc_id_col is not None
-        assert symbol_col is not None
+        assert label_col is not None
 
         # Optionally filter by status
         if statuses is not None and status_col:
@@ -404,14 +404,14 @@ class HGNCParser(BaseParser):
         rows_data: list[dict[str, str | None]] = []
         for row in df_approved.iter_rows(named=True):
             hgnc_id = row.get(hgnc_id_col)
-            symbol = row.get(symbol_col)
-            if not hgnc_id or not symbol:
+            label = row.get(label_col)
+            if not hgnc_id or not label:
                 continue
 
             alias_str = row.get(alias_col) if alias_col else None
             prev_str = row.get(prev_col) if prev_col else None
-            aliases = self._split_symbols(symbols_str=alias_str) if alias_str else []
-            prev_symbols = self._split_symbols(symbols_str=prev_str) if prev_str else []
+            aliases = self._split_labels(labels_str=alias_str) if alias_str else []
+            prev_labels = self._split_labels(labels_str=prev_str) if prev_str else []
 
             for alias in aliases:
                 rows_data.append(
@@ -419,19 +419,19 @@ class HGNCParser(BaseParser):
                         "subject_id": hgnc_id,
                         "subject_label": alias,
                         "object_id": hgnc_id,
-                        "object_label": symbol,
+                        "object_label": label,
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
                     }
                 )
 
-            for prev in prev_symbols:
+            for prev in prev_labels:
                 rows_data.append(
                     {
                         "subject_id": hgnc_id,
                         "subject_label": prev,
                         "object_id": hgnc_id,
-                        "object_label": symbol,
+                        "object_label": label,
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
                     }

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 __all__ = [
     "WRITERS",
     "write_json",
+    "write_label2prev",
     "write_name2synonym",
     "write_output",
     "write_owl",
@@ -22,7 +23,6 @@ __all__ = [
     "write_sec2pri",
     "write_secondary",
     "write_sssom",
-    "write_symbol2prev",
 ]
 
 
@@ -221,11 +221,11 @@ def write_pri_ids(
     return output_path
 
 
-def write_pri_symbols(
+def write_pri_labels(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write unique primary symbols to a text file, one per line.
+    """Write unique primary labels to a text file, one per line.
 
     Args:
         mapping_set: The mapping set to read primary IDs from.
@@ -238,7 +238,7 @@ def write_pri_symbols(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Use the authoritative set when available (never appears in other outputs)
-    all_sym: set[str] = getattr(mapping_set, "_primary_symbols", set()) or set()
+    all_sym: set[str] = getattr(mapping_set, "_primary_labels", set()) or set()
 
     if not all_sym:
         # Fall back to extracting from mappings
@@ -298,7 +298,7 @@ def write_name2synonym(
 
     Only ``oboInOwl:hasExactSynonym`` rows are written; deprecation rows
     (``IAO:0100001``) are excluded because they belong in the
-    ``symbol2prev`` output.  Columns: ``primary_id``, ``name``, ``synonym``.
+    ``label2prev`` output.  Columns: ``primary_id``, ``name``, ``synonym``.
 
     Args:
         mapping_set: The mapping set to write.
@@ -333,20 +333,20 @@ def write_name2synonym(
     return output_path
 
 
-def write_symbol2prev(
+def write_label2prev(
     mapping_set: Sec2PriMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write symbol to previous (deprecated) symbol mappings to a TSV file.
+    """Write label to previous (deprecated) label mappings to a TSV file.
 
     Only ``IAO:0100001`` (``"term replaced by"``) rows are written; synonym
     rows (``oboInOwl:hasExactSynonym``) are excluded because they belong in
-    the ``name2synonym`` output.  Columns: ``primary_id``, ``primary_symbol``,
-    ``previous_symbol``, ``mapping_cardinality``.
+    the ``name2synonym`` output.  Columns: ``primary_id``, ``primary_label``,
+    ``previous_label``, ``mapping_cardinality``.
 
     Args:
         mapping_set: The mapping set to write.
-        output_path: Destination file path (e.g. ``symbol2prev.tsv``).
+        output_path: Destination file path (e.g. ``label2prev.tsv``).
 
     Returns:
         Path to the written file.
@@ -354,8 +354,8 @@ def write_symbol2prev(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Columns: primary_id (object), primary_symbol (object_label), previous_symbol (subject_label)
-    columns = ["primary_id", "primary_symbol", "previous_symbol", "mapping_cardinality"]
+    # Columns: primary_id (object), primary_label (object_label), previous_label (subject_label)
+    columns = ["primary_id", "primary_label", "previous_label", "mapping_cardinality"]
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
@@ -366,7 +366,7 @@ def write_symbol2prev(
             subject_label = getattr(m, "subject_label", None)
             object_label = getattr(m, "object_label", None)
             if subject_label or object_label:
-                # object_label is the primary symbol, subject_label is the previous symbol
+                # object_label is the primary label, subject_label is the previous label
                 values = [
                     str(getattr(m, "object_id", "") or ""),
                     str(object_label or ""),
@@ -416,7 +416,7 @@ WRITERS: dict[str, Callable[..., Path]] = {
     "priIDs": write_pri_ids,
     "secIDs": write_secondary,
     "name2synonym": write_name2synonym,
-    "symbol2prev": write_symbol2prev,
+    "label2prev": write_label2prev,
     "rdf": write_rdf,
     "json": write_json,
     "owl": write_owl,
