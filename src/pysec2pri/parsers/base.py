@@ -1030,7 +1030,7 @@ def _annotate_id_mappings(
                 result.append(m)
                 continue
             new_comment = (
-                f"Ambiguous mapping: subject_id '{subj_id}' is also a current primary ID"
+                f"Ambiguous mapping: secondary '{subj_id}' is also a current primary ID"
                 + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
                 + "."
                 + (f" {existing}" if existing else "")
