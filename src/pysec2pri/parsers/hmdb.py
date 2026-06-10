@@ -286,7 +286,6 @@ class HMDBParser(BaseParser):
 # Concrete parsers
 
 
-
 class HMDBMetaboliteParser(HMDBParser):
     """Parser for ``hmdb_metabolites.xml``.
 
