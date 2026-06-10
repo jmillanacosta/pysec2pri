@@ -227,17 +227,17 @@ class TestHGNCParser:
         assert isinstance(result, Sec2PriMappingSet)
         assert len(result.mappings) > 0
 
-    def test_parse_symbols(self, hgnc_complete_path: Path) -> None:
-        """Test parsing output for HGNC symbols."""
+    def test_parse_labels(self, hgnc_complete_path: Path) -> None:
+        """Test parsing output for HGNC labels."""
         parser = HGNCParser(show_progress=False)
-        result = parser.parse_symbols(hgnc_complete_path)
+        result = parser.parse_labels(hgnc_complete_path)
         assert isinstance(result, Sec2PriMappingSet)
 
-    def test_name2synonym_excludes_previous_symbols(self, hgnc_complete_path: Path) -> None:
-        """to_name2synonym must only contain hasExactSynonym rows (alias symbols).
+    def test_name2synonym_excludes_previous_labels(self, hgnc_complete_path: Path) -> None:
+        """to_name2synonym must only contain hasExactSynonym rows (alias labels).
 
-        Previous symbols carry IAO:0100001 and are deprecation mappings, not
-        synonyms.  They must appear in to_symbol_sec2pri but never in
+        Previous labels carry IAO:0100001 and are deprecation mappings, not
+        synonyms.  They must appear in to_label_sec2pri but never in
         to_name2synonym.
 
         mock_hgnc_complete.tsv:
@@ -246,7 +246,7 @@ class TestHGNCParser:
           MYC    alias: c-Myc          prev: v-myc
         """
         parser = HGNCParser(show_progress=False)
-        result = parser.parse_symbols(hgnc_complete_path)
+        result = parser.parse_labels(hgnc_complete_path)
 
         df = result.to_name2synonym()
         synonyms = set(df["synonym"].tolist())
@@ -256,20 +256,20 @@ class TestHGNCParser:
         assert "P53" in synonyms
         assert "LFS1" in synonyms
         assert "c-Myc" in synonyms
-        # Previous symbols (IAO:0100001) must NOT appear in name2synonym
+        # Previous labels (IAO:0100001) must NOT appear in name2synonym
         assert "PSCP" not in synonyms
         assert "tumor_p53" not in synonyms
         assert "v-myc" not in synonyms
 
-    def test_symbol_sec2pri_contains_previous_symbols(self, hgnc_complete_path: Path) -> None:
-        """to_symbol_sec2pri contains all label mappings including previous symbols."""
+    def test_label_sec2pri_contains_previous_labels(self, hgnc_complete_path: Path) -> None:
+        """to_label_sec2pri contains all label mappings including previous labels."""
         parser = HGNCParser(show_progress=False)
-        result = parser.parse_symbols(hgnc_complete_path)
+        result = parser.parse_labels(hgnc_complete_path)
 
-        df = result.to_symbol_sec2pri()
-        # Column is now "secondary_symbol" (was subject_label)
-        all_secondary = set(df["secondary_symbol"].tolist())
-        # Both aliases and previous symbols must appear in the full symbol mapping
+        df = result.to_label_sec2pri()
+        # Column is now "secondary_label" (was subject_label)
+        all_secondary = set(df["secondary_label"].tolist())
+        # Both aliases and previous labels must appear in the full label mapping
         assert "BRCC1" in all_secondary
         assert "PSCP" in all_secondary
         assert "tumor_p53" in all_secondary
@@ -299,25 +299,25 @@ class TestNCBIParser:
         assert len(pri_ids) > 0
         assert all(id_.startswith("NCBIGene:") for id_ in pri_ids)
 
-        """Test parsing output for NCBI symbols."""
+        """Test parsing output for NCBI labels."""
         parser = NCBIParser(show_progress=False)
-        result = parser.parse_symbols(ncbi_info_path, tax_id="9606")
+        result = parser.parse_labels(ncbi_info_path, tax_id="9606")
         assert isinstance(result, Sec2PriMappingSet)
 
-    def test_parse_symbols_direction(self, ncbi_info_path: Path) -> None:
-        """Symbol mappings must be sec:pri: synonym is subject, primary symbol is object."""
+    def test_parse_labels_direction(self, ncbi_info_path: Path) -> None:
+        """Label mappings must be sec:pri: synonym is subject, primary label is object."""
         parser = NCBIParser(show_progress=False)
-        result = parser.parse_symbols(ncbi_info_path, tax_id="9606")
+        result = parser.parse_labels(ncbi_info_path, tax_id="9606")
         mappings = result.mappings or []
         assert len(mappings) > 0
         subject_labels = {m.subject_label for m in mappings}
         object_labels = {m.object_label for m in mappings}
         # mock_gene_info.tsv: GENE1 has synonyms ALT_SYM1 and ALT_SYM2
-        # synonyms must be subjects; current Symbol must be the object
+        # synonyms must be subjects; current label must be the object
         assert "ALT_SYM1" in subject_labels
         assert "ALT_SYM2" in subject_labels
         assert "GENE1" in object_labels
-        # the current primary symbol must never appear as a subject_label
+        # the current primary label must never appear as a subject_label
         assert "GENE1" not in subject_labels
 
 

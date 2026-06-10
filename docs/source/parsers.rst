@@ -26,10 +26,10 @@ If possible, you can also add automated download in ``src/pysec2pri/download.py`
      - ``parse()``
    * - **HGNC**
      - ``hgnc_complete_set.txt``, ``withdrawn.txt``
-     - ``parse()``, ``parse_symbols()``, ``parse_all()``
+     - ``parse()``, ``parse_labels()``, ``parse_all()``
    * - **NCBI Gene**
      - ``gene_history``, ``gene_info``
-     - ``parse()``, ``parse_symbols()``, ``parse_all()``
+     - ``parse()``, ``parse_labels()``, ``parse_all()``
    * - **UniProt**
      - ``sec_ac.txt``, ``delac_sp.txt``
      - ``parse()``

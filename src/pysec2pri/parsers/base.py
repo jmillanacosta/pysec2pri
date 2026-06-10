@@ -337,21 +337,21 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
     Attributes:
         _primary_ids: Private store for the full primary ID set.
-        _primary_symbols: Private store for the full primary Symbol set.
+        _primary_labels: Private store for the full primary Symbol set.
     """
 
     # Primaries are private to sssom's schema
-    # Populated by parsers that have access to the full primary ID/symbol list
+    # Populated by parsers that have access to the full primary ID/label list
     # (e.g. HGNCParser when the complete set file is provided).
     _primary_ids: set[str]
     # Maps label text to set of primary IDs that carry that label.
-    _primary_symbols: dict[str, set[str]]
+    _primary_labels: dict[str, set[str]]
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Initialise the mapping set and the private primary-IDs store."""
         super().__init__(*args, **kwargs)
         object.__setattr__(self, "_primary_ids", set())
-        object.__setattr__(self, "_primary_symbols", {})
+        object.__setattr__(self, "_primary_labels", {})
 
     # Export helpers
 
@@ -773,34 +773,34 @@ class IdMappingSet(Sec2PriMappingSet):
 
 
 class LabelMappingSet(Sec2PriMappingSet):
-    """Mapping set for label-based (previous/alias symbol to current symbol) mappings."""
+    """Mapping set for label-based (previous/alias label to current label) mappings."""
 
     def compute_cardinalities(self) -> None:
         """Compute cardinalities using subject_label and object_label."""
         self._compute_cardinalities(on="label")
 
-    def to_symbol_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
-        """Return a ``DataFrame`` of previous/alias symbol to current symbol mappings.
+    def to_label_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of previous/alias label to current label mappings.
 
-        Columns: ``secondary_id`` (subject_id), ``secondary_symbol``
-        (subject_label: alias or previous symbol), ``primary_id`` (object_id),
-        ``primary_symbol`` (object_label: current approved symbol),
+        Columns: ``secondary_id`` (subject_id), ``secondary_label``
+        (subject_label: alias or previous label), ``primary_id`` (object_id),
+        ``primary_label`` (object_label: current approved label),
         ``predicate_id``, ``mapping_cardinality``.
 
         Args:
             output_path: If given, the DataFrame is also written as a TSV file.
 
         Returns:
-            :class:`pandas.DataFrame` with one row per symbol mapping.
+            :class:`pandas.DataFrame` with one row per label mapping.
         """
         import pandas as pd
 
         rows = [
             {
                 "secondary_id": str(getattr(m, "subject_id", "") or ""),
-                "secondary_symbol": str(getattr(m, "subject_label", "") or ""),
+                "secondary_label": str(getattr(m, "subject_label", "") or ""),
                 "primary_id": str(getattr(m, "object_id", "") or ""),
-                "primary_symbol": str(getattr(m, "object_label", "") or ""),
+                "primary_label": str(getattr(m, "object_label", "") or ""),
                 "predicate_id": str(getattr(m, "predicate_id", "") or ""),
                 "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
             }
@@ -810,38 +810,38 @@ class LabelMappingSet(Sec2PriMappingSet):
             rows,
             columns=[
                 "secondary_id",
-                "secondary_symbol",
+                "secondary_label",
                 "primary_id",
-                "primary_symbol",
+                "primary_label",
                 "predicate_id",
                 "mapping_cardinality",
             ],
         )
 
         if output_path is not None:
-            path = self._resolve_path(output_path, "_symbol_sec2pri.tsv")
+            path = self._resolve_path(output_path, "_label_sec2pri.tsv")
             path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(path, sep="\t", index=False)
 
         return df
 
-    def to_pri_symbols(self, output_path: Path | str | None = None) -> list[tuple[str, str]]:
-        r"""Return a sorted list of unique ``(primary_id, symbol)`` pairs.
+    def to_pri_labels(self, output_path: Path | str | None = None) -> list[tuple[str, str]]:
+        r"""Return a sorted list of unique ``(primary_id, label)`` pairs.
 
-        When ``_primary_symbols`` is populated (e.g. from the HGNC complete set)
+        When ``_primary_labels`` is populated (e.g. from the HGNC complete set)
         that dict is used.  Otherwise pairs are derived from the unique
         ``(object_id, object_label)`` values in the mappings.
 
         Args:
             output_path: If given, the pairs are also written as a two-column
-                TSV file (``id\\tsymbol``).
+                TSV file (``id\\tlabel``).
 
         Returns:
-            Sorted list of ``(primary_id, symbol)`` tuples.
+            Sorted list of ``(primary_id, label)`` tuples.
         """
         private: dict[str, set[str]] = (
-            object.__getattribute__(self, "_primary_symbols")
-            if hasattr(self, "_primary_symbols")
+            object.__getattribute__(self, "_primary_labels")
+            if hasattr(self, "_primary_labels")
             else {}
         )
 
@@ -862,10 +862,10 @@ class LabelMappingSet(Sec2PriMappingSet):
                 - {("", "")}
             )
         if output_path is not None:
-            path = self._resolve_path(output_path, "_pri_symbols.txt")
+            path = self._resolve_path(output_path, "_pri_labels.txt")
             path.parent.mkdir(parents=True, exist_ok=True)
             text = "\n".join(f"{pri_id}\t{label}" for pri_id, label in pairs)
-            path.write_text("id\tsymbol\n" + text + "\n", encoding="utf-8")
+            path.write_text("id\tlabel\n" + text + "\n", encoding="utf-8")
 
         return pairs
 
@@ -877,7 +877,7 @@ class LabelMappingSet(Sec2PriMappingSet):
 
         Only ``oboInOwl:hasExactSynonym`` rows are included.  Rows with
         ``IAO:0100001`` (``"term replaced by"``) are deprecation mappings and
-        belong in the ``symbol_sec2pri`` output, not here.
+        belong in the ``label_sec2pri`` output, not here.
 
         The direction follows the sec:pri structure, where the secondary
         (synonym/alternative) term is the subject and the primary (canonical)
@@ -919,8 +919,8 @@ class LabelMappingSet(Sec2PriMappingSet):
         """Write to any supported format by name.
 
         Formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``,
-        ``"symbol_sec2pri"`` (``"symbol2prev"`` is a deprecated alias),
-        ``"pri_symbols"``, ``"name2synonym"``.
+        ``"label_sec2pri"`` (``"label2prev"`` is a deprecated alias),
+        ``"pri_labels"``, ``"name2synonym"``.
 
         Args:
             fmt: Format key (see above).
@@ -937,13 +937,13 @@ class LabelMappingSet(Sec2PriMappingSet):
         if shared is not None:
             return shared
 
-        if fmt in ("symbol_sec2pri", "symbol2prev"):
-            self.to_symbol_sec2pri(output_path)
-            return self._resolve_path(output_path, "_symbol_sec2pri.tsv")
+        if fmt in ("label_sec2pri", "label2prev"):
+            self.to_label_sec2pri(output_path)
+            return self._resolve_path(output_path, "_label_sec2pri.tsv")
 
-        if fmt == "pri_symbols":
-            self.to_pri_symbols(output_path)
-            return self._resolve_path(output_path, "_pri_symbols.txt")
+        if fmt == "pri_labels":
+            self.to_pri_labels(output_path)
+            return self._resolve_path(output_path, "_pri_labels.txt")
 
         if fmt == "name2synonym":
             self.to_name2synonym(output_path)
@@ -951,12 +951,12 @@ class LabelMappingSet(Sec2PriMappingSet):
 
         raise ValueError(
             f"Unknown format {fmt!r}. Choose from: "
-            "json, name2synonym, owl, pri_symbols, rdf, sssom, symbol_sec2pri"
+            "json, name2synonym, owl, pri_labels, rdf, sssom, label_sec2pri"
         )
 
 
 class AmbiguousMappingSet(Sec2PriMappingSet):
-    """Mapping set of ambiguous IDs or symbols.
+    """Mapping set of ambiguous IDs or labels.
 
     An entry is ambiguous when the same string appears both as a current
     primary identifier/label (in the datasource's full primary set) and
@@ -1130,7 +1130,7 @@ def _get_primary_sets(
     """
     stored_ids: set[str] | None = getattr(mapping_set, "_primary_ids", None)
     stored_labels: dict[str, set[str]] | None = (
-        getattr(mapping_set, "_primary_symbols", None) or None
+        getattr(mapping_set, "_primary_labels", None) or None
     )  # treat empty dict as missing
 
     if stored_ids is None:
@@ -1519,7 +1519,7 @@ class BaseParser(ABC):
         Used by :meth:`_build_mappings` when a row carries a ``_label_type``
         key.
 
-        - ``"previous"``: the secondary name, label or symbol ``IAO:0100001`` "term replaced by").
+        - ``"previous"``: the secondary name, label or label ``IAO:0100001`` "term replaced by").
         - ``"alias"`` (or any other value): a valid alternative name: ``oboInOwl:hasExactSynonym``.
 
         Args:
@@ -1676,11 +1676,11 @@ class BaseParser(ABC):
         return WITHDRAWN_ENTRY == identifier
 
     @staticmethod
-    def _split_symbols(symbols_str: str, sep: str = "|") -> list[str]:
-        """Split a separated string of symbols."""
-        if not symbols_str:
+    def _split_labels(labels_str: str, sep: str = "|") -> list[str]:
+        """Split a separated string of labels."""
+        if not labels_str:
             return []
-        return [s.strip() for s in symbols_str.split(sep) if s.strip()]
+        return [s.strip() for s in labels_str.split(sep) if s.strip()]
 
     @staticmethod
     def is_withdrawn_primary(subject_id: str) -> bool:
@@ -1696,9 +1696,9 @@ class BaseParser(ABC):
 
     @staticmethod
     def _parse_merged_info(merged_str: str) -> tuple[str, str] | None:
-        """Parse merged_into_report to extract hgnc_id and symbol.
+        """Parse merged_into_report to extract hgnc_id and label.
 
-        Returns (hgnc_id, symbol) or None if parsing fails.
+        Returns (hgnc_id, label) or None if parsing fails.
         """
         if not merged_str or merged_str == "":
             return None
@@ -1787,7 +1787,7 @@ class BaseParser(ABC):
         )
         # Annotate ambiguous mappings (primary also appears as secondary)
         if mapping_set_class == LabelMappingSet:
-            pri_labels = mapping_set._primary_symbols
+            pri_labels = mapping_set._primary_labels
             mappings_updated = _annotate_ambiguous_mappings(
                 mappings, mapping_type=mapping_type, primary_labels=pri_labels
             )

@@ -104,7 +104,7 @@ def build_alias_index(mapping_set: Sec2PriMappingSet) -> dict[str, list[str]]:
 
     Args:
         mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`
-            (e.g. the result of ``generate_hgnc_symbols()``).
+            (e.g. the result of ``generate_hgnc_labels()``).
 
     Returns:
         Dict mapping each ``object_id`` to the list of ``subject_label``
@@ -126,15 +126,15 @@ def build_primary_token_to_id(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
     """Return ``{primary_label: primary_id}`` from a label mapping set.
 
     Collects every ``(object_label, object_id)`` pair seen in the mappings
-    and, where available, the ``_primary_symbols`` store.  Useful for
-    translating a primary symbol string into its CURIE so that
+    and, where available, the ``_primary_labels`` store.  Useful for
+    translating a primary label string into its CURIE so that
     :func:`build_alias_index` (keyed by object_id) can be looked up.
 
     Args:
         mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`.
 
     Returns:
-        Dict ``{primary_symbol: primary_id}``.
+        Dict ``{primary_label: primary_id}``.
     """
     result: dict[str, str] = {}
     for m in mapping_set.mappings or []:
@@ -142,7 +142,7 @@ def build_primary_token_to_id(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
         oid = str(getattr(m, "object_id", None) or "")
         if lbl and oid:
             result[lbl] = oid
-    stored: dict[str, set[str]] | None = getattr(mapping_set, "_primary_symbols", None)
+    stored: dict[str, set[str]] | None = getattr(mapping_set, "_primary_labels", None)
     if isinstance(stored, dict):
         for sym, ids in stored.items():
             if sym and ids and sym not in result:
@@ -157,7 +157,7 @@ def resolve_ambiguous_with_hints(
     alias_index: dict[str, list[str]],
     token_to_id: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
-    """Attempt to resolve an ambiguous symbol or ID using user-provided alias hints.
+    """Attempt to resolve an ambiguous label or ID using user-provided alias hints.
 
     An ambiguous token appears both as a current primary entry **and** as a
     secondary (subject) in a mapping that points to a different primary.
@@ -180,13 +180,13 @@ def resolve_ambiguous_with_hints(
 
     Args:
         ambiguous_token:
-            The symbol or ID that is both primary and secondary.
+            The label or ID that is both primary and secondary.
         user_aliases:
             Alias strings provided by the user (e.g. from a ``known_alias``
             column) to help determine which entity is actually meant.
         lkp:
             ``{secondary_token: resolved_token}`` lookup (from
-            :func:`build_symbol_lookup` or :func:`build_lookup`).
+            :func:`build_label_lookup` or :func:`build_lookup`).
         alias_index:
             ``{primary_id: [non-IAO alias strings]}`` built via
             :func:`build_alias_index`.
@@ -218,7 +218,7 @@ def resolve_ambiguous_with_hints(
     # The user alias matches the target's primary label, its primary ID,
     # *or* one of its non-IAO alias strings.  Matching the primary label
     # directly covers the common case where the user writes the current
-    # symbol (e.g. "RNF141") rather than a secondary alias.
+    # label (e.g. "RNF141") rather than a secondary alias.
     if target_token and (
         target_token in user_set
         or (target_id and target_id in user_set)
@@ -267,11 +267,11 @@ def build_ambiguous_set(mapping_set: Sec2PriMappingSet) -> set[str]:
     return subject_ids & primary_ids
 
 
-def build_ambiguous_symbols_set(mapping_set: Sec2PriMappingSet) -> set[str]:
+def build_ambiguous_labels_set(mapping_set: Sec2PriMappingSet) -> set[str]:
     """Return the set of *ambiguous* subject labels in *mapping_set*.
 
     Analogous to :func:`build_ambiguous_set` but operates on
-    ``subject_label`` / ``object_label`` (symbol) mappings.
+    ``subject_label`` / ``object_label`` (label) mappings.
 
     Args:
         mapping_set: Any :class:`~pysec2pri.parsers.base.LabelMappingSet`.
@@ -281,11 +281,11 @@ def build_ambiguous_symbols_set(mapping_set: Sec2PriMappingSet) -> set[str]:
         set when no ambiguity is detected.
     """
     stored: dict[str, set[str]] | set[str] = (
-        object.__getattribute__(mapping_set, "_primary_symbols")
-        if hasattr(mapping_set, "_primary_symbols")
+        object.__getattribute__(mapping_set, "_primary_labels")
+        if hasattr(mapping_set, "_primary_labels")
         else set()
     )
-    # _primary_symbols is stored as dict[symbol, set[ids]]; extract the key set.
+    # _primary_labels is stored as dict[label, set[ids]]; extract the key set.
     primary_labels: set[str] = (set(stored.keys()) if isinstance(stored, dict) else stored) or {
         str(getattr(m, "object_label", None) or "") for m in (mapping_set.mappings or [])
     } - {""}
@@ -304,7 +304,7 @@ def _warn_ambiguous(ambiguous_found: set[str], kind: str = "ID") -> None:
     Args:
         ambiguous_found: Set of token strings that were ambiguous.
         kind: Human-readable label for the token type (``"ID"`` or
-            ``"symbol"``), used in the warning message.
+            ``"label"``), used in the warning message.
     """
     if not ambiguous_found:
         return
@@ -503,7 +503,7 @@ def _resolve_cell_with_hints(
             resolved.append(resolved_tok)
             if resolved_id is None:
                 # In ID mode (token_to_id=None) the resolved token IS the ID;
-                # in symbol mode look up the corresponding primary ID.
+                # in label mode look up the corresponding primary ID.
                 resolved_id = (token_to_id or {}).get(resolved_tok) or resolved_tok
     return sep.join(resolved), resolved_id
 
@@ -712,7 +712,7 @@ def update_ids(
     return _update_dataframe(ids, at, suffix, lkp, amb, kind="ID", col_label="ids")
 
 
-def build_symbol_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+def build_label_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
     """Return a ``{secondary_label: primary_label}`` dictionary.
 
     Useful when you want to apply the look-up yourself or cache it for
@@ -720,10 +720,10 @@ def build_symbol_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
 
     Args:
         mapping_set: A :class:`~pysec2pri.parsers.base.LabelMappingSet`
-            (e.g. the result of ``generate_hgnc_symbols()``).
+            (e.g. the result of ``generate_hgnc_labels()``).
 
     Returns:
-        Dictionary mapping every previous/alias symbol to its current symbol.
+        Dictionary mapping every previous/alias label to its current label.
     """
     lookup: dict[str, str] = {}
     for m in mapping_set.mappings or []:
@@ -735,8 +735,8 @@ def build_symbol_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
 
 
 @overload
-def update_symbols(
-    symbols: str,
+def update_labels(
+    labels: str,
     mapping_set: Sec2PriMappingSet,
     *,
     at: None = ...,
@@ -750,8 +750,8 @@ def update_symbols(
 
 
 @overload
-def update_symbols(
-    symbols: list[str],
+def update_labels(
+    labels: list[str],
     mapping_set: Sec2PriMappingSet,
     *,
     at: None = ...,
@@ -765,8 +765,8 @@ def update_symbols(
 
 
 @overload
-def update_symbols(
-    symbols: pd.DataFrame,
+def update_labels(
+    labels: pd.DataFrame,
     mapping_set: Sec2PriMappingSet,
     *,
     at: str | list[str],
@@ -779,8 +779,8 @@ def update_symbols(
     ...
 
 
-def update_symbols(
-    symbols: IdsInput,
+def update_labels(
+    labels: IdsInput,
     mapping_set: Sec2PriMappingSet,
     *,
     at: str | list[str] | None = None,
@@ -789,28 +789,28 @@ def update_symbols(
     ambiguous: set[str] | None = None,
     synonyms: str | list[str] | None = None,
 ) -> dict[str, str] | pd.DataFrame:
-    """Resolve previous/alias gene symbols to current symbols.
+    """Resolve previous/alias gene labels to current labels.
 
     Same as :func:`update_ids` but resolves via the
     ``subject_label`` to ``object_label`` mapping rather than IDs.
 
     Parameters
     ----------
-    symbols:
+    labels:
         One of:
 
-        * **str**: a single symbol, or multiple symbols joined by
+        * **str**: a single label, or multiple labels joined by
           ``|``, ``,``, ``;``, or whitespace.
-        * **list[str]**: a list of symbol strings.
+        * **list[str]**: a list of label strings.
         * **pandas.DataFrame**: a DataFrame; you must also supply *at*.
 
     mapping_set:
         A :class:`~pysec2pri.parsers.base.LabelMappingSet`
-        (e.g. the result of ``generate_hgnc_symbols()``).
+        (e.g. the result of ``generate_hgnc_labels()``).
 
     at:
         *DataFrame mode only.* Column name or list of column names that
-        contain symbols.  For each column ``col`` a new column named
+        contain labels.  For each column ``col`` a new column named
         ``col + suffix`` is added to the returned DataFrame.
 
     suffix:
@@ -818,19 +818,19 @@ def update_symbols(
         ``"_current"``).
 
     lookup:
-        Pre-built ``{previous_symbol: current_symbol}`` dictionary.
-        Pass the result of :func:`build_symbol_lookup` to avoid rebuilding
+        Pre-built ``{previous_label: current_label}`` dictionary.
+        Pass the result of :func:`build_label_lookup` to avoid rebuilding
         on repeated calls.
 
     ambiguous:
         Pre-built set of ambiguous labels (see
-        :func:`build_ambiguous_symbols_set`).  When ``None``, it is
+        :func:`build_ambiguous_labels_set`).  When ``None``, it is
         computed automatically from *mapping_set*.
 
     synonyms:
         *DataFrame mode only.* Name of a column in the DataFrame that
         contains user-supplied alias strings (delimited by ``|``, ``,``,
-        ``;``, or whitespace) to help resolve ambiguous symbols.
+        ``;``, or whitespace) to help resolve ambiguous labels.
         When provided, :func:`resolve_ambiguous_with_hints` is called for
         every ambiguous cell using that row's alias list.  The alias index
         is built from *mapping_set* itself (non-IAO entries).
@@ -838,52 +838,52 @@ def update_symbols(
     Returns
     -------
     dict[str, str]
-        When *symbols* is a ``str`` or ``list[str]``: a dictionary mapping
-        each unique input symbol to its resolved current symbol.  Symbols
+        When *labels* is a ``str`` or ``list[str]``: a dictionary mapping
+        each unique input label to its resolved current label.  Symbols
         not found in the mapping set are returned unchanged.  **Ambiguous
-        symbols are mapped to an empty string** and a warning is emitted.
+        labels are mapped to an empty string** and a warning is emitted.
 
     pandas.DataFrame
-        When *symbols* is a ``DataFrame``: a copy of the DataFrame with one
+        When *labels* is a ``DataFrame``: a copy of the DataFrame with one
         new ``<col><suffix>`` column per entry in *at*.  Ambiguous cells
         are set to ``""``; a warning is emitted after all columns are
         processed.
     """
-    lkp = lookup if lookup is not None else build_symbol_lookup(mapping_set)
-    amb = ambiguous if ambiguous is not None else build_ambiguous_symbols_set(mapping_set)
+    lkp = lookup if lookup is not None else build_label_lookup(mapping_set)
+    amb = ambiguous if ambiguous is not None else build_ambiguous_labels_set(mapping_set)
 
-    if isinstance(symbols, str):
-        return _update_str(symbols, lkp, amb, kind="symbol")
-    if isinstance(symbols, list):
-        return _update_list(symbols, lkp, amb, kind="symbol")
+    if isinstance(labels, str):
+        return _update_str(labels, lkp, amb, kind="label")
+    if isinstance(labels, list):
+        return _update_list(labels, lkp, amb, kind="label")
 
     # DataFrame mode
     if synonyms is not None and isinstance(synonyms, str):
         alias_index = build_alias_index(mapping_set)
         token_to_id = build_primary_token_to_id(mapping_set)
         return _update_dataframe_with_synonyms(
-            symbols,
+            labels,
             at,
             suffix,
             lkp,
             amb,
-            kind="symbol",
-            col_label="symbols",
+            kind="label",
+            col_label="labels",
             synonyms_col=synonyms,
             alias_index=alias_index,
             token_to_id=token_to_id,
         )
-    return _update_dataframe(symbols, at, suffix, lkp, amb, kind="symbol", col_label="symbols")
+    return _update_dataframe(labels, at, suffix, lkp, amb, kind="label", col_label="labels")
 
 
 __all__ = [
     "build_alias_index",
+    "build_ambiguous_labels_set",
     "build_ambiguous_set",
-    "build_ambiguous_symbols_set",
+    "build_label_lookup",
     "build_lookup",
     "build_primary_token_to_id",
-    "build_symbol_lookup",
     "resolve_ambiguous_with_hints",
     "update_ids",
-    "update_symbols",
+    "update_labels",
 ]
