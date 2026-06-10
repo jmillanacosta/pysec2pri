@@ -114,28 +114,10 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
     """
     raw = load_config(datasource_name)
 
-    # Extract curie_map to get prefix and curie_base_url
-    curie_map = raw.get("mappingset", {}).get("curie_map", {})
-    # The first entry that's not a standard prefix is the datasource prefix
-    standard_prefixes = {"IAO", "oboInOwl", "semapv", "skos", "sssom", "sec2pri"}
-    prefix = ""
-    curie_base_url = ""
-    for k, v in curie_map.items():
-        if k not in standard_prefixes:
-            prefix = k
-            curie_base_url = v
-            break
-
-    # Determine name - special case for wikidata
-    if datasource_name.lower() == "wikidata":
-        name = "Wikidata"
-    else:
-        name = datasource_name.upper()
-
     return DatasourceConfig(
-        name=raw.get("name") or name,
-        prefix=raw.get("prefix") or prefix,
-        curie_base_url=raw.get("curie_base_url") or curie_base_url,
+        name=raw.get("name", ""),
+        prefix=raw.get("prefix", ""),
+        curie_base_url=raw.get("curie_base_url", ""),
         config_id=raw.get("config_id", ""),
         datasource_id=raw.get("datasource_id", ""),
         parser_class=raw.get("parser_class", ""),
@@ -1188,7 +1170,7 @@ def _build_conflicts(
         if subj_id and subj_id in primary_ids:
             amb_ids.add(subj_id)
             conflicts.append(
-                f"subject_id '{subj_id}' is also a current primary ID"
+                f"secondary '{subj_id}' is also a current primary ID"
                 + (f" (mapping points to '{obj_id}')" if obj_id else "")
             )
     if mode == "label":
@@ -1760,7 +1742,7 @@ class BaseParser(ABC):
         if self.version and description:
             description = f"{description} Version: {self.version}."
 
-        # Annotate ambiguous mappings (subject also appears as object) with a
+        # Annotate ambiguous mappings (primary also appears as secondary) with a
         # comment so every output format carries the information by default.
         mappings = _annotate_ambiguous_mappings(mappings, mapping_type=mapping_type)
 

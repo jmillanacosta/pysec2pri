@@ -13,7 +13,7 @@ from pysec2pri.parsers.base import (
 )
 from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
 from pysec2pri.parsers.hgnc import HGNCParser
-from pysec2pri.parsers.hmdb import HMDBParser
+from pysec2pri.parsers.hmdb import HMDBMetaboliteParser, HMDBProteinParser
 from pysec2pri.parsers.ncbi import NCBIParser
 from pysec2pri.parsers.uniprot import UniProtParser
 from pysec2pri.parsers.wikidata import WikidataParser
@@ -26,7 +26,8 @@ __all__ = [
     "ChEBIParser",
     "DatasourceConfig",
     "HGNCParser",
-    "HMDBParser",
+    "HMDBMetaboliteParser",
+    "HMDBProteinParser",
     "IdMappingSet",
     "LabelMappingSet",
     "NCBIParser",

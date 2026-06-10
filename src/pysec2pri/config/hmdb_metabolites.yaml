@@ -2,10 +2,10 @@
 config_id: "hmdb_metabolites"
 datasource_id: "hmdb"
 name: "HMDB Metabolites"
-parser_class: "HMDBParser"
+parser_class: "HMDBMetaboliteParser"
 prefix: "HMDB"
 curie_base_url: "http://identifiers.org/hmdb/"
-
+entity_types: ["metabolites"]
 mappingset:
   sssom_version: null
   curie_map:

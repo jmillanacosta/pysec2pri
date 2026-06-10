@@ -250,7 +250,7 @@ def check_hmdb_release() -> ReleaseInfo:
         ReleaseInfo with the latest HMDB release details.
     """
     # HMDB requires downloading to check the version in XML
-    metabolites_url = ALL_DATASOURCES["hmdb"].download_urls["metabolites"]
+    metabolites_url = ALL_DATASOURCES["hmdb_metabolites"].download_urls["metabolites"]
     last_modified = get_file_last_modified(metabolites_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 

@@ -5,7 +5,7 @@ name: "HGNC"
 parser_class: "HGNCParser"
 prefix: "HGNC"
 curie_base_url: "http://identifiers.org/hgnc/"
-
+entity_types: ["genes"]
 mappingset:
   sssom_version: null
   curie_map:

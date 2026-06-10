@@ -5,7 +5,7 @@ name: "UniProt"
 parser_class: "UniProtParser"
 prefix: "UniProtKB"
 curie_base_url: "http://identifiers.org/uniprot/"
-
+entity_types: ["proteins"]
 mappingset:
   sssom_version: null
   curie_map:

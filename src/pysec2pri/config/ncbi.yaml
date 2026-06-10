@@ -7,7 +7,7 @@ parse_options:
   default_taxonomy_id: 9606
 prefix: "NCBIGene"
 curie_base_url: "http://identifiers.org/ncbigene/"
-
+entity_types: ["genes"]
 mappingset:
   sssom_version: null
   curie_map:
