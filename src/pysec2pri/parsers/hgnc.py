@@ -247,8 +247,7 @@ class HGNCParser(BaseParser):
         """Extract all current HGNC Symbols from the complete set file.
 
         Returns a ``dict`` mapping each symbol text to the set of primary HGNC
-        IDs that carry that symbol.  Most symbols map to exactly one ID, but
-        the dict form allows O(1) ambiguity lookups.
+        IDs that carry that symbol.
 
         Args:
             file_path: Path to the HGNC complete set TSV file.

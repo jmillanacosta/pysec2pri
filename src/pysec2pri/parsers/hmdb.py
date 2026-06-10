@@ -1,8 +1,12 @@
 """HMDB XML file parser for secondary-to-primary identifier mappings.
 
 This parser extracts ID-to-ID mappings from:
-- hmdb_metabolites.xml  -> HMDB0... accessions
-- hmdb_proteins.xml     -> HMDBP... accessions
+- hmdb_metabolites.xml  -> HMDB0... accessions  (HMDBMetaboliteParser)
+- hmdb_proteins.xml     -> HMDBP... accessions  (HMDBProteinParser)
+
+Each subclass reads its own YAML config:
+- hmdb_metabolites.yaml
+- hmdb_proteins.yaml
 
 Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
@@ -32,64 +36,18 @@ if TYPE_CHECKING:
 # HMDB XML namespace
 HMDB_NS = {"hmdb": "http://www.hmdb.ca"}
 
-# Pattern for bare numeric legacy protein IDs (e.g. "5229")
 _BARE_NUM_RE = re.compile(r"^\d+$")
 
 
 class HMDBParser(BaseParser):
-    """Parser for HMDB XML files (metabolites and proteins).
+    """Shared XML-parser for HMDB metabolite and protein files.
 
-    Extracts secondary-to-primary HMDB accession mappings from
-    ``hmdb_metabolites.xml`` and/or ``hmdb_proteins.xml``.
+    Use :class:`HMDBMetaboliteParser` or :class:`HMDBProteinParser`.
     """
 
-    datasource_name = "hmdb"
-
-    @property
-    def source_url(self) -> str:
-        """Get the metabolites download URL from config."""
-        return self.get_download_url("metabolites") or ""
-
-    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
-        """Parse HMDB metabolites XML file.
-
-        Args:
-            input_path: Path to ``hmdb_metabolites.xml`` (or ``.zip``/``.gz``).
-
-        Returns:
-            IdMappingSet for metabolite accessions.
-        """
-        if input_path is None:
-            raise ValueError("input_path must not be None")
-        return self._parse_xml(
-            Path(input_path),
-            element_tag="metabolite",
-            prefix="HMDB",
-            desc="Parsing HMDB metabolites XML",
-        )
-
-    def parse_proteins(self, input_path: Path | str) -> Sec2PriMappingSet:
-        """Parse HMDB proteins XML file.
-
-        Primary accessions have the form ``HMDBP00001``.
-        Secondary accessions may be bare numbers (legacy format, e.g.
-        ``5229``) or full ``HMDBP`` accessions; both are normalised to
-        ``HMDBP:HMDBP<zero-padded>`` using the same prefix logic as
-        the metabolites parser.
-
-        Args:
-            input_path: Path to ``hmdb_proteins.xml`` (or ``.zip``/``.gz``).
-
-        Returns:
-            IdMappingSet for protein accessions.
-        """
-        return self._parse_xml(
-            Path(input_path),
-            element_tag="protein",
-            prefix="HMDB",
-            desc="Parsing HMDB proteins XML",
-            secondary_normaliser=self._normalise_protein_secondary,
-        )
+    # Subclasses must declare their own datasource_name so each reads
+    # its own YAML config file (hmdb_metabolites.yaml / hmdb_proteins.yaml).
+    datasource_name: str  # must be set by subclass
 
     # Internal helpers
 
@@ -121,19 +79,6 @@ class HMDBParser(BaseParser):
         m = version_re.search(head)
         return m.group(1).strip() if m else None
 
-    @staticmethod
-    def _normalise_protein_secondary(raw: str) -> str:
-        """Return a CURIE-ready protein accession from a raw secondary value.
-
-        Bare numeric values (legacy IDs) are zero-padded to 5 digits and
-        prefixed with ``HMDBP`` so they match the primary ``HMDBP`` pattern.
-        Already-prefixed values are returned unchanged.
-        """
-        raw = raw.strip()
-        if _BARE_NUM_RE.match(raw):
-            return f"HMDBP{int(raw):05d}"
-        return raw
-
     def _parse_xml(
         self,
         file_path: Path,
@@ -142,19 +87,20 @@ class HMDBParser(BaseParser):
         desc: str,
         secondary_normaliser: Callable[[str], str] | None = None,
     ) -> Sec2PriMappingSet:
-        """Parse HMDB XML for metabolites and proteins.
+        """Parse an HMDB XML file and return a mapping set.
 
         Args:
-            file_path: Path to the XML file (may be ``.zip`` or ``.gz``).
+            file_path: Path to the XML file (plain, ``.zip``, or ``.gz``).
             element_tag: Top-level record element name (``"metabolite"`` or
                 ``"protein"``).
-            prefix: CURIE prefix (``"HMDB"`` for both).
+            prefix: CURIE prefix (``"HMDB"`` for both record types).
             desc: Progress-bar description string.
             secondary_normaliser: Optional callable ``(raw_str) -> str``
                 applied to each raw secondary accession before prefixing.
 
         Returns:
-            Sec2PriMappingSet with computed cardinalities.
+            :class:`Sec2PriMappingSet` with computed cardinalities and
+            ``_primary_ids`` populated.
         """
         xml_content = self._read_xml_content(file_path)
         if xml_content is None:
@@ -251,7 +197,7 @@ class HMDBParser(BaseParser):
         prefix: str,
         secondary_normaliser: Callable[[str], str] | None,
     ) -> list[dict[str, str]]:
-        """Fallback parser for test files without namespace."""
+        """Fallback parser for test files without a namespace declaration."""
         rows_data: list[dict[str, str]] = []
         try:
             tree = DefusedET.parse(file_path)
@@ -263,7 +209,7 @@ class HMDBParser(BaseParser):
         return rows_data
 
     def _read_xml_content(self, file_path: Path) -> IO[bytes] | IO[str] | None:
-        """Read XML content, handling compressed files.
+        """Open an XML file, transparently handling ``.zip`` and ``.gz`` wrappers.
 
         Args:
             file_path: Path to the XML file (plain, ``.zip``, or ``.gz``).
@@ -296,7 +242,7 @@ class HMDBParser(BaseParser):
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
     ) -> Sec2PriMappingSet:
-        """Delegate to base class method."""
+        """Delegate to the base-class factory."""
         return self.create_mapping_set(mappings, mapping_type)
 
     def parse_primary_ids(
@@ -320,7 +266,7 @@ class HMDBParser(BaseParser):
             populated.  At least one of the two path arguments must be supplied.
         """
         if metabolites_path is None and proteins_path is None:
-            raise ValueError("At least one of metabolites_path or proteins_path must be supplied.")
+            raise ValueError("At least one of metabolites or proteins_path must be supplied.")
 
         primary_ids: set[str] = set()
 
@@ -329,7 +275,7 @@ class HMDBParser(BaseParser):
             primary_ids |= object.__getattribute__(ms_m, "_primary_ids")
 
         if proteins_path is not None:
-            ms_p = self.parse_proteins(proteins_path)
+            ms_p = self.parse(proteins_path)
             primary_ids |= object.__getattribute__(ms_p, "_primary_ids")
 
         ms = self._create_mapping_set([], mapping_type="id")
@@ -337,4 +283,101 @@ class HMDBParser(BaseParser):
         return ms
 
 
-__all__ = ["HMDBParser"]
+# Concrete parsers
+
+
+class HMDBMetaboliteParser(HMDBParser):
+    """Parser for ``hmdb_metabolites.xml``.
+
+    Reads configuration from ``hmdb_metabolites.yaml``.
+    Primary accessions have the form ``HMDB0…`` (e.g. ``HMDB0000001``).
+    """
+
+    datasource_name = "hmdb_metabolites"
+
+    @property
+    def source_url(self) -> str:
+        """Metabolites download URL from ``hmdb_metabolites.yaml``."""
+        return self.get_download_url("metabolites") or ""
+
+    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+        """Parse ``hmdb_metabolites.xml`` (or ``.zip`` / ``.gz``).
+
+        Args:
+            input_path: Path to the metabolites XML file.
+
+        Returns:
+            :class:`Sec2PriMappingSet` for metabolite accessions.
+        """
+        if input_path is None:
+            raise ValueError("input_path must not be None")
+        return self._parse_xml(
+            Path(input_path),
+            element_tag="metabolite",
+            prefix="HMDB",
+            desc="Parsing HMDB metabolites XML",
+        )
+
+
+class HMDBProteinParser(HMDBParser):
+    """Parser for ``hmdb_proteins.xml``.
+
+    Reads configuration from ``hmdb_proteins.yaml``.
+    Primary accessions have the form ``HMDBP…`` (e.g. ``HMDBP00001``).
+    Secondary accessions may be bare numbers (legacy format, e.g. ``5229``)
+    or full ``HMDBP`` accessions; both are normalised by
+    :meth:`_normalise_protein_secondary`.
+    """
+
+    datasource_name = "hmdb_proteins"
+
+    @property
+    def source_url(self) -> str:
+        """Proteins download URL from ``hmdb_proteins.yaml``."""
+        return self.get_download_url("proteins") or ""
+
+    @staticmethod
+    def _normalise_protein_secondary(raw: str) -> str:
+        """Normalise a raw secondary protein accession to a ``HMDBP``-prefixed form.
+
+        Bare numeric values (legacy IDs) are zero-padded to five digits and
+        prefixed with ``HMDBP`` to match the primary accession pattern.
+        Already-prefixed values are returned unchanged.
+
+        Args:
+            raw: Raw secondary accession string (e.g. ``"5229"`` or
+                ``"HMDBP05229"``).
+
+        Returns:
+            Normalised accession string (e.g. ``"HMDBP05229"``).
+        """
+        raw = raw.strip()
+        if _BARE_NUM_RE.match(raw):
+            return f"HMDBP{int(raw):05d}"
+        return raw
+
+    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+        """Parse ``hmdb_proteins.xml`` (or ``.zip`` / ``.gz``).
+
+        Args:
+            input_path: Path to the proteins XML file.
+
+        Returns:
+            :class:`Sec2PriMappingSet` for protein accessions.
+        """
+        if input_path is None:
+            raise ValueError("input_path must not be None")
+        return self._parse_xml(
+            Path(input_path),
+            element_tag="protein",
+            prefix="HMDB",
+            desc="Parsing HMDB proteins XML",
+            secondary_normaliser=self._normalise_protein_secondary,
+        )
+
+
+__all__ = [
+    "HMDBMetaboliteParser",
+    "HMDBParser",
+    "HMDBProteinParser",
+]

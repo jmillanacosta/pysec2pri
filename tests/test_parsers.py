@@ -8,7 +8,8 @@ from sssom_schema import Mapping
 from pysec2pri.parsers import (
     ChEBIParser,
     HGNCParser,
-    HMDBParser,
+    HMDBMetaboliteParser,
+    HMDBProteinParser,
     NCBIParser,
     UniProtParser,
 )
@@ -139,24 +140,24 @@ class TestChEBIParser:
         assert "dihydrogen oxide" in subject_labels
 
 
-class TestHMDBParser:
-    """Tests for HMDB parser."""
+class TestHMDBParsers:
+    """Tests for HMDB parsers."""
 
-    def test_parse_returns_mapping_set(self, hmdb_xml_path: Path) -> None:
+    def test_parse_met_returns_mapping_set(self, hmdb_xml_path: Path) -> None:
         """parse() returns a Sec2PriMappingSet."""
-        parser = HMDBParser(show_progress=False)
+        parser = HMDBMetaboliteParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         assert isinstance(result, Sec2PriMappingSet)
 
     def test_parse_produces_mappings(self, hmdb_xml_path: Path) -> None:
         """parse() extracts sec->pri mappings (fake file has 3)."""
-        parser = HMDBParser(show_progress=False)
+        parser = HMDBMetaboliteParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         assert len(result.mappings or []) == 3
 
     def test_parse_subject_object_ids(self, hmdb_xml_path: Path) -> None:
         """Secondary IDs are subjects; primary IDs are objects."""
-        parser = HMDBParser(show_progress=False)
+        parser = HMDBMetaboliteParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         mappings = result.mappings or []
         subjects = {m.subject_id for m in mappings}
@@ -169,45 +170,45 @@ class TestHMDBParser:
 
     def test_parse_no_secondary_skipped(self, hmdb_xml_path: Path) -> None:
         """Records with empty secondary_accessions produce no mappings."""
-        parser = HMDBParser(show_progress=False)
+        parser = HMDBMetaboliteParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         subjects = {m.subject_id for m in (result.mappings or [])}
         # HMDB0000003 has no secondary accessions
         assert "HMDB:HMDB0000003" not in subjects
 
-    def test_parse_proteins_returns_mapping_set(self, hmdb_proteins_xml_path: Path) -> None:
-        """parse_proteins() returns a Sec2PriMappingSet."""
-        parser = HMDBParser(show_progress=False)
-        result = parser.parse_proteins(hmdb_proteins_xml_path)
+    def test_parse_prot_returns_mapping_set(self, hmdb_proteins_xml_path: Path) -> None:
+        """parse() returns a Sec2PriMappingSet."""
+        parser = HMDBProteinParser(show_progress=False)
+        result = parser.parse(hmdb_proteins_xml_path)
         assert isinstance(result, Sec2PriMappingSet)
 
-    def test_parse_proteins_produces_mappings(self, hmdb_proteins_xml_path: Path) -> None:
-        """parse_proteins() extracts sec->pri mappings (fake has 3)."""
-        parser = HMDBParser(show_progress=False)
-        result = parser.parse_proteins(hmdb_proteins_xml_path)
+    def test_parse_prot_produces_mappings(self, hmdb_proteins_xml_path: Path) -> None:
+        """parse() extracts sec->pri mappings (fake has 3)."""
+        parser = HMDBProteinParser(show_progress=False)
+        result = parser.parse(hmdb_proteins_xml_path)
         assert len(result.mappings or []) == 3
 
-    def test_parse_proteins_bare_number_normalised(self, hmdb_proteins_xml_path: Path) -> None:
+    def test_parse_bare_number_normalised(self, hmdb_proteins_xml_path: Path) -> None:
         """Bare numeric secondary accessions are normalised to HMDBP prefix."""
-        parser = HMDBParser(show_progress=False)
-        result = parser.parse_proteins(hmdb_proteins_xml_path)
+        parser = HMDBProteinParser(show_progress=False)
+        result = parser.parse(hmdb_proteins_xml_path)
         subjects = {m.subject_id for m in (result.mappings or [])}
         # "5229" should become "HMDB:HMDBP05229" (secondary to subject)
         assert "HMDB:HMDBP05229" in subjects
         # full HMDBP accession unchanged
         assert "HMDB:HMDBP05261" in subjects
 
-    def test_parse_proteins_no_secondary_skipped(self, hmdb_proteins_xml_path: Path) -> None:
+    def test_parse_prot_no_secondary_skipped(self, hmdb_proteins_xml_path: Path) -> None:
         """Protein records with empty secondary_accessions produce no mappings."""
-        parser = HMDBParser(show_progress=False)
-        result = parser.parse_proteins(hmdb_proteins_xml_path)
+        parser = HMDBProteinParser(show_progress=False)
+        result = parser.parse(hmdb_proteins_xml_path)
         subjects = {m.subject_id for m in (result.mappings or [])}
         # HMDBP00003 has no secondary accessions
         assert "HMDB:HMDBP00003" not in subjects
 
     def test_parse_populates_primary_ids_including_no_secondary(self, hmdb_xml_path: Path) -> None:
         """_primary_ids includes ALL metabolites, even those with no secondaries."""
-        parser = HMDBParser(show_progress=False)
+        parser = HMDBMetaboliteParser(show_progress=False)
         result = parser.parse(hmdb_xml_path)
         pri_ids = result.to_pri_ids()
         # fake file has 3 metabolites; HMDB0000003 has no secondaries but must appear
@@ -345,7 +346,7 @@ class TestParserIntegration:
         """Test that all mappings are mapping instances."""
         results = [
             ChEBIParser(show_progress=False).parse(chebi_sdf_path),
-            HMDBParser(show_progress=False).parse(hmdb_xml_path),
+            HMDBMetaboliteParser(show_progress=False).parse(hmdb_xml_path),
             HGNCParser(show_progress=False).parse(hgnc_withdrawn_path),
             NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606"),
             UniProtParser(show_progress=False).parse(uniprot_sec_ac_path),
@@ -369,7 +370,7 @@ class TestParserIntegration:
         """Sec2pri mappings use IAO:0100001 with label 'term replaced by'."""
         results = [
             ChEBIParser(show_progress=False).parse(chebi_sdf_path),
-            HMDBParser(show_progress=False).parse(hmdb_xml_path),
+            HMDBMetaboliteParser(show_progress=False).parse(hmdb_xml_path),
             HGNCParser(show_progress=False).parse(hgnc_withdrawn_path),
             NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606"),
             UniProtParser(show_progress=False).parse(uniprot_sec_ac_path),

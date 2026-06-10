@@ -6,7 +6,6 @@ __all__ = [
     "ALL_DATASOURCES",
     "CHEBI",
     "HGNC",
-    "HMDB",
     "NCBI",
     "UNIPROT",
     "WIKIDATA",
@@ -15,7 +14,8 @@ __all__ = [
 # Pre-loaded datasource configurations
 CHEBI: DatasourceConfig = get_datasource_config("chebi")
 HGNC: DatasourceConfig = get_datasource_config("hgnc")
-HMDB: DatasourceConfig = get_datasource_config("hmdb")
+HMDB_PROT: DatasourceConfig = get_datasource_config("hmdb_proteins")
+HMDB_MET: DatasourceConfig = get_datasource_config("hmdb_metabolites")
 NCBI: DatasourceConfig = get_datasource_config("ncbi")
 UNIPROT: DatasourceConfig = get_datasource_config("uniprot")
 WIKIDATA: DatasourceConfig = get_datasource_config("wikidata")
@@ -24,7 +24,8 @@ WIKIDATA: DatasourceConfig = get_datasource_config("wikidata")
 ALL_DATASOURCES: dict[str, DatasourceConfig] = {
     "chebi": CHEBI,
     "hgnc": HGNC,
-    "hmdb": HMDB,
+    "hmdb_metabolites": HMDB_MET,
+    "hmdb_proteins": HMDB_PROT,
     "ncbi": NCBI,
     "uniprot": UNIPROT,
     "wikidata": WIKIDATA,

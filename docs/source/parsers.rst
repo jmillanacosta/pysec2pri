@@ -23,7 +23,7 @@ If possible, you can also add automated download in ``src/pysec2pri/download.py`
      - ``parse()``, ``parse_synonyms()``
    * - **HMDB**
      - ``hmdb_metabolites.xml`` or ``hmdb_proteins.xml``
-     - ``parse()``, ``parse_proteins()``
+     - ``parse()``
    * - **HGNC**
      - ``hgnc_complete_set.txt``, ``withdrawn.txt``
      - ``parse()``, ``parse_symbols()``, ``parse_all()``

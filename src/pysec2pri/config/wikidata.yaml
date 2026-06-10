@@ -1,7 +1,7 @@
 # Datasource metadata
 config_id: "wikidata"
 datasource_id: "wikidata"
-name: "Wikidata"
+name: "wikidata"
 parser_class: "WikidataParser"
 parse_options:
   entity_types: [metabolites, genes, proteins]

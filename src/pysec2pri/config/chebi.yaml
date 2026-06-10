@@ -5,7 +5,7 @@ name: "ChEBI"
 parser_class: "ChEBIParser"
 prefix: "CHEBI"
 curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
-
+entity_types: ["chemical entities"]
 mappingset:
   sssom_version: null
   curie_map:

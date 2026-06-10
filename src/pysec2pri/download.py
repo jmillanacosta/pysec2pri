@@ -224,20 +224,44 @@ def check_ncbi_release() -> ReleaseInfo:
     )
 
 
+METALINK_URL = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/RELEASE.metalink"
+NS = {"m": "http://www.metalinker.org/"}
+
+
+def _fetch_uniprot_metalink(url: str = METALINK_URL) -> str:
+    import requests
+
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return r.text
+
+
+def _parse_uniprot_release_xml(xml_text: str) -> tuple[str, datetime | None]:
+    from defusedxml.ElementTree import fromstring
+
+    root = fromstring(xml_text)
+
+    version_node = root.find("m:version", NS)
+    if version_node is None or not version_node.text:
+        raise ValueError("Missing UniProt version in metalink")
+
+    version = version_node.text.strip()
+    return version, None
+
+
 def check_uniprot_release() -> ReleaseInfo:
     """Check for the latest UniProt release.
 
     Returns:
         ReleaseInfo with the latest UniProt release details.
     """
-    sec_ac_url = ALL_DATASOURCES["uniprot"].download_urls["sec_ac"]
-    last_modified = get_file_last_modified(sec_ac_url)
-    version = last_modified.strftime("%Y-%m-%d") if last_modified else None
+    xml_text = _fetch_uniprot_metalink()
+    version, release_date = _parse_uniprot_release_xml(xml_text)
 
     return ReleaseInfo(
         datasource="uniprot",
-        version=version,
-        release_date=last_modified,
+        version=version,  # e.g. "2026_01"
+        release_date=release_date,  # likely None unless you derive it elsewhere
         is_new=True,
         files=dict(ALL_DATASOURCES["uniprot"].download_urls),
     )
@@ -250,7 +274,7 @@ def check_hmdb_release() -> ReleaseInfo:
         ReleaseInfo with the latest HMDB release details.
     """
     # HMDB requires downloading to check the version in XML
-    metabolites_url = ALL_DATASOURCES["hmdb"].download_urls["metabolites"]
+    metabolites_url = ALL_DATASOURCES["hmdb_metabolites"].download_urls["metabolites"]
     last_modified = get_file_last_modified(metabolites_url)
     version = last_modified.strftime("%Y-%m-%d") if last_modified else None
 

@@ -114,28 +114,10 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
     """
     raw = load_config(datasource_name)
 
-    # Extract curie_map to get prefix and curie_base_url
-    curie_map = raw.get("mappingset", {}).get("curie_map", {})
-    # The first entry that's not a standard prefix is the datasource prefix
-    standard_prefixes = {"IAO", "oboInOwl", "semapv", "skos", "sssom", "sec2pri"}
-    prefix = ""
-    curie_base_url = ""
-    for k, v in curie_map.items():
-        if k not in standard_prefixes:
-            prefix = k
-            curie_base_url = v
-            break
-
-    # Determine name - special case for wikidata
-    if datasource_name.lower() == "wikidata":
-        name = "Wikidata"
-    else:
-        name = datasource_name.upper()
-
     return DatasourceConfig(
-        name=raw.get("name") or name,
-        prefix=raw.get("prefix") or prefix,
-        curie_base_url=raw.get("curie_base_url") or curie_base_url,
+        name=raw.get("name", ""),
+        prefix=raw.get("prefix", ""),
+        curie_base_url=raw.get("curie_base_url", ""),
         config_id=raw.get("config_id", ""),
         datasource_id=raw.get("datasource_id", ""),
         parser_class=raw.get("parser_class", ""),
@@ -1028,9 +1010,16 @@ def _build_annotated_mapping(m: Mapping, new_comment: str) -> Mapping:
     return Mapping(**m_fields)
 
 
-def _annotate_id_mappings(mappings: list[Mapping]) -> list[Mapping]:
+def _annotate_id_mappings(
+    mappings: list[Mapping],
+    primaries: set[str] | None = None,
+) -> list[Mapping]:
     """Annotate ambiguous id mappings (subject_id is also an active primary ID)."""
-    object_ids: set[str] = {str(getattr(m, "object_id", None) or "") for m in mappings} - {""}
+    if not primaries:
+        object_ids: set[str] = {str(getattr(m, "object_id", None) or "") for m in mappings} - {""}
+    else:
+        object_ids = primaries
+
     result: list[Mapping] = []
     for m in mappings:
         subj_id = str(getattr(m, "subject_id", None) or "")
@@ -1041,10 +1030,10 @@ def _annotate_id_mappings(mappings: list[Mapping]) -> list[Mapping]:
                 result.append(m)
                 continue
             new_comment = (
-                f"Ambiguous mapping: subject_id '{subj_id}' is also a current primary ID"
+                f"Ambiguous mapping: secondary '{subj_id}' is also a current primary ID"
                 + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
                 + "."
-                + (f" Original comment: {existing}" if existing else "")
+                + (f" {existing}" if existing else "")
             )
             result.append(_build_annotated_mapping(m, new_comment))
         else:
@@ -1052,14 +1041,20 @@ def _annotate_id_mappings(mappings: list[Mapping]) -> list[Mapping]:
     return result
 
 
-def _annotate_label_mappings(mappings: list[Mapping]) -> list[Mapping]:
+def _annotate_label_mappings(
+    mappings: list[Mapping],
+    primary_labels: dict[str, set[str]] | None = None,
+) -> list[Mapping]:
     """Annotate ambiguous label mappings."""
-    label_to_obj_ids: dict[str, set[str]] = {}
-    for m in mappings:
-        lbl = str(getattr(m, "object_label", None) or "")
-        oid = str(getattr(m, "object_id", None) or "")
-        if lbl and oid:
-            label_to_obj_ids.setdefault(lbl, set()).add(oid)
+    if primary_labels:
+        label_to_obj_ids = primary_labels
+    else:
+        label_to_obj_ids = {}
+        for m in mappings:
+            lbl = str(getattr(m, "object_label", None) or "")
+            oid = str(getattr(m, "object_id", None) or "")
+            if lbl and oid:
+                label_to_obj_ids.setdefault(lbl, set()).add(oid)
 
     result: list[Mapping] = []
     for m in mappings:
@@ -1074,7 +1069,7 @@ def _annotate_label_mappings(mappings: list[Mapping]) -> list[Mapping]:
                 continue
             conflict_list = ", ".join(sorted(conflicting_ids))
             new_comment = (
-                f"Ambiguous mapping: subject_label '{subj_label}' is also the primary"
+                f"Ambiguous mapping: subject_label '{subj_label}' is also the"
                 f" label of {conflict_list}"
                 + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
                 + "."
@@ -1087,7 +1082,10 @@ def _annotate_label_mappings(mappings: list[Mapping]) -> list[Mapping]:
 
 
 def _annotate_ambiguous_mappings(
-    mappings: list[Mapping], mapping_type: str = "id"
+    mappings: list[Mapping],
+    primary_labels: dict[str, set[str]] | None = None,
+    primary_ids: set[str] | None = None,
+    mapping_type: str = "id",
 ) -> list[Mapping]:
     """Return a new list where ambiguous mappings carry an explanatory comment.
 
@@ -1098,8 +1096,7 @@ def _annotate_ambiguous_mappings(
     For **label** mappings a mapping is ambiguous when its ``subject_label``
     appears as a primary label for a *different* entity, determined by
     checking whether the same label text is paired with a different
-    ``object_id`` elsewhere in the list.  This avoids false-positives caused
-    by the fact that label mappings always share ``subject_id == object_id``.
+    ``object_id`` elsewhere in the list.
 
     This function is called automatically by
     :meth:`BaseParser.create_mapping_set` so that every output format
@@ -1119,8 +1116,8 @@ def _annotate_ambiguous_mappings(
         return mappings
 
     if mapping_type == "id":
-        return _annotate_id_mappings(mappings)
-    return _annotate_label_mappings(mappings)
+        return _annotate_id_mappings(mappings, primary_ids)
+    return _annotate_label_mappings(mappings, primary_labels)
 
 
 def _get_primary_sets(
@@ -1188,7 +1185,7 @@ def _build_conflicts(
         if subj_id and subj_id in primary_ids:
             amb_ids.add(subj_id)
             conflicts.append(
-                f"subject_id '{subj_id}' is also a current primary ID"
+                f"secondary '{subj_id}' is also a current primary ID"
                 + (f" (mapping points to '{obj_id}')" if obj_id else "")
             )
     if mode == "label":
@@ -1760,8 +1757,7 @@ class BaseParser(ABC):
         if self.version and description:
             description = f"{description} Version: {self.version}."
 
-        # Annotate ambiguous mappings (subject also appears as object) with a
-        # comment so every output format carries the information by default.
+        # Annotate ambiguous mappings (primary also appears as secondary)
         mappings = _annotate_ambiguous_mappings(mappings, mapping_type=mapping_type)
 
         # Create the mapping set with SSSOM metadata
@@ -1789,7 +1785,19 @@ class BaseParser(ABC):
             subject_preprocessing=_compress(ms_meta.get("subject_preprocessing")),
             object_preprocessing=_compress(ms_meta.get("object_preprocessing")),
         )
-
+        # Annotate ambiguous mappings (primary also appears as secondary)
+        if mapping_set_class == LabelMappingSet:
+            pri_labels = mapping_set._primary_symbols
+            mappings_updated = _annotate_ambiguous_mappings(
+                mappings, mapping_type=mapping_type, primary_labels=pri_labels
+            )
+            mapping_set.mappings = mappings_updated
+        else:
+            pri_ids = mapping_set._primary_ids
+            mappings_updated = _annotate_ambiguous_mappings(
+                mappings, mapping_type=mapping_type, primary_ids=pri_ids
+            )
+            mapping_set.mappings = mappings_updated
         # Compute cardinalities
         mapping_set.compute_cardinalities()
 

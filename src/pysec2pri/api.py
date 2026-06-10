@@ -428,12 +428,13 @@ def generate_hmdb_primary_ids(
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
-    from pysec2pri.parsers.hmdb import HMDBParser
+    from pysec2pri.parsers.hmdb import HMDBMetaboliteParser
 
     if metabolites_path is None and proteins_path is None:
-        metabolites_path = _auto_download("hmdb", version, keys=["metabolites"])["metabolites"]
-
-    parser = HMDBParser(version=version, show_progress=show_progress)
+        metabolites_path = _auto_download("hmdb_metabolites", version, keys=["metabolites"])[
+            "metabolites"  # Metabolites default
+        ]
+    parser = HMDBMetaboliteParser(version=version, show_progress=show_progress)
     return parser.parse_primary_ids(
         metabolites_path=metabolites_path,
         proteins_path=proteins_path,
@@ -581,12 +582,12 @@ def generate_hmdb(
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
-    from pysec2pri.parsers import HMDBParser
+    from pysec2pri.parsers import HMDBMetaboliteParser
 
     if input_path is None:
-        input_path = _auto_download("hmdb", version)["metabolites"]
+        input_path = _auto_download("hmdb_metabolites", version)["metabolites"]
 
-    parser = HMDBParser(version=version, show_progress=show_progress)
+    parser = HMDBMetaboliteParser(version=version, show_progress=show_progress)
     return parser.parse(Path(input_path))
 
 
@@ -604,13 +605,13 @@ def generate_hmdb_proteins(
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
-    from pysec2pri.parsers import HMDBParser
+    from pysec2pri.parsers import HMDBProteinParser
 
     if input_path is None:
-        input_path = _auto_download("hmdb", version)["proteins"]
+        input_path = _auto_download("hmdb_proteins", version)["proteins"]
 
-    parser = HMDBParser(version=version, show_progress=show_progress)
-    return parser.parse_proteins(Path(input_path))
+    parser = HMDBProteinParser(version=version, show_progress=show_progress)
+    return parser.parse(Path(input_path))
 
 
 def generate_wikidata(
