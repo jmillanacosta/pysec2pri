@@ -507,6 +507,8 @@ class HGNCDownloader(BaseDownloader):
             name = item.get("name", "")
             match = re.search(r"hgnc_complete_set_(\d{4}-\d{2}-\d{2})\.txt$", name)
             if match:
+                if f"withdrawn_{match.group(1)}" not in response.text:
+                    continue
                 versions.append(match.group(1))
         return sorted(set(versions))
 
