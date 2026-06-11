@@ -416,9 +416,9 @@ class HGNCParser(BaseParser):
             for alias in aliases:
                 rows_data.append(
                     {
-                        "subject_id": hgnc_id,
-                        "subject_label": alias,
                         "object_id": hgnc_id,
+                        "subject_label": alias,
+                        "subject_type": "rdfs literal",
                         "object_label": label,
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
@@ -428,9 +428,9 @@ class HGNCParser(BaseParser):
             for prev in prev_labels:
                 rows_data.append(
                     {
-                        "subject_id": hgnc_id,
-                        "subject_label": prev,
                         "object_id": hgnc_id,
+                        "subject_label": prev,
+                        "subject_type": "rdfs literal",
                         "object_label": label,
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
