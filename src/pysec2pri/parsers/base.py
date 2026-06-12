@@ -1161,7 +1161,7 @@ def _extract_fields_ambig(m: Mapping) -> tuple[str, str, str, str, str, str]:
 
 
 def _build_conflicts(
-    subj_id: str,
+    subj_id: str | None,
     subj_label: str,
     obj_id: str,
     obj_label: str,
@@ -1189,15 +1189,16 @@ def _build_conflicts(
                 + (f" (mapping points to '{obj_id}')" if obj_id else "")
             )
     if mode == "label":
-        ids_for_label = primary_labels.get(subj_label) if subj_label else None
-        conflicting_ids = (ids_for_label - {obj_id}) if ids_for_label else set()
-        if conflicting_ids:
-            amb_labels.add(subj_label)
-            conflict_list = ", ".join(sorted(conflicting_ids))
-            conflicts.append(
-                f"subject_label '{subj_label}' is also the primary label of {conflict_list}"
-                + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
-            )
+        if subj_label in primary_labels:
+            ids_for_label = primary_labels.get(subj_label) if subj_label else None
+            conflicting_ids = (ids_for_label - {obj_id}) if ids_for_label else set()
+            if conflicting_ids:
+                amb_labels.add(subj_label)
+                conflict_list = ", ".join(sorted(conflicting_ids))
+                conflicts.append(
+                    f"subject_label '{subj_label}' is also the primary label of {conflict_list}"
+                    + (f" (this mapping resolves to '{obj_id}')" if obj_id else "")
+                )
     return conflicts, amb_ids, amb_labels
 
 
@@ -1241,8 +1242,10 @@ def _find_ambiguous(mapping_set: Sec2PriMappingSet) -> AmbiguousMappingSet:
         found.
     """
     mode = "id"
+    get_subj = "subject_id"
     if isinstance(mapping_set, LabelMappingSet):
         mode = "label"
+        get_subj = "object_id"
     mappings = list(mapping_set.mappings or [])
     primary_ids, primary_labels = _get_primary_sets(mapping_set, mappings)
 
@@ -1252,14 +1255,12 @@ def _find_ambiguous(mapping_set: Sec2PriMappingSet) -> AmbiguousMappingSet:
 
     for m in mappings:
         subj_id, subj_label, obj_id, obj_label, pred, raw_comment = _extract_fields_ambig(m)
-
         conflicts, ids, labels = _build_conflicts(
             subj_id, subj_label, obj_id, obj_label, pred, primary_ids, primary_labels, mode
         )
 
         ambiguous_ids |= ids
         ambiguous_labels |= labels
-
         if not conflicts:
             continue
 
@@ -1277,7 +1278,7 @@ def _find_ambiguous(mapping_set: Sec2PriMappingSet) -> AmbiguousMappingSet:
         changed = False
 
         for m in mappings:
-            subj_id = str(getattr(m, "subject_id", None) or "")
+            subj_id = str(getattr(m, get_subj, None) or "")
             subj_label = str(getattr(m, "subject_label", None) or "")
 
             replacement = annotated_by_subj.get(subj_id) or annotated_by_label.get(subj_label)
