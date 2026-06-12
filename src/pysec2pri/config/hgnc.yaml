@@ -125,7 +125,7 @@ mapping_sets:
     method: parse_symbols
     primary_input: complete
     required_inputs: [complete]
-    formats: [sssom, symbol_sec2pri, name2synonym, pri_symbols, rdf, json, owl, all]
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

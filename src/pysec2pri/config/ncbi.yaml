@@ -127,7 +127,7 @@ mapping_sets:
     method: parse_symbols
     primary_input: gene_info
     required_inputs: [gene_info]
-    formats: [sssom, symbol_sec2pri, name2synonym, pri_symbols, rdf, json, owl, all]
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 
 input_file_types:
   - gene_info.gz
