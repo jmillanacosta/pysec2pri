@@ -125,7 +125,7 @@ mapping_sets:
     primary_input: null
     required_inputs: []
     # name2synonym excluded: Wikidata uses oboInOwl:consider, not hasExactSynonym
-    formats: [sssom, symbol_sec2pri, pri_symbols, rdf, json, owl, all]
+    formats: [sssom, label_sec2pri, pri_labels, rdf, json, owl, all]
 input_file_types:
   - sparql
 

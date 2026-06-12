@@ -138,7 +138,7 @@ mapping_sets:
     method: parse_synonyms
     primary_input: names
     required_inputs: [names, compounds]
-    formats: [sssom, symbol_sec2pri, name2synonym, pri_symbols, rdf, json, owl, all]
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 
 source: "ChEBI database"
 homepage: "https://www.ebi.ac.uk/chebi/"
