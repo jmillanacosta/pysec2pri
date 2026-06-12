@@ -1,3 +1,6 @@
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
+
 [build-system]
 requires = ["uv_build>=0.9.6,<1.0"]
 build-backend = "uv_build"
@@ -13,6 +16,7 @@ authors = [
 maintainers = [
     { name = "Javier Millán Acosta", email = "javier.millan.acosta@gmail.com" }
 ]
+
 
 # See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#classifiers
 # Search tags using the controlled vocabulary at https://pypi.org/classifiers
@@ -57,7 +61,7 @@ dependencies = [
     "typing-extensions",
     "pydantic>=2.0", # data validation and models
     "linkml>=1.10.0",
-    "sssom>=0.4.0", # SSSOM standard support
+    "sssom==0.4.21", # SSSOM standard support
     "curies>=0.7.0", # CURIE handling
     "httpx>=0.24.0", # HTTP client for downloads
     "polars>=0.20.0", # Fast dataframe operations for diffs
@@ -68,6 +72,7 @@ dependencies = [
     "numpy", # Required by pandas and polars
     "rdkit", # Chemistry toolkit for SDF parsing
     "polars-runtime-32", # Polars runtime for 32-bit systems
+    "sssom-schema==1.1.0a5", # SSSOM schema for validation
 
 ]
 
@@ -136,6 +141,7 @@ Funding = "https://github.com/sponsors/jmillanacosta"
 
 [project.scripts]
 pysec2pri = "pysec2pri.cli:main"
+
 
 [tool.cruft]
 skip = [

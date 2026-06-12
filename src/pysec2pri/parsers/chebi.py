@@ -303,9 +303,9 @@ class ChEBIParser(BaseParser):
         }
         rows = [
             {
-                "subject_id": sid,
-                "subject_label": syn,  # synonym = secondary : subject
                 "object_id": sid,
+                "subject_label": syn,  # synonym = secondary : subject
+                "subject_type": "rdfs literal",
                 "object_label": pname,  # primary name : object
                 "_label_type": "alias",
             }
