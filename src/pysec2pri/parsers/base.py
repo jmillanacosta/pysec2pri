@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -357,7 +358,7 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
     def _default_stem(self) -> str:
         """Derive a base filename stem from mapping set metadata."""
-        ms_id: str = str(getattr(self, "mapping_set_id", None) or "")
+        ms_id: str = str(getattr(self, "mapping_set_id", None) or "") + f"/{self.version}"
         if ms_id:
             stem = ms_id.rstrip("/").rsplit("/", 1)[-1]
         else:
@@ -1415,6 +1416,11 @@ class BaseParser(ABC):
                     if hasattr(mapping, key) and value is not None:
                         setattr(mapping, key, value)
 
+    def _record_id(self, namespace: str, version: str, pri: str, sec: str) -> str:
+        """Assign a hex ID to a record."""
+        digest = hashlib.sha256(f"{pri}|{sec}".encode()).hexdigest()[:16]
+        return f"{namespace}{version}/{digest}"
+
     def _extract_version_from_file(self, file_path: Path) -> str | None:
         """Extract a version string embedded in a data file's header.
 
@@ -1684,16 +1690,16 @@ class BaseParser(ABC):
         return [s.strip() for s in labels_str.split(sep) if s.strip()]
 
     @staticmethod
-    def is_withdrawn_primary(subject_id: str) -> bool:
-        """Check if a primary ID represents a withdrawn/deleted entry.
+    def is_withdrawn_primary(id: str) -> bool:
+        """Check if an ID represents a withdrawn/deleted entry.
 
         Args:
-            subject_id: The primary identifier to check.
+            id: The primary identifier to check.
 
         Returns:
             True if the primary ID indicates a withdrawn entry.
         """
-        return subject_id == WITHDRAWN_ENTRY
+        return id == WITHDRAWN_ENTRY
 
     @staticmethod
     def _parse_merged_info(merged_str: str) -> tuple[str, str] | None:
@@ -1760,12 +1766,12 @@ class BaseParser(ABC):
 
         # Annotate ambiguous mappings (primary also appears as secondary)
         mappings = _annotate_ambiguous_mappings(mappings, mapping_type=mapping_type)
-
+        fix_ms_id = str(ms_meta.get("mapping_set_id")) + f"/{self.version}"
         # Create the mapping set with SSSOM metadata
         mapping_set = mapping_set_class(
             mappings=mappings,
             curie_map=curie_map,
-            mapping_set_id=ms_meta.get("mapping_set_id"),
+            mapping_set_id=fix_ms_id,
             mapping_set_version=self.version,
             mapping_set_title=ms_meta.get("mapping_set_title"),
             mapping_set_description=description or None,

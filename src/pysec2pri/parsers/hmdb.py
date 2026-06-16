@@ -186,6 +186,12 @@ class HMDBParser(BaseParser):
                     "subject_label": "",
                     "object_id": primary_id,
                     "object_label": primary_label,
+                    "record_id": self._record_id(
+                        str(self.get_mapping_metadata()["record_id"]),
+                        str(self.version),
+                        primary_id,
+                        secondary_id,
+                    ),
                 }
             )
         return rows
@@ -370,7 +376,7 @@ class HMDBProteinParser(HMDBParser):
         return self._parse_xml(
             Path(input_path),
             element_tag="protein",
-            prefix="HMDB",
+            prefix="HMDBP",
             desc="Parsing HMDB proteins XML",
             secondary_normaliser=self._normalise_protein_secondary,
         )

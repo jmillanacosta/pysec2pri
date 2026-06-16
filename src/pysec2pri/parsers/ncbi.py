@@ -253,6 +253,12 @@ class NCBIParser(BaseParser):
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
+                        "record_id": self._record_id(
+                            str(self.get_mapping_metadata()["record_id"]),
+                            str(self.version),
+                            object_id,
+                            subject_id,
+                        ),
                     }
                 )
             else:
@@ -264,6 +270,12 @@ class NCBIParser(BaseParser):
                         "predicate_id": m_meta["predicate_id"],
                         "predicate_label": m_meta.get("predicate_label"),
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,
+                        "record_id": self._record_id(
+                            str(self.get_mapping_metadata()["record_id"]),
+                            str(self.version),
+                            object_id,
+                            subject_id,
+                        ),
                     }
                 )
 
@@ -332,6 +344,12 @@ class NCBIParser(BaseParser):
                                 "object_label": pri_label_str,  # current label = primary : object
                                 "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
+                                "record_id": self._record_id(
+                                    str(self.get_mapping_metadata()["record_id"]),
+                                    str(self.version),
+                                    curie_id,
+                                    syn,
+                                ),
                             }
                         )
 
