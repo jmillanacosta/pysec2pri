@@ -278,6 +278,8 @@ class ChEBIParser(BaseParser):
     def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
         """Build Mapping objects for secondary->primary ID mappings."""
         m_meta = self.get_mapping_metadata()
+        version = str(self.version)
+        record_id = m_meta.get("record_id", None)
         fixed = {
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
@@ -288,12 +290,26 @@ class ChEBIParser(BaseParser):
             "confidence": m_meta.get("confidence"),
             "license": m_meta.get("license"),
         }
-        rows = [{"subject_id": sec, "object_id": pri} for pri, sec in raw_id_mappings]
+        rows = [
+            {
+                "subject_id": sec,
+                "object_id": pri,
+                "record_id": self._record_id(
+                    str(record_id),
+                    version,
+                    pri,
+                    sec,
+                ),
+            }
+            for pri, sec in raw_id_mappings
+        ]
         return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
 
     def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
         """Build Mapping objects for label/synonym mappings."""
         m_meta = self.get_mapping_metadata()
+        record_id = m_meta.get("record_id", None)
+        version = str(m_meta.get("version", ""))
         fixed = {
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
@@ -303,6 +319,12 @@ class ChEBIParser(BaseParser):
         }
         rows = [
             {
+                "record_id": self._record_id(
+                    str(record_id),
+                    version,
+                    sid,
+                    syn,
+                ),
                 "object_id": sid,
                 "subject_label": syn,  # synonym = secondary : subject
                 "subject_type": "rdfs literal",
@@ -310,6 +332,7 @@ class ChEBIParser(BaseParser):
                 "_label_type": "alias",
             }
             for sid, pname, syn in raw_name_mappings
+            if syn
         ]
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
 

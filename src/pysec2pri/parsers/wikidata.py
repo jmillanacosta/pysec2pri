@@ -473,6 +473,12 @@ class WikidataParser(BaseParser):
                 "object_id": row[obj_i],
                 "subject_label": row[subj_label_i] if subj_label_i is not None else None,
                 "object_label": row[obj_label_i] if obj_label_i is not None else None,
+                "record_id": self._record_id(
+                    str(self.get_mapping_metadata()["record_id"]),
+                    str(self.version),
+                    row[obj_i],
+                    row[subj_i],
+                ),
             }
             for row in redirects_df.iter_rows()
         ]

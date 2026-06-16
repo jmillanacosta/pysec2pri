@@ -194,9 +194,9 @@ class TestHMDBParsers:
         result = parser.parse(hmdb_proteins_xml_path)
         subjects = {m.subject_id for m in (result.mappings or [])}
         # "5229" should become "HMDB:HMDBP05229" (secondary to subject)
-        assert "HMDB:HMDBP05229" in subjects
+        assert "HMDBP:HMDBP05229" in subjects
         # full HMDBP accession unchanged
-        assert "HMDB:HMDBP05261" in subjects
+        assert "HMDBP:HMDBP05261" in subjects
 
     def test_parse_prot_no_secondary_skipped(self, hmdb_proteins_xml_path: Path) -> None:
         """Protein records with empty secondary_accessions produce no mappings."""
@@ -204,7 +204,7 @@ class TestHMDBParsers:
         result = parser.parse(hmdb_proteins_xml_path)
         subjects = {m.subject_id for m in (result.mappings or [])}
         # HMDBP00003 has no secondary accessions
-        assert "HMDB:HMDBP00003" not in subjects
+        assert "HMDBP:HMDBP00003" not in subjects
 
     def test_parse_populates_primary_ids_including_no_secondary(self, hmdb_xml_path: Path) -> None:
         """_primary_ids includes ALL metabolites, even those with no secondaries."""

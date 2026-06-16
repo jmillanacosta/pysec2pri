@@ -92,6 +92,9 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first data row
 
+        meta_id = str(self.get_mapping_metadata()["record_id"])
+        version = str(self.version)
+
         df = (
             pl.scan_csv(
                 file_path,
@@ -124,7 +127,19 @@ class UniProtParser(BaseParser):
                 (pl.lit("UniProtKB:") + pl.col("subject_id")).alias("subject_id"),
                 (pl.lit("UniProtKB:") + pl.col("object_id")).alias("object_id"),
             )
-            .select(["subject_id", "object_id"])
+            .with_columns(
+                pl.struct(["subject_id", "object_id"])
+                .map_elements(
+                    lambda x: self._record_id(
+                        meta_id,
+                        version,
+                        x["object_id"],
+                        x["subject_id"],
+                    ),
+                    return_dtype=pl.Utf8,
+                )
+                .alias("record_id")
+            )
             .collect()
         )
 
@@ -162,6 +177,9 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first deleted accession
 
+        meta_id = str(self.get_mapping_metadata()["record_id"])
+        version = str(self.version)
+
         df = (
             pl.scan_csv(
                 file_path,
@@ -178,8 +196,21 @@ class UniProtParser(BaseParser):
                     r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"
                 )
             )
-            .with_columns((pl.lit("UniProtKB:") + pl.col("accession")).alias("object_id"))
-            .select("object_id")
+            .with_columns(pl.lit("UniProtKB:") + pl.col("accession").alias("object_id"))
+            .with_columns(
+                pl.struct(["object_id"])
+                .map_elements(
+                    lambda x: self._record_id(
+                        meta_id,
+                        version,
+                        x["object_id"],
+                        x["object_id"],  # subject_id == object_id in this dataset
+                    ),
+                    return_dtype=pl.Utf8,
+                )
+                .alias("record_id")
+            )
+            .select(["object_id", "record_id"])
             .collect()
         )
 

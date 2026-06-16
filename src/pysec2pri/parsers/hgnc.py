@@ -331,6 +331,12 @@ class HGNCParser(BaseParser):
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
+                        "record_id": self._record_id(
+                            str(m_meta["record_id"]),
+                            str(self.version),
+                            WITHDRAWN_ENTRY,
+                            hgnc_id,
+                        ),
                     }
                 )
                 continue
@@ -348,6 +354,12 @@ class HGNCParser(BaseParser):
                             "object_label": target_label or "",
                             "predicate_id": m_meta["predicate_id"],
                             "predicate_label": m_meta.get("predicate_label"),
+                            "record_id": self._record_id(
+                                str(m_meta["record_id"]),
+                                str(self.version),
+                                target_id,
+                                hgnc_id,
+                            ),
                         }
                     )
 
@@ -422,6 +434,12 @@ class HGNCParser(BaseParser):
                         "object_label": label,
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
+                        "record_id": self._record_id(
+                            str(m_meta["record_id"]),
+                            str(self.version),
+                            hgnc_id,
+                            alias,
+                        ),
                     }
                 )
 
@@ -434,6 +452,12 @@ class HGNCParser(BaseParser):
                         "object_label": label,
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
+                        "record_id": self._record_id(
+                            str(m_meta["record_id"]),
+                            str(self.version),
+                            hgnc_id,
+                            prev,
+                        ),
                     }
                 )
 
