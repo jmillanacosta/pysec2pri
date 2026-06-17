@@ -1142,7 +1142,9 @@ def _get_primary_sets(
     ``label_index`` maps each label text to the set of primary IDs that carry
     that label.
     """
-    stored_ids: set[str] | None = getattr(mapping_set, "_primary_ids", None)
+    stored_ids: set[str] | None = (
+        getattr(mapping_set, "_primary_ids", None) or None
+    )  # treat empty set as missing
     stored_labels: dict[str, set[str]] | None = (
         getattr(mapping_set, "_primary_labels", None) or None
     )  # treat empty dict as missing
@@ -1218,20 +1220,18 @@ def _build_conflicts(
 
 def _make_annotated_mapping(m: Mapping, conflicts: list[str], existing_raw: str) -> Mapping:
     if existing_raw.startswith("Ambiguous mapping:"):
+        # Already wrapped by _annotate_id_mappings/_annotate_label_mappings;
+        # unwrap to the truly original comment to avoid nested wrapping.
         marker = " Original comment: "
-        if marker in existing_raw:
-            existing_raw.split(marker, 1)[1]
-        else:
-            pass
+        original = existing_raw.split(marker, 1)[1] if marker in existing_raw else ""
     else:
-        pass
-
-    str(getattr(m, "subject_id", None) or "")
-    str(getattr(m, "subject_label", None) or "")
+        original = existing_raw
 
     conflict_detail = "; ".join(conflicts)
 
-    new_comment = f"Ambiguous: {conflict_detail}."
+    new_comment = f"Ambiguous: {conflict_detail}." + (
+        f" Original comment: {original}" if original else ""
+    )
 
     m_fields = {
         k: getattr(m, k, None)
