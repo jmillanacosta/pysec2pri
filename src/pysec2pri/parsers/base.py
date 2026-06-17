@@ -602,30 +602,43 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
         if on == "label":
             sec_field, pri_field = "subject_label", "object_label"
+            sentinel = WITHDRAWN_ENTRY_LABEL
         else:
             sec_field, pri_field = "subject_id", "object_id"
+            sentinel = WITHDRAWN_ENTRY
 
         import polars as pl
 
         sec_vals = [str(getattr(m, sec_field, None) or "") for m in mappings]
         pri_vals = [str(getattr(m, pri_field, None) or "") for m in mappings]
 
+        df = pl.DataFrame({"sec": sec_vals, "pri": pri_vals})
+        sec_is_nf = pl.col("sec") == sentinel
+        pri_is_nf = pl.col("pri") == sentinel
+
+        # Withdrawn (sssom:NoTermFound) rows are excluded from the
+        # distinct-counterpart counts, matching sssom's own behavior.
+        real = df.filter(~sec_is_nf & ~pri_is_nf)
+        objects_per_subject = real.group_by("sec").agg(pl.col("pri").n_unique().alias("n_objects"))
+        subjects_per_object = real.group_by("pri").agg(pl.col("sec").n_unique().alias("n_subjects"))
+
         cardinalities: list[str] = (
-            pl.DataFrame({"sec": sec_vals, "pri": pri_vals})
-            .with_columns(
-                pl.col("sec").count().over("sec").alias("s_count"),
-                pl.col("pri").count().over("pri").alias("p_count"),
-            )
+            df.join(objects_per_subject, on="sec", how="left", maintain_order="left")
+            .join(subjects_per_object, on="pri", how="left", maintain_order="left")
             .select(
-                pl.when(pl.col("s_count") == 1, pl.col("p_count") == 1)
+                pl.when(sec_is_nf & pri_is_nf)
+                .then(pl.lit("0:0"))
+                .when(sec_is_nf)
+                .then(pl.lit("0:1"))
+                .when(pri_is_nf)
+                .then(pl.lit("1:0"))
+                .when((pl.col("n_subjects") == 1) & (pl.col("n_objects") == 1))
                 .then(pl.lit("1:1"))
-                .when(pl.col("s_count") > 1, pl.col("p_count") == 1)
-                .then(pl.lit("n:1"))
-                .when(pl.col("s_count") == 1, pl.col("p_count") > 1)
+                .when((pl.col("n_subjects") == 1) & (pl.col("n_objects") > 1))
                 .then(pl.lit("1:n"))
-                .when(pl.col("s_count") > 1, pl.col("p_count") > 1)
-                .then(pl.lit("n:n"))
-                .otherwise(pl.lit("1:0"))
+                .when((pl.col("n_subjects") > 1) & (pl.col("n_objects") == 1))
+                .then(pl.lit("n:1"))
+                .otherwise(pl.lit("n:n"))
                 .alias("cardinality")
             )
             .get_column("cardinality")
