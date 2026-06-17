@@ -119,32 +119,36 @@ class UniProtParser(BaseParser):
                 pl.col("line").str.split(" ").list.last().str.strip_chars().alias("object_id"),
             )
             .filter(
+                pl.col("subject_id").is_not_null(),
+                pl.col("object_id").is_not_null(),
                 pl.col("subject_id").str.len_chars() > 0,
                 pl.col("object_id").str.len_chars() > 0,
                 pl.col("subject_id") != pl.col("object_id"),
             )
             .with_columns(
-                (pl.lit("UniProtKB:") + pl.col("subject_id")).alias("subject_id"),
-                (pl.lit("UniProtKB:") + pl.col("object_id")).alias("object_id"),
-            )
-            .with_columns(
-                pl.struct(["subject_id", "object_id"])
-                .map_elements(
-                    lambda x: self._record_id(
-                        meta_id,
-                        version,
-                        x["object_id"],
-                        x["subject_id"],
-                    ),
-                    return_dtype=pl.Utf8,
-                )
-                .alias("record_id")
+                pl.concat_str([pl.lit("UniProtKB:"), pl.col("subject_id")]).alias("subject_id"),
+                pl.concat_str([pl.lit("UniProtKB:"), pl.col("object_id")]).alias("object_id"),
             )
             .collect()
         )
 
         if df.is_empty():
             return []
+
+        df = df.with_columns(
+            pl.struct(["subject_id", "object_id"])
+            .map_elements(
+                lambda x: self._record_id(
+                    meta_id,
+                    version,
+                    x["object_id"],
+                    x["subject_id"],
+                ),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("record_id")
+        )
 
         m_meta = self.get_mapping_metadata()
         fixed = {
@@ -156,7 +160,7 @@ class UniProtParser(BaseParser):
             "mapping_tool": m_meta.get("mapping_tool"),
             "license": m_meta.get("license"),
         }
-        rows = df.select(["subject_id", "object_id"]).to_dicts()
+        rows = df.select(["subject_id", "object_id", "record_id"]).to_dicts()
         return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
     def _parse_delac(self, file_path: Path) -> list[Mapping]:
@@ -191,31 +195,36 @@ class UniProtParser(BaseParser):
                 quote_char=None,
             )
             .with_columns(pl.col("accession").str.strip_chars())
+            .filter(pl.col("accession").str.len_chars() > 0)
             .filter(
                 pl.col("accession").str.contains(
                     r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"
                 )
             )
-            .with_columns(pl.lit("UniProtKB:") + pl.col("accession").alias("object_id"))
             .with_columns(
-                pl.struct(["object_id"])
-                .map_elements(
-                    lambda x: self._record_id(
-                        meta_id,
-                        version,
-                        x["object_id"],
-                        x["object_id"],  # subject_id == object_id in this dataset
-                    ),
-                    return_dtype=pl.Utf8,
-                )
-                .alias("record_id")
+                pl.concat_str([pl.lit("UniProtKB:"), pl.col("accession")]).alias("object_id")
             )
-            .select(["object_id", "record_id"])
+            .select("object_id")
             .collect()
         )
 
         if df.is_empty():
             return []
+
+        df = df.with_columns(
+            pl.struct(["object_id"])
+            .map_elements(
+                lambda x: self._record_id(
+                    meta_id,
+                    version,
+                    x["object_id"],
+                    x["object_id"],  # subject_id == object_id in this dataset
+                ),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("record_id")
+        )
 
         m_meta = self.get_mapping_metadata()
         fixed = {
@@ -229,7 +238,7 @@ class UniProtParser(BaseParser):
             "license": m_meta.get("license"),
             "comment": "Deleted accession with no replacement.",
         }
-        rows = df.select("object_id").to_dicts()
+        rows = df.select(["object_id", "record_id"]).to_dicts()
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
     def _create_mapping_set(
