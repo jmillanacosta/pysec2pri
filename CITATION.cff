@@ -8,6 +8,6 @@ authors:
     orcid: "https://orcid.org/0000-0002-4904-3269"
   - name: "Denise Slenter"
     orcid: "https://orcid.org/0000-0001-8449-1318"
-version: 0.1.2
+version: 0.1.3-dev
 doi:
 url: "https://github.com/sec2pri/pysec2pri"
