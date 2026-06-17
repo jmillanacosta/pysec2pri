@@ -602,30 +602,43 @@ class Sec2PriMappingSet(MappingSet):  # type: ignore[misc]
 
         if on == "label":
             sec_field, pri_field = "subject_label", "object_label"
+            sentinel = WITHDRAWN_ENTRY_LABEL
         else:
             sec_field, pri_field = "subject_id", "object_id"
+            sentinel = WITHDRAWN_ENTRY
 
         import polars as pl
 
         sec_vals = [str(getattr(m, sec_field, None) or "") for m in mappings]
         pri_vals = [str(getattr(m, pri_field, None) or "") for m in mappings]
 
+        df = pl.DataFrame({"sec": sec_vals, "pri": pri_vals})
+        sec_is_nf = pl.col("sec") == sentinel
+        pri_is_nf = pl.col("pri") == sentinel
+
+        # Withdrawn (sssom:NoTermFound) rows are excluded from the
+        # distinct-counterpart counts, matching sssom's own behavior.
+        real = df.filter(~sec_is_nf & ~pri_is_nf)
+        objects_per_subject = real.group_by("sec").agg(pl.col("pri").n_unique().alias("n_objects"))
+        subjects_per_object = real.group_by("pri").agg(pl.col("sec").n_unique().alias("n_subjects"))
+
         cardinalities: list[str] = (
-            pl.DataFrame({"sec": sec_vals, "pri": pri_vals})
-            .with_columns(
-                pl.col("sec").count().over("sec").alias("s_count"),
-                pl.col("pri").count().over("pri").alias("p_count"),
-            )
+            df.join(objects_per_subject, on="sec", how="left", maintain_order="left")
+            .join(subjects_per_object, on="pri", how="left", maintain_order="left")
             .select(
-                pl.when(pl.col("s_count") == 1, pl.col("p_count") == 1)
+                pl.when(sec_is_nf & pri_is_nf)
+                .then(pl.lit("0:0"))
+                .when(sec_is_nf)
+                .then(pl.lit("0:1"))
+                .when(pri_is_nf)
+                .then(pl.lit("1:0"))
+                .when((pl.col("n_subjects") == 1) & (pl.col("n_objects") == 1))
                 .then(pl.lit("1:1"))
-                .when(pl.col("s_count") > 1, pl.col("p_count") == 1)
-                .then(pl.lit("n:1"))
-                .when(pl.col("s_count") == 1, pl.col("p_count") > 1)
+                .when((pl.col("n_subjects") == 1) & (pl.col("n_objects") > 1))
                 .then(pl.lit("1:n"))
-                .when(pl.col("s_count") > 1, pl.col("p_count") > 1)
-                .then(pl.lit("n:n"))
-                .otherwise(pl.lit("1:0"))
+                .when((pl.col("n_subjects") > 1) & (pl.col("n_objects") == 1))
+                .then(pl.lit("n:1"))
+                .otherwise(pl.lit("n:n"))
                 .alias("cardinality")
             )
             .get_column("cardinality")
@@ -1129,7 +1142,9 @@ def _get_primary_sets(
     ``label_index`` maps each label text to the set of primary IDs that carry
     that label.
     """
-    stored_ids: set[str] | None = getattr(mapping_set, "_primary_ids", None)
+    stored_ids: set[str] | None = (
+        getattr(mapping_set, "_primary_ids", None) or None
+    )  # treat empty set as missing
     stored_labels: dict[str, set[str]] | None = (
         getattr(mapping_set, "_primary_labels", None) or None
     )  # treat empty dict as missing
@@ -1205,20 +1220,18 @@ def _build_conflicts(
 
 def _make_annotated_mapping(m: Mapping, conflicts: list[str], existing_raw: str) -> Mapping:
     if existing_raw.startswith("Ambiguous mapping:"):
+        # Already wrapped by _annotate_id_mappings/_annotate_label_mappings;
+        # unwrap to the truly original comment to avoid nested wrapping.
         marker = " Original comment: "
-        if marker in existing_raw:
-            existing_raw.split(marker, 1)[1]
-        else:
-            pass
+        original = existing_raw.split(marker, 1)[1] if marker in existing_raw else ""
     else:
-        pass
-
-    str(getattr(m, "subject_id", None) or "")
-    str(getattr(m, "subject_label", None) or "")
+        original = existing_raw
 
     conflict_detail = "; ".join(conflicts)
 
-    new_comment = f"Ambiguous: {conflict_detail}."
+    new_comment = f"Ambiguous: {conflict_detail}." + (
+        f" Original comment: {original}" if original else ""
+    )
 
     m_fields = {
         k: getattr(m, k, None)
