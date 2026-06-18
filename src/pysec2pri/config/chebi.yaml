@@ -107,18 +107,35 @@ mapping:
   issue_tracker: "https://github.com/sec2pri/pysec2pri/issues"
   other: null
   comment: "Generated with pysec2pri"
-# Threshold version where TSV data products were introduced (< 245: use chebi_sdf.yaml)
-new_format_version: 245
-
-# Archive URL for finding releases
+# Archive URL for finding releases (current, TSV-era archive)
 archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
 
-# Download URLs for TSV flat files (releases >= 245)
-# Use {version} as placeholder for release number
+# Download URLs for TSV flat files (releases >= 245, the current/latest era).
+# Use {version} as placeholder for release number.
 download_urls:
   secondary_ids: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/secondary_ids.tsv.gz"
   names: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/names.tsv.gz"
   compounds: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/compounds.tsv.gz"
+
+# Historical distribution eras, oldest first. Each era describes the URL
+# template/format ChEBI releases used at the time; `era_for(version)` picks
+# the one whose from_version/to_version bounds contain the requested version.
+distribution_eras:
+  - id: sdf
+    to_version: "244"
+    format: sdf
+    archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/"
+    download_urls:
+      sdf_3star: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete_3star.sdf.gz"
+      sdf_complete: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete.sdf.gz"
+  - id: tsv
+    from_version: "245"
+    format: tsv
+    archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+    download_urls:
+      secondary_ids: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/secondary_ids.tsv.gz"
+      names: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/names.tsv.gz"
+      compounds: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/compounds.tsv.gz"
 
 primary_file_key: "secondary_ids"
 

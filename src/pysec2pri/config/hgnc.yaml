@@ -112,6 +112,18 @@ download_urls:
   complete: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
   withdrawn: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/withdrawn.txt"
 
+# Historical distribution eras. HGNC has lived at several locations over time
+# (see wayback_hgnc/wayback_hgnc.sh); this is the most recently confirmed
+# pre-GCS one. Declarative only for now: no downloader resolves it yet, and
+# the URLs are no longer live (Wayback Machine fetching is a follow-up).
+distribution_eras:
+  - id: ebi_hgnc_ftp
+    to_version: "2023-12-31"
+    wayback: true
+    download_urls:
+      complete: "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/hgnc_complete_set.txt"
+      withdrawn: "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/withdrawn.txt"
+
 primary_file_key: "withdrawn"
 archive_url: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/"
 id_pattern: "^HGNC:\\d+$"

@@ -277,9 +277,11 @@ class ChEBIParser(BaseParser):
 
     def _build_id_mappings(self, raw_id_mappings: list[tuple[str, str]]) -> list[Mapping]:
         """Build Mapping objects for secondary->primary ID mappings."""
+        from pysec2pri.consolidate import load_mapping_dates
+
         m_meta = self.get_mapping_metadata()
-        version = str(self.version)
         record_id = m_meta.get("record_id", None)
+        consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="ids")
         fixed = {
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
@@ -290,26 +292,26 @@ class ChEBIParser(BaseParser):
             "confidence": m_meta.get("confidence"),
             "license": m_meta.get("license"),
         }
-        rows = [
-            {
-                "subject_id": sec,
-                "object_id": pri,
-                "record_id": self._record_id(
-                    str(record_id),
-                    version,
-                    pri,
-                    sec,
-                ),
-            }
-            for pri, sec in raw_id_mappings
-        ]
+        rows = []
+        for pri, sec in raw_id_mappings:
+            rid = self._record_id(str(record_id), pri, sec)
+            rows.append(
+                {
+                    "subject_id": sec,
+                    "object_id": pri,
+                    "record_id": rid,
+                    "mapping_date": consolidated.get(rid),
+                }
+            )
         return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
 
     def _build_label_mappings(self, raw_name_mappings: list[tuple[str, str, str]]) -> list[Mapping]:
         """Build Mapping objects for label/synonym mappings."""
+        from pysec2pri.consolidate import load_mapping_dates
+
         m_meta = self.get_mapping_metadata()
         record_id = m_meta.get("record_id", None)
-        version = str(m_meta.get("version", ""))
+        consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="labels")
         fixed = {
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
@@ -317,23 +319,22 @@ class ChEBIParser(BaseParser):
             "mapping_tool": m_meta.get("mapping_tool"),
             "license": m_meta.get("license"),
         }
-        rows = [
-            {
-                "record_id": self._record_id(
-                    str(record_id),
-                    version,
-                    sid,
-                    syn,
-                ),
-                "object_id": sid,
-                "subject_label": syn,  # synonym = secondary : subject
-                "subject_type": "rdfs literal",
-                "object_label": pname,  # primary name : object
-                "_label_type": "alias",
-            }
-            for sid, pname, syn in raw_name_mappings
-            if syn
-        ]
+        rows = []
+        for sid, pname, syn in raw_name_mappings:
+            if not syn:
+                continue
+            rid = self._record_id(str(record_id), sid, syn)
+            rows.append(
+                {
+                    "record_id": rid,
+                    "object_id": sid,
+                    "subject_label": syn,  # synonym = secondary : subject
+                    "subject_type": "rdfs literal",
+                    "object_label": pname,  # primary name : object
+                    "_label_type": "alias",
+                    "mapping_date": consolidated.get(rid),
+                }
+            )
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
 
     def _create_mapping_set(
@@ -770,10 +771,13 @@ class ChEBIDownloader(BaseDownloader):
     ) -> dict[str, str]:
         """Get ChEBI download URLs based on version.
 
-        For version >= 245 (and use_sdf=False): returns TSV flat file URLs
-        For version < 245 (or use_sdf=True): returns SDF file URL
-
-        URLs are loaded from chebi.yaml config file.
+        Resolves the distribution era for *version* via
+        :meth:`~pysec2pri.parsers.base.DatasourceConfig.era_for` (see
+        ``chebi.yaml``'s ``distribution_eras``): the ``sdf`` era (releases
+        <= 244) returns a single SDF URL, the ``tsv`` era (releases >= 245)
+        returns the three flat-file URLs. When no era matches (e.g.
+        ``version`` is ``None`` for "latest"), falls back to the top-level
+        ``download_urls`` (TSV).
 
         Args:
             version: Specific release version.
@@ -789,27 +793,21 @@ class ChEBIDownloader(BaseDownloader):
         if not self._config:
             raise ValueError("ChEBI config not loaded")
 
-        download_urls = self._config.download_urls
+        era = self._config.era_for(v)
+        if use_sdf and (era is None or era.format != "sdf"):
+            era = next((e for e in self._config.distribution_eras if e.format == "sdf"), era)
 
-        # Determine format: use new TSV if >= threshold AND not forcing SDF
-        use_tsv = self.is_new_format(v) and not use_sdf
-
-        if use_tsv:
-            # New TSV format (>= 245): flat keys in chebi.yaml
-            return {
-                "secondary_ids": download_urls["secondary_ids"].format(version=v),
-                "names": download_urls["names"].format(version=v),
-                "compounds": download_urls["compounds"].format(version=v),
-            }
-        else:
-            # SDF format: keys live in chebi_sdf.yaml
-            from pysec2pri.parsers.base import get_datasource_config
-
-            sdf_config = get_datasource_config("chebi_sdf")
-            sdf_urls = sdf_config.download_urls
+        if era is not None and era.format == "sdf":
             sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-            url = sdf_urls[sdf_key].format(version=v)
+            url = era.download_urls[sdf_key].format(version=v)
             return {"sdf": url}
+
+        download_urls = era.download_urls if era is not None else self._config.download_urls
+        return {
+            "secondary_ids": download_urls["secondary_ids"].format(version=v),
+            "names": download_urls["names"].format(version=v),
+            "compounds": download_urls["compounds"].format(version=v),
+        }
 
     def download(
         self,
@@ -844,15 +842,21 @@ class ChEBIDownloader(BaseDownloader):
             "tsv" or "sdf"
         """
         v = version or self.version
-        use_tsv = self.is_new_format(v) and not self.use_sdf
-        return "tsv" if use_tsv else "sdf"
+        if self.use_sdf:
+            return "sdf"
+        if self._config:
+            era = self._config.era_for(v)
+            if era is not None and era.format:
+                return era.format
+        return "tsv" if self.is_new_format(v) else "sdf"
 
     def list_versions(self) -> list[str]:
         """List all available ChEBI archive release numbers.
 
-        Queries both the current archive (TSV releases >= 245) and the legacy
-        archive (SDF-only releases < 245) and returns all release numbers
-        sorted in ascending order.
+        Queries the base archive URL plus every distribution era's
+        ``archive_url`` (e.g. the legacy SDF-only archive for releases <=
+        244, see ``chebi.yaml``'s ``distribution_eras``) and unions all
+        discovered release numbers.
 
         Returns:
             Sorted list of version strings (e.g. ``["100", "101", ..., "251"]``).
@@ -867,33 +871,20 @@ class ChEBIDownloader(BaseDownloader):
         if not self._config or not self._config.archive_url:
             raise ValueError("ChEBI archive URL not configured")
 
+        archive_urls = {self._config.archive_url}
+        archive_urls.update(
+            era.archive_url for era in self._config.distribution_eras if era.archive_url
+        )
+
         versions: set[str] = set()
-
-        # Derive legacy archive base URL from the legacy SDF URL template in config:
-        # e.g. ".../chebi_legacy/archive/rel{version}/SDF/..." -> ".../chebi_legacy/archive/"
-        legacy_base: str | None = None
-        legacy_urls: dict[str, str] = self._config.download_urls.get("legacy", {})
-        legacy_template = next(iter(legacy_urls.values()), None)
-        if legacy_template:
-            # Strip from "rel{version}" onwards to get the directory listing URL
-            idx = legacy_template.find("rel{version}")
-            if idx != -1:
-                legacy_base = legacy_template[:idx]
-
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-            # New archive (>= 245)
-            response = client.get(self._config.archive_url)
-            response.raise_for_status()
-            versions.update(re.findall(r"rel(\d+)", response.text))
-
-            # Legacy archive (< 245)
-            if legacy_base:
+            for url in archive_urls:
                 try:
-                    legacy_response = client.get(legacy_base)
-                    legacy_response.raise_for_status()
-                    versions.update(re.findall(r"rel(\d+)", legacy_response.text))
+                    response = client.get(url)
+                    response.raise_for_status()
+                    versions.update(re.findall(r"rel(\d+)", response.text))
                 except httpx.HTTPError:
-                    pass  # Legacy archive unavailable, still return what we have
+                    pass  # That archive location unavailable, still return what we have
 
         return sorted(versions, key=int)
 

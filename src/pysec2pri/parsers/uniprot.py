@@ -93,7 +93,6 @@ class UniProtParser(BaseParser):
                     break  # next line is first data row
 
         meta_id = str(self.get_mapping_metadata()["record_id"])
-        version = str(self.version)
 
         df = (
             pl.scan_csv(
@@ -140,7 +139,6 @@ class UniProtParser(BaseParser):
             .map_elements(
                 lambda x: self._record_id(
                     meta_id,
-                    version,
                     x["object_id"],
                     x["subject_id"],
                 ),
@@ -149,6 +147,10 @@ class UniProtParser(BaseParser):
             )
             .alias("record_id")
         )
+
+        from pysec2pri.consolidate import load_mapping_dates
+
+        consolidated = load_mapping_dates("uniprot", mapping_sets="ids")
 
         m_meta = self.get_mapping_metadata()
         fixed = {
@@ -161,6 +163,8 @@ class UniProtParser(BaseParser):
             "license": m_meta.get("license"),
         }
         rows = df.select(["subject_id", "object_id", "record_id"]).to_dicts()
+        for row in rows:
+            row["mapping_date"] = consolidated.get(row["record_id"])
         return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
     def _parse_delac(self, file_path: Path) -> list[Mapping]:
@@ -182,7 +186,6 @@ class UniProtParser(BaseParser):
                     break  # next line is first deleted accession
 
         meta_id = str(self.get_mapping_metadata()["record_id"])
-        version = str(self.version)
 
         df = (
             pl.scan_csv(
@@ -216,7 +219,6 @@ class UniProtParser(BaseParser):
             .map_elements(
                 lambda x: self._record_id(
                     meta_id,
-                    version,
                     x["object_id"],
                     x["object_id"],  # subject_id == object_id in this dataset
                 ),
@@ -225,6 +227,10 @@ class UniProtParser(BaseParser):
             )
             .alias("record_id")
         )
+
+        from pysec2pri.consolidate import load_mapping_dates
+
+        consolidated = load_mapping_dates("uniprot", mapping_sets="ids")
 
         m_meta = self.get_mapping_metadata()
         fixed = {
@@ -239,6 +245,8 @@ class UniProtParser(BaseParser):
             "comment": "Deleted accession with no replacement.",
         }
         rows = df.select(["object_id", "record_id"]).to_dicts()
+        for row in rows:
+            row["mapping_date"] = consolidated.get(row["record_id"])
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
     def _create_mapping_set(
@@ -274,7 +282,9 @@ class UniProtParser(BaseParser):
         if acindex_path is None:
             from pysec2pri.api import _auto_download
 
-            acindex_path = _auto_download("uniprot", None, keys=["acindex"])["acindex"]
+            files, release_date = _auto_download("uniprot", None, keys=["acindex"])
+            acindex_path = files["acindex"]
+            self.release_date = release_date
         acindex_path = Path(str(acindex_path))
         self._resolve_version(acindex_path)
 

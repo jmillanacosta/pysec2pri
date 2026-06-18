@@ -337,6 +337,78 @@ def list_versions_cmd(datasource: str) -> None:
             click.echo(f"  {v}")
 
 
+# consolidate
+
+
+@main.command("consolidate")
+@click.argument("datasource", type=click.Choice(["chebi", "hgnc", "ncbi", "uniprot"]))
+@click.option(
+    "--mode",
+    default="release",
+    show_default=True,
+    type=click.Choice(["release", "date"]),
+    help=(
+        "'release': walk every historical release for the first-seen version/date. "
+        "'date': single pass using the source's own per-row date (falls back to "
+        "'release' with a warning if the source has none)."
+    ),
+)
+@_opt_subset
+@click.option(
+    "--mapping-sets",
+    default="ids",
+    show_default=True,
+    type=click.Choice(["ids", "labels"]),
+    help="Which mapping-set kind to consolidate dates for.",
+)
+@_opt_tax_id
+@click.option("--cache-dir", type=PathType, default=None, help="Cache directory.")
+@click.option(
+    "--force", is_flag=True, default=False, help="Re-scan every release, ignoring resume state."
+)
+@_opt_no_progress
+def consolidate_cmd(
+    datasource: str,
+    mode: str,
+    subset: str,
+    mapping_sets: str,
+    tax_id: str,
+    cache_dir: Path | None,
+    force: bool,
+    no_progress: bool,
+) -> None:
+    """Build/update the per-mapping first-seen-date index for DATASOURCE.
+
+    In 'release' mode (default), walks every historical release of
+    DATASOURCE once to discover the earliest release each mapping appeared
+    in. This is slow and network-heavy (~250 releases for ChEBI); it's meant
+    to be run as a manual/one-off operation, not as part of normal mapping
+    generation. In 'date' mode, a single current-release pass captures the
+    source's own per-row date directly (fast); DATASOURCE must have no
+    versioned archive at all (e.g. NCBI) to require 'date' mode.
+    """
+    from pysec2pri.consolidate import consolidate_mapping_dates
+
+    click.echo(
+        f"Consolidating {datasource.upper()} mapping dates "
+        f"(mode={mode}, {subset}, {mapping_sets})..."
+    )
+    try:
+        path = consolidate_mapping_dates(
+            datasource,
+            mode=mode,
+            cache_dir=cache_dir,
+            subset=subset,
+            mapping_sets=mapping_sets,
+            tax_id=tax_id,
+            show_progress=not no_progress,
+            force=force,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Wrote consolidated mapping-date index -> {path}")
+
+
 # ambiguous
 
 
