@@ -23,10 +23,12 @@ __all__ = [
     "ReleaseInfo",
     "check_release",
     "download_datasource",
+    "download_datasource_with_release",
     "download_file",
     "get_download_urls",
     "get_latest_release_info",
     "list_versions",
+    "resolve_release_date",
 ]
 
 _CLOUDFLARE_HINTS = (
@@ -408,10 +410,9 @@ def _get_chebi_urls_for_version(
 ) -> dict[str, str]:
     """Build ChEBI URLs for a specific release version.
 
-    For releases >= 245, returns TSV flat file URLs.
-    For releases < 245, returns SDF file URL.
-
-    URLs are loaded from chebi.yaml config file.
+    Delegates to :meth:`~pysec2pri.parsers.chebi.ChEBIDownloader.get_download_urls`,
+    which resolves the distribution era (TSV >= 245, legacy SDF <= 244) from
+    ``chebi.yaml``'s ``distribution_eras``.
 
     Args:
         version: Release number (e.g., "232", "245").
@@ -422,30 +423,9 @@ def _get_chebi_urls_for_version(
     Returns:
         Dictionary with file URLs keyed by type (sdf, secondary_ids, etc.).
     """
-    config = ALL_DATASOURCES.get("chebi")
-    if not config:
-        raise ValueError("ChEBI config not loaded")
+    from pysec2pri.parsers.chebi import ChEBIDownloader
 
-    new_format_version = config.new_format_version or 245
-    download_urls = config.download_urls
-    release_num = int(version)
-
-    if release_num >= new_format_version:
-        # New TSV format (>= 245): flat keys in chebi.yaml download_urls
-        return {
-            "secondary_ids": download_urls["secondary_ids"].format(version=version),
-            "names": download_urls["names"].format(version=version),
-            "compounds": download_urls["compounds"].format(version=version),
-        }
-    else:
-        # Legacy SDF format (< 245): keys live in chebi_sdf.yaml
-        from pysec2pri.parsers.base import get_datasource_config
-
-        sdf_config = get_datasource_config("chebi_sdf")
-        sdf_urls = sdf_config.download_urls
-        sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-        url = sdf_urls[sdf_key].format(version=version)
-        return {"sdf": url}
+    return ChEBIDownloader(version=version, subset=subset).get_download_urls(version)
 
 
 def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
@@ -555,13 +535,77 @@ def get_download_urls(
         return dict(config.download_urls)
 
 
+def resolve_release_date(
+    datasource: str,
+    version: str | None = None,
+    subset: str = "3star",
+) -> datetime | None:
+    """Resolve the upstream release date for a datasource/version.
+
+    This is the date used for the SSSOM ``mapping_date`` of generated mapping
+    sets. It does not download the data files (it may issue a lightweight
+    ``HEAD`` request to read a ``Last-Modified`` header). Prefer
+    :func:`download_datasource_with_release` when you are downloading anyway,
+    to avoid an extra round-trip.
+
+    Args:
+        datasource: Name of the datasource.
+        version: Specific version, when applicable.
+        subset: For ChEBI: "3star" or "complete".
+
+    Returns:
+        The release date, or None when it cannot be determined.
+    """
+    datasource_lower = datasource.lower()
+    config = ALL_DATASOURCES.get(datasource_lower)
+    if not config:
+        raise ValueError(f"Unknown datasource: {datasource}")
+    _, release_date = _get_datasource_urls(datasource_lower, config, version, subset)
+    return release_date
+
+
+def _iso_to_datetime(value: str | None) -> datetime | None:
+    """Parse an ``YYYY-MM-DD`` string into a datetime, or return None."""
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def _warn_if_unversioned(datasource_lower: str, version: str | None) -> None:
+    """Log a warning when a *version* was requested for an unversioned source."""
+    if version:
+        logger.warning(
+            f"{datasource_lower} does not have versioned archives. "
+            f"Downloading latest version instead."
+        )
+
+
+# HMDB's live site sits behind Cloudflare bot protection, which blocks even
+# the lightweight HEAD request the generic Last-Modified fallback relies on.
+# HMDB also has not published a new release since Version 5.0, so a static
+# lookup is both necessary and safe to keep current. Dates are the "Released
+# on" values published on HMDB's own Downloads page
+# (https://hmdb.ca/downloads, Version 5.0 / "Current Version" tab).
+_HMDB_RELEASE_DATES: dict[str, datetime] = {
+    "hmdb_metabolites": datetime(2021, 11, 17),
+    "hmdb_proteins": datetime(2021, 11, 9),
+}
+
+
 def _get_datasource_urls(
     datasource_lower: str,
     config: DatasourceConfig,
     version: str | None = None,
     subset: str = "3star",
-) -> dict[str, str]:
-    """Get download URLs for a datasource.
+) -> tuple[dict[str, str], datetime | None]:
+    """Get download URLs and the source release date for a datasource.
+
+    The release date drives the SSSOM ``mapping_date`` of generated mapping
+    sets, so it should reflect when the upstream data was released rather than
+    when it was downloaded. Each datasource resolves it from the most specific
+    signal available; a generic HTTP ``Last-Modified`` lookup is used as a
+    fallback.
 
     Args:
         datasource_lower: Lowercase datasource name.
@@ -570,42 +614,63 @@ def _get_datasource_urls(
         subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
 
     Returns:
-        Dictionary mapping file keys to URLs.
+        Tuple of (file-key -> URL mapping, release date or None).
     """
+    urls: dict[str, str]
+    release_date: datetime | None = None
+
     if datasource_lower == "hgnc":
         if version:
             urls = _get_hgnc_urls_for_version(version)
+            # The HGNC archive version is itself the release date (YYYY-MM-DD).
+            release_date = _iso_to_datetime(version)
             logger.info(f"HGNC version {version}: {urls}")
         else:
             release_info = check_hgnc_release()
             urls = release_info.files
+            release_date = release_info.release_date
             logger.info(f"HGNC release {release_info.version}: {urls}")
-        return urls
 
-    if datasource_lower == "chebi":
+    elif datasource_lower == "chebi":
         if version:
             urls = _get_chebi_urls_for_version(version, subset=subset)
             logger.info(f"ChEBI version {version}: {urls}")
         else:
             release_info = check_chebi_release()
             urls = release_info.files
+            release_date = release_info.release_date
             logger.info(f"ChEBI release {release_info.version}: {urls}")
-        return urls
 
-    if datasource_lower == "uniprot":
+    elif datasource_lower == "uniprot":
         if version:
             urls = _get_uniprot_urls_for_version(version)
             logger.info(f"UniProt version {version}: {urls}")
-            return urls
-        return dict(config.download_urls)
+        else:
+            urls = dict(config.download_urls)
 
-    # NCBI, HMDB - no versioned archives available
-    if version:
-        logger.warning(
-            f"{datasource_lower} does not have versioned archives. "
-            f"Downloading latest version instead."
-        )
-    return dict(config.download_urls)
+    elif datasource_lower in _HMDB_RELEASE_DATES:
+        _warn_if_unversioned(datasource_lower, version)
+        urls = dict(config.download_urls)
+        release_date = _HMDB_RELEASE_DATES[datasource_lower]
+
+    else:
+        # NCBI - no versioned archives available
+        _warn_if_unversioned(datasource_lower, version)
+        urls = dict(config.download_urls)
+
+    # Generic fallback: derive the release date from the file's Last-Modified
+    # header when a more specific signal was not available above. Must never
+    # raise: some sources (e.g. HMDB) sit behind Cloudflare and block even
+    # this lightweight HEAD request, and a date-resolution failure must not
+    # break the actual file download.
+    if release_date is None and urls:
+        first_url = next(iter(urls.values()))
+        try:
+            release_date = get_file_last_modified(first_url)
+        except CloudflareBlockedError:
+            logger.debug(f"Could not resolve release date for {first_url}: Cloudflare-blocked.")
+
+    return urls, release_date
 
 
 def download_datasource(
@@ -639,12 +704,48 @@ def download_datasource(
     if not config:
         raise ValueError(f"Unknown datasource: {datasource}")
 
+    files, _ = download_datasource_with_release(
+        datasource, output_dir, decompress=decompress, version=version, subset=subset, keys=keys
+    )
+    return files
+
+
+def download_datasource_with_release(
+    datasource: str,
+    output_dir: Path,
+    decompress: bool = True,
+    version: str | None = None,
+    subset: str = "3star",
+    keys: list[str] | None = None,
+) -> tuple[dict[str, Path], datetime | None]:
+    """Download all files for a datasource and report its release date.
+
+    Same as :func:`download_datasource`, but also returns the resolved source
+    release date (used for the SSSOM ``mapping_date``). See
+    :func:`_get_datasource_urls` for how the date is determined per datasource.
+
+    Args:
+        datasource: Name of the datasource.
+        output_dir: Directory to save files.
+        decompress: Whether to decompress .gz files.
+        version: Specific version to download. Format depends on datasource.
+        subset: For ChEBI: "3star" or "complete" (for releases using SDF only).
+        keys: Optional list of file-key names to download.
+
+    Returns:
+        Tuple of (file-key -> downloaded path mapping, release date or None).
+    """
+    datasource_lower = datasource.lower()
+    config = ALL_DATASOURCES.get(datasource_lower)
+    if not config:
+        raise ValueError(f"Unknown datasource: {datasource}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    urls = _get_datasource_urls(datasource_lower, config, version, subset)
+    urls, release_date = _get_datasource_urls(datasource_lower, config, version, subset)
     if keys is not None:
         urls = {k: v for k, v in urls.items() if k in keys}
 
-    return _download_urls(urls, output_dir, decompress)
+    return _download_urls(urls, output_dir, decompress), release_date
 
 
 def _download_urls(

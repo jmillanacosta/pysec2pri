@@ -28,6 +28,7 @@ HGNC_ID = "hgnc_id"
 SYMBOL = "symbol"
 ALIAS_SYMBOL = "alias_symbol"
 PREV_SYMBOL = "prev_symbol"
+DATE_SYMBOL_CHANGED = "date_symbol_changed"
 STATUS = "status"
 
 # Merged info column has different naming variants across HGNC file versions
@@ -333,7 +334,6 @@ class HGNCParser(BaseParser):
                         "comment": "Withdrawn entry with no replacement.",
                         "record_id": self._record_id(
                             str(m_meta["record_id"]),
-                            str(self.version),
                             WITHDRAWN_ENTRY,
                             hgnc_id,
                         ),
@@ -356,7 +356,6 @@ class HGNCParser(BaseParser):
                             "predicate_label": m_meta.get("predicate_label"),
                             "record_id": self._record_id(
                                 str(m_meta["record_id"]),
-                                str(self.version),
                                 target_id,
                                 hgnc_id,
                             ),
@@ -392,6 +391,7 @@ class HGNCParser(BaseParser):
         label_col = self._find_column(df.columns, SYMBOL)
         alias_col = self._find_column(df.columns, ALIAS_SYMBOL)
         prev_col = self._find_column(df.columns, PREV_SYMBOL)
+        date_changed_col = self._find_column(df.columns, DATE_SYMBOL_CHANGED)
 
         if not all([status_col, hgnc_id_col, label_col]):
             raise ValueError(f"Missing required columns in {file_path}")
@@ -424,6 +424,11 @@ class HGNCParser(BaseParser):
             prev_str = row.get(prev_col) if prev_col else None
             aliases = self._split_labels(labels_str=alias_str) if alias_str else []
             prev_labels = self._split_labels(labels_str=prev_str) if prev_str else []
+            # The date the current symbol was set, i.e. when its previous
+            # symbol(s) became secondary. HGNC records only the most recent
+            # change, so with multiple prev_symbol entries this date applies
+            # exactly to the latest rename and approximately to earlier ones.
+            symbol_changed_date = row.get(date_changed_col) if date_changed_col else None
 
             for alias in aliases:
                 rows_data.append(
@@ -436,7 +441,6 @@ class HGNCParser(BaseParser):
                         "comment": "Alias symbol mapping.",
                         "record_id": self._record_id(
                             str(m_meta["record_id"]),
-                            str(self.version),
                             hgnc_id,
                             alias,
                         ),
@@ -452,9 +456,9 @@ class HGNCParser(BaseParser):
                         "object_label": label,
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
+                        "mapping_date": symbol_changed_date,
                         "record_id": self._record_id(
                             str(m_meta["record_id"]),
-                            str(self.version),
                             hgnc_id,
                             prev,
                         ),

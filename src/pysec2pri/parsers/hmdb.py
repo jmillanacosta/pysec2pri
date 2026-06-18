@@ -188,7 +188,6 @@ class HMDBParser(BaseParser):
                     "object_label": primary_label,
                     "record_id": self._record_id(
                         str(self.get_mapping_metadata()["record_id"]),
-                        str(self.version),
                         primary_id,
                         secondary_id,
                     ),

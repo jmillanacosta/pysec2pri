@@ -1,4 +1,4 @@
-hgnc_id	symbol	status	alias_symbol	prev_symbol	locus_group
-HGNC:2001	BRCA1	Approved	BRCC1|RNF53	PSCP	protein-coding gene
-HGNC:2002	TP53	Approved	P53|LFS1	tumor_p53	protein-coding gene
-HGNC:2003	MYC	Approved	c-Myc	v-myc	protein-coding gene
+hgnc_id	symbol	status	alias_symbol	prev_symbol	locus_group	date_symbol_changed
+HGNC:2001	BRCA1	Approved	BRCC1|RNF53	PSCP	protein-coding gene	1996-03-01
+HGNC:2002	TP53	Approved	P53|LFS1	tumor_p53	protein-coding gene	1994-06-15
+HGNC:2003	MYC	Approved	c-Myc	v-myc	protein-coding gene	1991-09-20

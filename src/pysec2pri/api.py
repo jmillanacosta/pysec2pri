@@ -24,6 +24,8 @@ from pysec2pri.exports import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import pandas as pd
 
     from pysec2pri.diff import MappingDiff
@@ -90,7 +92,7 @@ def _auto_download(
     datasource: str,
     version: str | None = None,
     keys: list[str] | None = None,
-) -> dict[str, Path]:
+) -> tuple[dict[str, Path], datetime | None]:
     """Download files for *datasource* into a temp dir.
 
     Args:
@@ -98,13 +100,18 @@ def _auto_download(
         version: Optional specific version to download.
         keys: Optional list of file-key names to download. When given, only
             those keys are fetched (e.g. ``["complete"]``).
+
+    Returns:
+        Tuple of (file-key -> downloaded path mapping, source release date or
+        None). The release date is set on the parser so the generated mapping
+        set's ``mapping_date`` reflects the upstream release.
     """
     import tempfile
 
-    from pysec2pri.download import download_datasource
+    from pysec2pri.download import download_datasource_with_release
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_{datasource}_"))
-    return download_datasource(datasource, tmpdir, version=version, keys=keys)
+    return download_datasource_with_release(datasource, tmpdir, version=version, keys=keys)
 
 
 def generate_chebi(
@@ -129,19 +136,24 @@ def generate_chebi(
     """
     import tempfile
 
-    from pysec2pri.download import check_chebi_release
+    from pysec2pri.download import check_chebi_release, resolve_release_date
     from pysec2pri.parsers import ChEBIParser
     from pysec2pri.parsers.chebi import ChEBIDownloader
 
+    release_date = None
     if input_path is None:
         if version is None:
             version = check_chebi_release().version or "245"
+        release_date = resolve_release_date("chebi", version, subset=subset)
         downloader = ChEBIDownloader(version=version, subset=subset)
         tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
-        downloader.download(tmpdir, version=version)
-        input_path = tmpdir
+        downloaded = downloader.download(tmpdir, version=version)
+        # SDF releases (< 245) download a single file; TSV releases (>= 245)
+        # download a directory of flat files that `parse()` auto-discovers.
+        input_path = downloaded.get("sdf", tmpdir)
 
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    parser.release_date = release_date
 
     if mapping_sets == "synonyms":
         return parser.parse_synonyms(Path(input_path))
@@ -192,14 +204,16 @@ def generate_hgnc(
     """
     from pysec2pri.parsers import HGNCParser
 
+    release_date = None
     if input_path is None or complete_set_path is None:
-        files = _auto_download("hgnc", version)
+        files, release_date = _auto_download("hgnc", version)
         if input_path is None:
             input_path = files["withdrawn"]
         if complete_set_path is None:
             complete_set_path = files["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse(Path(input_path), complete_set_path=Path(complete_set_path))
 
 
@@ -223,10 +237,13 @@ def generate_hgnc_primary_ids(
     """
     from pysec2pri.parsers import HGNCParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("hgnc", version, keys=["complete"])["complete"]
+        files, release_date = _auto_download("hgnc", version, keys=["complete"])
+        input_path = files["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_ids(Path(input_path))
 
 
@@ -250,10 +267,13 @@ def generate_hgnc_primary_labels(
     """
     from pysec2pri.parsers import HGNCParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("hgnc", version, keys=["complete"])["complete"]
+        files, release_date = _auto_download("hgnc", version, keys=["complete"])
+        input_path = files["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_labels(Path(input_path))
 
 
@@ -275,10 +295,13 @@ def generate_hgnc_labels(
     """
     from pysec2pri.parsers import HGNCParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("hgnc", version)["complete"]
+        files, release_date = _auto_download("hgnc", version)
+        input_path = files["complete"]
 
     parser = HGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_labels(Path(input_path), statuses=statuses)
 
 
@@ -303,18 +326,21 @@ def generate_chebi_primary_ids(
     """
     import tempfile
 
-    from pysec2pri.download import check_chebi_release
+    from pysec2pri.download import check_chebi_release, resolve_release_date
     from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
 
+    release_date = None
     if input_path is None:
         if version is None:
             version = check_chebi_release().version or "245"
+        release_date = resolve_release_date("chebi", version, subset=subset)
         downloader = ChEBIDownloader(version=version, subset=subset)
         tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
         downloader.download(tmpdir, version=version, keys=["compounds"])
         input_path = tmpdir
 
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    parser.release_date = release_date
     return parser.parse_primary_ids(Path(input_path))
 
 
@@ -339,18 +365,21 @@ def generate_chebi_primary_labels(
     """
     import tempfile
 
-    from pysec2pri.download import check_chebi_release
+    from pysec2pri.download import check_chebi_release, resolve_release_date
     from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
 
+    release_date = None
     if input_path is None:
         if version is None:
             version = check_chebi_release().version or "245"
+        release_date = resolve_release_date("chebi", version, subset=subset)
         downloader = ChEBIDownloader(version=version, subset=subset)
         tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_chebi_{version}_"))
         downloader.download(tmpdir, version=version, keys=["compounds"])
         input_path = tmpdir
 
     parser = ChEBIParser(version=version, show_progress=show_progress, subset=subset)
+    parser.release_date = release_date
     return parser.parse_primary_labels(Path(input_path))
 
 
@@ -374,10 +403,13 @@ def generate_ncbi_primary_ids(
     """
     from pysec2pri.parsers import NCBIParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("ncbi", version, keys=["gene_info"])["gene_info"]
+        files, release_date = _auto_download("ncbi", version, keys=["gene_info"])
+        input_path = files["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_ids(Path(input_path), tax_id=tax_id)
 
 
@@ -401,10 +433,13 @@ def generate_ncbi_primary_labels(
     """
     from pysec2pri.parsers import NCBIParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("ncbi", version, keys=["gene_info"])["gene_info"]
+        files, release_date = _auto_download("ncbi", version, keys=["gene_info"])
+        input_path = files["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_labels(Path(input_path), tax_id=tax_id)
 
 
@@ -430,11 +465,12 @@ def generate_hmdb_primary_ids(
     """
     from pysec2pri.parsers.hmdb import HMDBMetaboliteParser
 
+    release_date = None
     if metabolites_path is None and proteins_path is None:
-        metabolites_path = _auto_download("hmdb_metabolites", version, keys=["metabolites"])[
-            "metabolites"  # Metabolites default
-        ]
+        files, release_date = _auto_download("hmdb_metabolites", version, keys=["metabolites"])
+        metabolites_path = files["metabolites"]  # Metabolites default
     parser = HMDBMetaboliteParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_ids(
         metabolites_path=metabolites_path,
         proteins_path=proteins_path,
@@ -466,10 +502,13 @@ def generate_uniprot_primary_ids(
     """
     from pysec2pri.parsers.uniprot import UniProtParser
 
+    release_date = None
     if acindex_path is None:
-        acindex_path = _auto_download("uniprot", version, keys=["acindex"])["acindex"]
+        files, release_date = _auto_download("uniprot", version, keys=["acindex"])
+        acindex_path = files["acindex"]
 
     parser = UniProtParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_primary_ids(Path(acindex_path))
 
 
@@ -500,14 +539,16 @@ def generate_ncbi(
     """
     from pysec2pri.parsers import NCBIParser
 
+    release_date = None
     if input_path is None or gene_info_path is None:
-        files = _auto_download("ncbi", version)
+        files, release_date = _auto_download("ncbi", version)
         if input_path is None:
             input_path = files["gene_history"]
         if gene_info_path is None:
             gene_info_path = files["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse(Path(input_path), tax_id=tax_id, gene_info_path=Path(gene_info_path))
 
 
@@ -529,10 +570,13 @@ def generate_ncbi_labels(
     """
     from pysec2pri.parsers import NCBIParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("ncbi", version)["gene_info"]
+        files, release_date = _auto_download("ncbi", version)
+        input_path = files["gene_info"]
 
     parser = NCBIParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse_labels(Path(input_path), tax_id=tax_id)
 
 
@@ -555,13 +599,15 @@ def generate_uniprot(
     """
     from pysec2pri.parsers import UniProtParser
 
+    release_date = None
     if input_path is None:
-        files = _auto_download("uniprot", version)
+        files, release_date = _auto_download("uniprot", version)
         input_path = files.get("sec_ac") or next(iter(files.values()))
         if delac_file is None:
             delac_file = files.get("delac_sp")
 
     parser = UniProtParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse(
         Path(input_path),
         delac_path=Path(delac_file) if delac_file else None,
@@ -584,10 +630,13 @@ def generate_hmdb(
     """
     from pysec2pri.parsers import HMDBMetaboliteParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("hmdb_metabolites", version)["metabolites"]
+        files, release_date = _auto_download("hmdb_metabolites", version)
+        input_path = files["metabolites"]
 
     parser = HMDBMetaboliteParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse(Path(input_path))
 
 
@@ -607,10 +656,13 @@ def generate_hmdb_proteins(
     """
     from pysec2pri.parsers import HMDBProteinParser
 
+    release_date = None
     if input_path is None:
-        input_path = _auto_download("hmdb_proteins", version)["proteins"]
+        files, release_date = _auto_download("hmdb_proteins", version)
+        input_path = files["proteins"]
 
     parser = HMDBProteinParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
     return parser.parse(Path(input_path))
 
 

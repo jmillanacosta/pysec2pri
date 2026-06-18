@@ -22,6 +22,23 @@ from pysec2pri.parsers.base import (
 )
 
 
+def _ncbi_date_to_iso(value: object) -> str | None:
+    """Convert an NCBI ``YYYYMMDD`` date (str or int) to ISO ``YYYY-MM-DD``.
+
+    Args:
+        value: Raw ``Discontinue_Date`` cell, e.g. ``20230115`` or ``"20230115"``.
+
+    Returns:
+        ISO-8601 date string, or ``None`` if *value* is missing/malformed.
+    """
+    if value is None:
+        return None
+    digits = str(value)
+    if len(digits) != 8 or not digits.isdigit():
+        return None
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
+
+
 class NCBIParser(BaseParser):
     """Parser for NCBI Gene TSV files using Polars.
 
@@ -238,6 +255,7 @@ class NCBIParser(BaseParser):
             object_id = str(row.get("Discontinued_GeneID") or "")
             sec_label = row.get("Discontinued_Symbol")
             disc_date = row.get("Discontinue_Date")
+            mapping_date = _ncbi_date_to_iso(disc_date)
 
             if not object_id:
                 continue
@@ -253,9 +271,9 @@ class NCBIParser(BaseParser):
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
+                        "mapping_date": mapping_date,
                         "record_id": self._record_id(
                             str(self.get_mapping_metadata()["record_id"]),
-                            str(self.version),
                             object_id,
                             subject_id,
                         ),
@@ -270,9 +288,9 @@ class NCBIParser(BaseParser):
                         "predicate_id": m_meta["predicate_id"],
                         "predicate_label": m_meta.get("predicate_label"),
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,
+                        "mapping_date": mapping_date,
                         "record_id": self._record_id(
                             str(self.get_mapping_metadata()["record_id"]),
-                            str(self.version),
                             object_id,
                             subject_id,
                         ),
@@ -346,7 +364,6 @@ class NCBIParser(BaseParser):
                                 "comment": "Gene symbol synonym.",
                                 "record_id": self._record_id(
                                     str(self.get_mapping_metadata()["record_id"]),
-                                    str(self.version),
                                     curie_id,
                                     syn,
                                 ),

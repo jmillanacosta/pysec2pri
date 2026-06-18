@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from datetime import date
+from datetime import date, datetime
 from importlib import resources as _importlib_resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast
@@ -35,6 +35,43 @@ WITHDRAWN_ENTRY_LABEL = "Withdrawn Entry"
 # Config directory path
 
 CONFIG_DIR = Path(_importlib_resources.files("pysec2pri.config"))  # type: ignore[arg-type]
+
+
+@dataclass
+class DistributionEra:
+    """One historical "shape" a datasource's distribution has taken.
+
+    Lets a config describe multiple eras (different URL templates, formats,
+    or archive locations) instead of a single hardcoded threshold. Eras are
+    matched by version using from_version/to_version (inclusive, numeric-aware
+    comparison so "100" < "245" compares correctly; falls back to lexicographic
+    for date-string versions like HGNC's "YYYY-MM-DD").
+    """
+
+    id: str
+    download_urls: dict[str, str] = field(default_factory=dict)
+    archive_url: str = ""
+    format: str | None = None
+    from_version: str | None = None
+    to_version: str | None = None
+    wayback: bool = False  # declarative only for now -- no resolver yet
+
+
+def _cmp_versions(a: str, b: str) -> int:
+    """Compare two version strings, numerically when possible.
+
+    Falls back to plain string comparison for non-numeric versions (e.g.
+    ISO date strings like ``"2026-04-07"``, which already sort correctly
+    lexicographically).
+
+    Returns:
+        Negative if ``a < b``, zero if equal, positive if ``a > b``.
+    """
+    try:
+        ai, bi = int(a), int(b)
+        return (ai > bi) - (ai < bi)
+    except ValueError:
+        return (a > b) - (a < b)
 
 
 @dataclass
@@ -67,6 +104,9 @@ class DatasourceConfig:
     # For now, only ChEBI: version threshold for new TSV format.
     # Use if release files change location or serialization.
     new_format_version: int | None = None
+    # Historical distribution "shapes" this datasource has had (different URL
+    # templates, formats, or archive locations across its lifetime).
+    distribution_eras: list[DistributionEra] = field(default_factory=list)
     # Full metadata from YAML
     mappingset_metadata: dict[str, Any] = field(default_factory=dict)
     mapping_metadata: dict[str, Any] = field(default_factory=dict)
@@ -81,6 +121,27 @@ class DatasourceConfig:
             List of format strings, or an empty list when the kind is absent.
         """
         return self.mapping_sets.get(kind, {}).get("formats", [])
+
+    def era_for(self, version: str | None) -> DistributionEra | None:
+        """Return the first configured era whose bounds contain *version*.
+
+        Args:
+            version: Version string to match, or ``None``.
+
+        Returns:
+            The matching :class:`DistributionEra`, or ``None`` if no eras are
+            configured or none match (callers should fall back to the
+            top-level ``download_urls``/``new_format_version`` behavior).
+        """
+        if not self.distribution_eras or version is None:
+            return None
+        for era in self.distribution_eras:
+            if era.from_version is not None and _cmp_versions(version, era.from_version) < 0:
+                continue
+            if era.to_version is not None and _cmp_versions(version, era.to_version) > 0:
+                continue
+            return era
+        return None
 
 
 def load_config(datasource_name: str) -> dict[str, Any]:
@@ -115,6 +176,19 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
     """
     raw = load_config(datasource_name)
 
+    eras = [
+        DistributionEra(
+            id=era.get("id", ""),
+            download_urls=era.get("download_urls") or {},
+            archive_url=era.get("archive_url", ""),
+            format=era.get("format"),
+            from_version=era.get("from_version"),
+            to_version=era.get("to_version"),
+            wayback=era.get("wayback", False),
+        )
+        for era in raw.get("distribution_eras", [])
+    ]
+
     return DatasourceConfig(
         name=raw.get("name", ""),
         prefix=raw.get("prefix", ""),
@@ -137,6 +211,7 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         sparql_endpoint=raw.get("sparql_endpoint", ""),
         queries=raw.get("queries", {}),
         new_format_version=raw.get("new_format_version"),
+        distribution_eras=eras,
         mappingset_metadata=raw.get("mappingset", {}),
         mapping_metadata=raw.get("mapping", {}),
     )
@@ -1364,6 +1439,11 @@ class BaseParser(ABC):
         """
         self.version = version
         self.show_progress = show_progress
+        # Release date of the source data, used for the SSSOM ``mapping_date``.
+        # Set by the download layer (see :func:`pysec2pri.api._auto_download`)
+        # to the upstream release date; falls back to the version when that is
+        # an ISO date (e.g. HGNC archives) or to today as a last resort.
+        self.release_date: str | date | datetime | None = None
 
         # Load config from YAML if available
         if config_name:
@@ -1429,10 +1509,18 @@ class BaseParser(ABC):
                     if hasattr(mapping, key) and value is not None:
                         setattr(mapping, key, value)
 
-    def _record_id(self, namespace: str, version: str, pri: str, sec: str) -> str:
-        """Assign a hex ID to a record."""
+    def _record_id(self, namespace: str, pri: str, sec: str) -> str:
+        """Assign a hex ID to a record.
+
+        Deliberately excludes the release/version: the same (pri, sec) pair
+        must hash to the same ``record_id`` across every release so that
+        mappings can be joined release-over-release (see
+        :mod:`pysec2pri.consolidate`) to discover when each one first/last
+        appeared. Per-release provenance is already on the ``Mapping`` via
+        ``mapping_date``/``subject_source_version``/``object_source_version``.
+        """
         digest = hashlib.sha256(f"{pri}|{sec}".encode()).hexdigest()[:16]
-        return f"{namespace}{version}/{digest}"
+        return f"{namespace}{digest}"
 
     def _extract_version_from_file(self, file_path: Path) -> str | None:
         """Extract a version string embedded in a data file's header.
@@ -1731,6 +1819,33 @@ class BaseParser(ABC):
             return (parts[0].strip(), parts[1].strip())
         return None
 
+    def _resolve_mapping_date(self) -> str:
+        """Resolve the SSSOM ``mapping_date`` for the output mapping set.
+
+        The mapping date reflects when the source data was released, not when
+        the mapping set was generated. Resolution order:
+
+        1. ``self.release_date`` when set by the download layer (the upstream
+           release date, e.g. an HTTP ``Last-Modified`` or archive date).
+        2. ``self.version`` when it is an ISO date (``YYYY-MM-DD``), which is
+           the most specific signal for sources whose version *is* a date
+           (e.g. the HGNC quarterly archive).
+        3. Today's date as a last resort (e.g. live SPARQL queries).
+
+        Returns:
+            ISO-8601 date string (``YYYY-MM-DD``).
+        """
+        rd = self.release_date
+        if isinstance(rd, datetime):
+            return rd.date().isoformat()
+        if isinstance(rd, date):
+            return rd.isoformat()
+        if isinstance(rd, str) and rd:
+            return rd
+        if self.version and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(self.version)):
+            return str(self.version)
+        return date.today().isoformat()
+
     def create_mapping_set(
         self,
         mappings: list[Mapping],
@@ -1799,7 +1914,7 @@ class BaseParser(ABC):
             mapping_provider=_compress(ms_meta.get("mapping_provider")),
             mapping_tool=_compress(ms_meta.get("mapping_tool")),
             mapping_tool_version=VERSION,
-            mapping_date=date.today().isoformat(),
+            mapping_date=self._resolve_mapping_date(),
             see_also=_compress(ms_meta.get("see_also")),
             issue_tracker=_compress(ms_meta.get("issue_tracker")),
             subject_preprocessing=_compress(ms_meta.get("subject_preprocessing")),
@@ -1831,6 +1946,7 @@ __all__ = [
     "BaseDownloader",
     "BaseParser",
     "DatasourceConfig",
+    "DistributionEra",
     "IdMappingSet",
     "LabelMappingSet",
     "Sec2PriMappingSet",

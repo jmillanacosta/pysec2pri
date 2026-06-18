@@ -140,6 +140,57 @@ class TestChEBIParser:
         assert "dihydrogen oxide" in subject_labels
 
 
+class TestChEBIDistributionEras:
+    """ChEBI's SDF/TSV format switch is resolved via DatasourceConfig.era_for."""
+
+    def test_legacy_version_resolves_sdf_url(self) -> None:
+        """A pre-245 release resolves to the legacy SDF era, not a missing config."""
+        from pysec2pri.parsers.chebi import ChEBIDownloader
+
+        downloader = ChEBIDownloader(subset="3star")
+        urls = downloader.get_download_urls("100")
+        assert urls.keys() == {"sdf"}
+        assert "chebi_legacy" in urls["sdf"]
+        assert "rel100" in urls["sdf"]
+        assert downloader.get_format("100") == "sdf"
+
+    def test_legacy_version_complete_subset_resolves_sdf_url(self) -> None:
+        """The 'complete' subset picks the complete (non-3star) SDF file."""
+        from pysec2pri.parsers.chebi import ChEBIDownloader
+
+        urls = ChEBIDownloader(subset="complete").get_download_urls("100")
+        assert urls["sdf"].endswith("ChEBI_complete.sdf.gz")
+
+    def test_new_version_resolves_tsv_urls(self) -> None:
+        """A >=245 release still resolves to the TSV flat-file URLs."""
+        from pysec2pri.parsers.chebi import ChEBIDownloader
+
+        downloader = ChEBIDownloader(subset="3star")
+        urls = downloader.get_download_urls("245")
+        assert urls.keys() == {"secondary_ids", "names", "compounds"}
+        assert "rel245" in urls["secondary_ids"]
+        assert downloader.get_format("245") == "tsv"
+
+    def test_era_for_boundary_versions(self) -> None:
+        """244 is the last SDF release, 245 is the first TSV release."""
+        from pysec2pri.parsers.base import get_datasource_config
+
+        config = get_datasource_config("chebi")
+        sdf_era = config.era_for("244")
+        tsv_era = config.era_for("245")
+        assert sdf_era is not None
+        assert tsv_era is not None
+        assert sdf_era.id == "sdf"
+        assert tsv_era.id == "tsv"
+
+    def test_era_for_no_version_returns_none(self) -> None:
+        """No version given means no era match; callers fall back to top-level config."""
+        from pysec2pri.parsers.base import get_datasource_config
+
+        config = get_datasource_config("chebi")
+        assert config.era_for(None) is None
+
+
 class TestHMDBParsers:
     """Tests for HMDB parsers."""
 
@@ -382,3 +433,133 @@ class TestParserIntegration:
                         f"predicate_label should be 'term replaced by' "
                         f"for IAO:0100001, got {m.predicate_label!r}"
                     )
+
+
+class TestMappingDate:
+    """Tests for release-date driven SSSOM ``mapping_date`` resolution."""
+
+    def test_resolve_mapping_date_prefers_release_datetime(self) -> None:
+        """A datetime release date is rendered as an ISO date string."""
+        from datetime import datetime
+
+        parser = HGNCParser(show_progress=False)
+        parser.release_date = datetime(2021, 4, 1, 13, 30, 0)
+        assert parser._resolve_mapping_date() == "2021-04-01"
+
+    def test_resolve_mapping_date_accepts_date_and_str(self) -> None:
+        """``date`` objects and ISO strings pass through unchanged."""
+        from datetime import date
+
+        parser = HGNCParser(show_progress=False)
+        parser.release_date = date(2022, 7, 15)
+        assert parser._resolve_mapping_date() == "2022-07-15"
+
+        parser.release_date = "2019-12-31"
+        assert parser._resolve_mapping_date() == "2019-12-31"
+
+    def test_resolve_mapping_date_falls_back_to_iso_version(self) -> None:
+        """When no release date is set, an ISO version (e.g. HGNC) is used."""
+        parser = HGNCParser(version="2020-10-01", show_progress=False)
+        assert parser.release_date is None
+        assert parser._resolve_mapping_date() == "2020-10-01"
+
+    def test_resolve_mapping_date_defaults_to_today(self) -> None:
+        """A non-date version with no release date falls back to today."""
+        from datetime import date
+
+        parser = ChEBIParser(version="245", show_progress=False)
+        assert parser._resolve_mapping_date() == date.today().isoformat()
+
+    def test_mapping_set_uses_release_date(self, hgnc_withdrawn_path: Path) -> None:
+        """The generated mapping set's ``mapping_date`` is the release date."""
+        from datetime import datetime
+
+        parser = HGNCParser(show_progress=False)
+        parser.release_date = datetime(2021, 4, 1)
+        result = parser.parse(hgnc_withdrawn_path)
+        assert result.mapping_date == "2021-04-01"
+
+
+class TestPerMappingDate:
+    """Tests for per-Mapping ``mapping_date`` sourced from upstream record dates."""
+
+    def test_hgnc_prev_symbol_uses_date_symbol_changed(self, hgnc_complete_path: Path) -> None:
+        """Previous-symbol mappings carry HGNC's own ``date_symbol_changed``.
+
+        mock_hgnc_complete.tsv: BRCA1 prev_symbol=PSCP, date_symbol_changed=1996-03-01.
+        """
+        parser = HGNCParser(show_progress=False)
+        result = parser.parse_labels(hgnc_complete_path)
+        prev_mappings = [m for m in result.mappings if m.subject_label == "PSCP"]
+        assert len(prev_mappings) == 1
+        assert prev_mappings[0].mapping_date == "1996-03-01"
+
+    def test_hgnc_alias_symbol_has_no_mapping_date(self, hgnc_complete_path: Path) -> None:
+        """Alias-symbol mappings have no associated change date in HGNC's data."""
+        parser = HGNCParser(show_progress=False)
+        result = parser.parse_labels(hgnc_complete_path)
+        alias_mappings = [m for m in result.mappings if m.subject_label == "BRCC1"]
+        assert len(alias_mappings) == 1
+        assert alias_mappings[0].mapping_date is None
+
+    def test_ncbi_discontinued_uses_discontinue_date(self, ncbi_history_path: Path) -> None:
+        """Discontinued-ID mappings carry NCBI's own ``Discontinue_Date``, as ISO.
+
+        mock_gene_history.tsv: GeneID=1001 -> Discontinued_GeneID=100001,
+        Discontinue_Date=20230115.
+        """
+        parser = NCBIParser(show_progress=False)
+        result = parser.parse(ncbi_history_path, tax_id="9606")
+        matches = [m for m in result.mappings if m.subject_id == "NCBIGene:100001"]
+        assert len(matches) == 1
+        assert matches[0].mapping_date == "2023-01-15"
+
+    def test_chebi_id_mapping_uses_consolidated_date(
+        self, chebi_sdf_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ChEBI ID mappings carry the consolidated first-seen date, when known.
+
+        mock_chebi.sdf: CHEBI:10001 has secondary IDs CHEBI:99901, CHEBI:99902.
+        Only the first is faked into the consolidated cache; the second must
+        fall back to no per-row date (set-level pinned date applies instead).
+        """
+        parser = ChEBIParser(show_progress=False)
+        m_meta = parser.get_mapping_metadata()
+        record_id = parser._record_id(str(m_meta["record_id"]), "CHEBI:10001", "CHEBI:99901")
+        monkeypatch.setattr(
+            "pysec2pri.consolidate.load_mapping_dates",
+            lambda *args, **kwargs: {record_id: "2013-02-15"},
+        )
+
+        result = parser.parse(chebi_sdf_path)
+
+        known = [m for m in result.mappings if m.subject_id == "CHEBI:99901"]
+        assert len(known) == 1
+        assert known[0].mapping_date == "2013-02-15"
+
+        unknown = [m for m in result.mappings if m.subject_id == "CHEBI:99902"]
+        assert len(unknown) == 1
+        assert unknown[0].mapping_date is None
+
+    def test_uniprot_id_mapping_uses_consolidated_date(
+        self, uniprot_sec_ac_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """UniProt ID mappings carry the consolidated first-seen date, when known.
+
+        mock_sec_ac.txt: secondary A0A009QSN8 -> primary A0ACD6B9T2.
+        """
+        parser = UniProtParser(show_progress=False)
+        m_meta = parser.get_mapping_metadata()
+        record_id = parser._record_id(
+            str(m_meta["record_id"]), "UniProtKB:A0ACD6B9T2", "UniProtKB:A0A009QSN8"
+        )
+        monkeypatch.setattr(
+            "pysec2pri.consolidate.load_mapping_dates",
+            lambda *args, **kwargs: {record_id: "2015-07-01"},
+        )
+
+        result = parser.parse(uniprot_sec_ac_path)
+
+        known = [m for m in result.mappings if m.subject_id == "UniProtKB:A0A009QSN8"]
+        assert len(known) == 1
+        assert known[0].mapping_date == "2015-07-01"
