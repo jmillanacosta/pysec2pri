@@ -333,7 +333,7 @@ class HGNCParser(BaseParser):
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
                         "record_id": self._record_id(
-                            str(m_meta["record_id"]),
+                            self._record_namespace(),
                             WITHDRAWN_ENTRY,
                             hgnc_id,
                         ),
@@ -355,7 +355,7 @@ class HGNCParser(BaseParser):
                             "predicate_id": m_meta["predicate_id"],
                             "predicate_label": m_meta.get("predicate_label"),
                             "record_id": self._record_id(
-                                str(m_meta["record_id"]),
+                                self._record_namespace(),
                                 target_id,
                                 hgnc_id,
                             ),
@@ -440,7 +440,7 @@ class HGNCParser(BaseParser):
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
                         "record_id": self._record_id(
-                            str(m_meta["record_id"]),
+                            self._record_namespace(),
                             hgnc_id,
                             alias,
                         ),
@@ -458,7 +458,7 @@ class HGNCParser(BaseParser):
                         "comment": "Previous symbol mapping.",
                         "mapping_date": symbol_changed_date,
                         "record_id": self._record_id(
-                            str(m_meta["record_id"]),
+                            self._record_namespace(),
                             hgnc_id,
                             prev,
                         ),

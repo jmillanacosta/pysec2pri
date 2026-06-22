@@ -12,6 +12,7 @@ from pysec2pri.parsers.base import (
     load_config,
 )
 from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
+from pysec2pri.parsers.ensembl import EnsemblDownloader, EnsemblParser
 from pysec2pri.parsers.hgnc import HGNCParser
 from pysec2pri.parsers.hmdb import HMDBMetaboliteParser, HMDBProteinParser
 from pysec2pri.parsers.ncbi import NCBIParser
@@ -25,6 +26,8 @@ __all__ = [
     "ChEBIDownloader",
     "ChEBIParser",
     "DatasourceConfig",
+    "EnsemblDownloader",
+    "EnsemblParser",
     "HGNCParser",
     "HMDBMetaboliteParser",
     "HMDBProteinParser",

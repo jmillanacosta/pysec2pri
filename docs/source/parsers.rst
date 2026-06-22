@@ -21,6 +21,10 @@ If possible, you can also add automated download in ``src/pysec2pri/download.py`
    * - **ChEBI**
      - TSV directory (≥ release 245) or SDF file (< 245)
      - ``parse()``, ``parse_synonyms()``
+   * - **Ensembl**
+     - ``stable_id_event``, ``mapping_session``, ``gene``, ``xref``,
+       ``external_synonym``
+     - ``parse()``, ``parse_labels()``, ``parse_all()``
    * - **HMDB**
      - ``hmdb_metabolites.xml`` or ``hmdb_proteins.xml``
      - ``parse()``
@@ -41,6 +45,9 @@ Module Reference
 ================
 
 .. autoclass:: pysec2pri.parsers.chebi.ChEBIParser
+    :members:
+
+.. autoclass:: pysec2pri.parsers.ensembl.EnsemblParser
     :members:
 
 .. autoclass:: pysec2pri.parsers.hmdb.HMDBParser

@@ -50,6 +50,12 @@ __all__ = [
     "generate_chebi_primary_ids",
     "generate_chebi_primary_labels",
     "generate_chebi_synonyms",
+    "generate_ensembl",
+    "generate_ensembl_ids",
+    "generate_ensembl_label_history",
+    "generate_ensembl_labels",
+    "generate_ensembl_primary_ids",
+    "generate_ensembl_primary_labels",
     "generate_hgnc",
     "generate_hgnc_ids",
     "generate_hgnc_labels",
@@ -390,7 +396,7 @@ def generate_chebi_primary_labels(
 
 def generate_ncbi_primary_ids(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -402,7 +408,7 @@ def generate_ncbi_primary_ids(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -415,12 +421,12 @@ def generate_ncbi_primary_ids(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_primary_ids(Path(input_path), tax_id=tax_id)
+    return parser.parse_primary_ids(Path(input_path), species=species)
 
 
 def generate_ncbi_primary_labels(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -432,7 +438,7 @@ def generate_ncbi_primary_labels(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -445,7 +451,7 @@ def generate_ncbi_primary_labels(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_primary_labels(Path(input_path), tax_id=tax_id)
+    return parser.parse_primary_labels(Path(input_path), species=species)
 
 
 def generate_hmdb_primary_ids(
@@ -520,7 +526,7 @@ def generate_uniprot_primary_ids(
 def generate_ncbi(
     input_path: Path | str | None = None,
     gene_info_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -538,7 +544,7 @@ def generate_ncbi(
         gene_info_path: Local gene_info file used to populate the full primary
             ID list. Auto-downloaded together with ``input_path`` when both
             are ``None``.
-        tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter (default: ``"9606"`` for human).
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -554,12 +560,12 @@ def generate_ncbi(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse(Path(input_path), tax_id=tax_id, gene_info_path=Path(gene_info_path))
+    return parser.parse(Path(input_path), species=species, gene_info_path=Path(gene_info_path))
 
 
 def generate_ncbi_labels(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "9606",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -569,7 +575,7 @@ def generate_ncbi_labels(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter (default: ``"9606"`` for human).
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -582,7 +588,240 @@ def generate_ncbi_labels(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_labels(Path(input_path), tax_id=tax_id)
+    return parser.parse_labels(Path(input_path), species=species)
+
+
+def _auto_download_ensembl(
+    version: str | None,
+    species: str | int,
+    keys: list[str],
+    show_progress: bool,
+) -> tuple[dict[str, Path], str, datetime | None]:
+    """Download Ensembl files into a temp dir; resolve version/release date.
+
+    Downloads are parameterized by species/assembly beyond just ``version``
+    (unlike most datasources), so this goes through
+    :class:`~pysec2pri.parsers.ensembl.EnsemblDownloader` directly rather
+    than the generic :func:`_auto_download` (mirrors the ChEBI pattern).
+    """
+    import tempfile
+
+    from pysec2pri.download import check_ensembl_release, resolve_release_date
+    from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+    if version is None:
+        version = check_ensembl_release().version
+        if version is None:
+            raise ValueError("Could not determine the latest Ensembl release.")
+    release_date = resolve_release_date("ensembl", version, species=species)
+    downloader = EnsemblDownloader(version=version, species=species, show_progress=show_progress)
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_ensembl_{version}_"))
+    files = downloader.download(tmpdir, version=version, keys=keys)
+    return files, version, release_date
+
+
+def generate_ensembl(
+    input_path: Path | str | None = None,
+    mapping_session_path: Path | str | None = None,
+    gene_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return Ensembl secondary to primary gene ID mappings.
+
+    Downloads ``stable_id_event``/``mapping_session``/``gene`` automatically
+    when their paths are omitted. Each release's ``stable_id_event`` table is
+    cumulative, so this describes the whole state of Ensembl gene IDs at
+    ``version`` (no cross-release chain resolution; see
+    :mod:`pysec2pri.consolidate` for that).
+
+    Args:
+        input_path: Local ``stable_id_event`` file (the ``ids`` mapping
+            set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
+            if ``None``.
+        mapping_session_path: Local ``mapping_session`` file, used to resolve
+            each row's ``mapping_date``. Auto-downloaded together with
+            ``input_path`` when both are ``None``.
+        gene_path: Local ``gene`` file, used to populate the full primary ID
+            list. Auto-downloaded together with the others when ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if input_path is None or mapping_session_path is None or gene_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["stable_id_event", "mapping_session", "gene"], show_progress
+        )
+        if input_path is None:
+            input_path = files["stable_id_event"]
+        if mapping_session_path is None:
+            mapping_session_path = files["mapping_session"]
+        if gene_path is None:
+            gene_path = files["gene"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse(
+        Path(input_path),
+        mapping_session_path=Path(mapping_session_path),
+        gene_path=Path(gene_path),
+    )
+
+
+def generate_ensembl_labels(
+    input_path: Path | str | None = None,
+    gene_path: Path | str | None = None,
+    xref_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return Ensembl gene external-synonym to current-label mappings.
+
+    Downloads ``external_synonym``/``gene``/``xref`` automatically when
+    their paths are omitted.
+
+    Args:
+        input_path: Local ``external_synonym`` file (the ``labels`` mapping
+            set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
+            if ``None``.
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        xref_path: Local ``xref`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if input_path is None or gene_path is None or xref_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene", "xref", "external_synonym"], show_progress
+        )
+        if input_path is None:
+            input_path = files["external_synonym"]
+        if gene_path is None:
+            gene_path = files["gene"]
+        if xref_path is None:
+            xref_path = files["xref"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_labels(Path(gene_path), Path(xref_path), Path(input_path))
+
+
+def generate_ensembl_primary_ids(
+    gene_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current Ensembl gene IDs.
+
+    Only the ``gene`` file is downloaded/read. The returned mapping set has
+    an empty ``mappings`` list; ``_primary_ids`` is populated.
+
+    Args:
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if gene_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene"], show_progress
+        )
+        gene_path = files["gene"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_primary_ids(Path(gene_path))
+
+
+def generate_ensembl_primary_labels(
+    gene_path: Path | str | None = None,
+    xref_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current Ensembl gene labels.
+
+    Only the ``gene``/``xref`` files are downloaded/read. The returned
+    mapping set has an empty ``mappings`` list; ``_primary_labels`` is
+    populated.
+
+    Args:
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        xref_path: Local ``xref`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if gene_path is None or xref_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene", "xref"], show_progress
+        )
+        if gene_path is None:
+            gene_path = files["gene"]
+        if xref_path is None:
+            xref_path = files["xref"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_primary_labels(Path(gene_path), Path(xref_path))
+
+
+def generate_ensembl_label_history(
+    species: str | int = 9606,
+    from_version: str | None = None,
+    to_version: str | None = None,
+    cache_dir: Path | str | None = None,
+    show_progress: bool = True,
+    force: bool = False,
+) -> Sec2PriMappingSet:
+    """Return cross-release previous-symbol -> current-symbol Ensembl mappings.
+
+    Ensembl's core schema has no previous-gene-symbol table, so genuine
+    previous-symbol -> current-symbol transitions are derived by diffing
+    each release's primary-label snapshot per stable ID. Delegates to
+    :func:`pysec2pri.consolidate.build_label_history`, which walks every
+    historical release (or a bounded range) and resumes on re-run. This is
+    a network-heavy, run-on-demand operation, not part of normal
+    single-release generation.
+
+    Args:
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        from_version: Optional lower bound (inclusive) on the release walk.
+        to_version: Optional upper bound (inclusive) on the release walk.
+        cache_dir: Directory for the resumable sidecar/cache. Defaults to
+            :func:`pysec2pri.consolidate.default_cache_dir`.
+        show_progress: Whether to show progress bars.
+        force: Re-walk every release, ignoring resume state.
+
+    Returns:
+        LabelMappingSet of previous -> current symbol transitions.
+    """
+    from pysec2pri.consolidate import build_label_history
+
+    return build_label_history(
+        species=species,
+        from_version=from_version,
+        to_version=to_version,
+        cache_dir=Path(cache_dir) if cache_dir else None,
+        show_progress=show_progress,
+        force=force,
+    )
 
 
 def generate_uniprot(
@@ -1557,6 +1796,7 @@ def find_ambiguous(
 
 generate_chebi_ids = generate_chebi
 generate_chebi_labels = generate_chebi_synonyms
+generate_ensembl_ids = generate_ensembl
 generate_hgnc_ids = generate_hgnc
 generate_hgnc_labels = generate_hgnc_labels
 generate_ncbi_ids = generate_ncbi

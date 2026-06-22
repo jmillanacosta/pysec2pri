@@ -41,3 +41,126 @@ class TestGenericFallbackResilience:
         urls, release_date = _get_datasource_urls("ncbi", ALL_DATASOURCES["ncbi"])
         assert release_date is None
         assert urls
+
+
+class _FakeHttpResponse:
+    """Stand-in for an httpx.Response carrying a directory-listing body."""
+
+    def __init__(self, text: str = "") -> None:
+        """Store the fake response body."""
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        """No-op: the fake response is always considered successful."""
+
+
+class _FakeHttpClient:
+    """Stand-in for httpx.Client returning a fixed directory listing."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Ignore all init args; this fake never opens a real connection."""
+
+    def __enter__(self) -> _FakeHttpClient:
+        """Support use as a context manager, like the real httpx.Client."""
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        """Support use as a context manager, like the real httpx.Client."""
+        return None
+
+    def get(self, url: str) -> _FakeHttpResponse:
+        """Return a fixed Ensembl-style directory listing, regardless of *url*."""
+        return _FakeHttpResponse(
+            '<a href="homo_sapiens_core_115_38/">homo_sapiens_core_115_38/</a>'
+        )
+
+
+class _FailingHttpClient(_FakeHttpClient):
+    """Stand-in for httpx.Client whose every request fails."""
+
+    def get(self, url: str) -> _FakeHttpResponse:
+        """Simulate a network failure, regardless of *url*."""
+        import httpx
+
+        raise httpx.ConnectError("simulated network failure")
+
+
+class TestEnsemblDownloader:
+    """Tests for EnsemblDownloader URL templating and assembly auto-discovery."""
+
+    def test_get_download_urls_templates_version_species_assembly(self) -> None:
+        """Explicit assembly skips discovery and fills the URL template directly."""
+        from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+        downloader = EnsemblDownloader(
+            version="115", species=9606, assembly="38", show_progress=False
+        )
+        urls = downloader.get_download_urls("115")
+        assert urls["stable_id_event"] == (
+            "https://ftp.ensembl.org/pub/release-115/mysql/"
+            "homo_sapiens_core_115_38/stable_id_event.txt.gz"
+        )
+        assert urls["gene"].endswith("homo_sapiens_core_115_38/gene.txt.gz")
+
+    def test_get_download_urls_resolves_mouse_species_token(self) -> None:
+        """A different taxon ID resolves to its own Ensembl species token."""
+        from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+        downloader = EnsemblDownloader(
+            version="115", species=10090, assembly="39", show_progress=False
+        )
+        urls = downloader.get_download_urls("115")
+        assert "mus_musculus_core_115_39" in urls["gene"]
+
+    def test_get_download_urls_unknown_species_raises(self) -> None:
+        """An undeclared taxon ID raises rather than silently building a bad URL."""
+        from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+        downloader = EnsemblDownloader(
+            version="115", species=99999, assembly="1", show_progress=False
+        )
+        with pytest.raises(ValueError, match="Unknown species"):
+            downloader.get_download_urls("115")
+
+    def test_get_download_urls_without_explicit_assembly_calls_discovery(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Omitting assembly triggers _resolve_core_dir (monkeypatched HTTP)."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(
+            version="115", species=9606, show_progress=False
+        )
+        urls = downloader.get_download_urls("115")
+        assert "homo_sapiens_core_115_38" in urls["gene"]
+
+    def test_resolve_core_dir_discovers_assembly_from_listing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_resolve_core_dir parses the assembly suffix out of the directory listing."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(show_progress=False)
+        assert downloader._resolve_core_dir("115", "homo_sapiens") == "38"
+
+    def test_resolve_core_dir_falls_back_to_default_on_http_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed listing request falls back to parse_options.default_assembly."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FailingHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(show_progress=False)
+        assert downloader._resolve_core_dir("115", "homo_sapiens") == "38"
+
+    def test_resolve_core_dir_falls_back_when_token_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A listing that doesn't mention the requested token falls back to the default."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(show_progress=False)
+        assert downloader._resolve_core_dir("115", "mus_musculus") == "38"

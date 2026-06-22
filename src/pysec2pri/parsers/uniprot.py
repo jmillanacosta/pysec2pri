@@ -92,7 +92,7 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first data row
 
-        meta_id = str(self.get_mapping_metadata()["record_id"])
+        meta_ns = self._record_namespace()
 
         df = (
             pl.scan_csv(
@@ -138,14 +138,21 @@ class UniProtParser(BaseParser):
             pl.struct(["subject_id", "object_id"])
             .map_elements(
                 lambda x: self._record_id(
-                    meta_id,
+                    meta_ns,
                     x["object_id"],
                     x["subject_id"],
                 ),
                 return_dtype=pl.Utf8,
                 strategy="thread_local",
             )
-            .alias("record_id")
+            .alias("record_id"),
+            pl.struct(["subject_id", "object_id"])
+            .map_elements(
+                lambda x: self._pair_hash(x["object_id"], x["subject_id"]),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("pair_key"),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -162,9 +169,11 @@ class UniProtParser(BaseParser):
             "mapping_tool": m_meta.get("mapping_tool"),
             "license": m_meta.get("license"),
         }
-        rows = df.select(["subject_id", "object_id", "record_id"]).to_dicts()
+        rows = df.select(["subject_id", "object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            row["mapping_date"] = consolidated.get(row["record_id"])
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
+            row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
     def _parse_delac(self, file_path: Path) -> list[Mapping]:
@@ -185,7 +194,7 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first deleted accession
 
-        meta_id = str(self.get_mapping_metadata()["record_id"])
+        meta_ns = self._record_namespace()
 
         df = (
             pl.scan_csv(
@@ -218,14 +227,21 @@ class UniProtParser(BaseParser):
             pl.struct(["object_id"])
             .map_elements(
                 lambda x: self._record_id(
-                    meta_id,
+                    meta_ns,
                     x["object_id"],
                     x["object_id"],  # subject_id == object_id in this dataset
                 ),
                 return_dtype=pl.Utf8,
                 strategy="thread_local",
             )
-            .alias("record_id")
+            .alias("record_id"),
+            pl.struct(["object_id"])
+            .map_elements(
+                lambda x: self._pair_hash(x["object_id"], x["object_id"]),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("pair_key"),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -244,9 +260,11 @@ class UniProtParser(BaseParser):
             "license": m_meta.get("license"),
             "comment": "Deleted accession with no replacement.",
         }
-        rows = df.select(["object_id", "record_id"]).to_dicts()
+        rows = df.select(["object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            row["mapping_date"] = consolidated.get(row["record_id"])
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
+            row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
     def _create_mapping_set(

@@ -1,0 +1,3 @@
+2951001	1100	HGNC:7470	MT-RNR1	0	mitochondrially encoded 12S rRNA	DIRECT	Generated via ensembl_manual
+2951049	1100	HGNC:7481	MT-TF	0	mitochondrially encoded tRNA-Phe (UUU/C)	DIRECT	Generated via ensembl_manual
+2951157	1100	HGNC:7500	MT-TV	0	mitochondrially encoded tRNA-Val (GUN)	DIRECT	Generated via ensembl_manual

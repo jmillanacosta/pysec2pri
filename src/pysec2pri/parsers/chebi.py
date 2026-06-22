@@ -280,8 +280,8 @@ class ChEBIParser(BaseParser):
         from pysec2pri.consolidate import load_mapping_dates
 
         m_meta = self.get_mapping_metadata()
-        record_id = m_meta.get("record_id", None)
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="ids")
+        record_ns = self._record_namespace()
         fixed = {
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
@@ -294,13 +294,14 @@ class ChEBIParser(BaseParser):
         }
         rows = []
         for pri, sec in raw_id_mappings:
-            rid = self._record_id(str(record_id), pri, sec)
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
             rows.append(
                 {
                     "subject_id": sec,
                     "object_id": pri,
-                    "record_id": rid,
-                    "mapping_date": consolidated.get(rid),
+                    "record_id": self._record_id(record_ns, pri, sec),
+                    "mapping_date": consolidated.get(self._pair_hash(pri, sec)),
                 }
             )
         return self._build_mappings(rows, fixed, desc="Creating ID mappings", total=len(rows))
@@ -310,8 +311,8 @@ class ChEBIParser(BaseParser):
         from pysec2pri.consolidate import load_mapping_dates
 
         m_meta = self.get_mapping_metadata()
-        record_id = m_meta.get("record_id", None)
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="labels")
+        record_ns = self._record_namespace()
         fixed = {
             "mapping_justification": m_meta["mapping_justification"],
             "subject_source": m_meta.get("subject_source"),
@@ -323,16 +324,17 @@ class ChEBIParser(BaseParser):
         for sid, pname, syn in raw_name_mappings:
             if not syn:
                 continue
-            rid = self._record_id(str(record_id), sid, syn)
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
             rows.append(
                 {
-                    "record_id": rid,
+                    "record_id": self._record_id(record_ns, sid, syn),
                     "object_id": sid,
                     "subject_label": syn,  # synonym = secondary : subject
                     "subject_type": "rdfs literal",
                     "object_label": pname,  # primary name : object
                     "_label_type": "alias",
-                    "mapping_date": consolidated.get(rid),
+                    "mapping_date": consolidated.get(self._pair_hash(sid, syn)),
                 }
             )
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))

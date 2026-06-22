@@ -52,6 +52,15 @@ class NCBIParser(BaseParser):
 
     datasource_name = "ncbi"
 
+    def _product_slug(self) -> str | None:
+        """Species (NCBI taxon ID) the current run was filtered to.
+
+        Different species are disjoint datasets at the same release, so the
+        taxon ID is folded into ``mapping_set_id``/``record_id`` (see
+        :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`).
+        """
+        return getattr(self, "species", None)
+
     @property
     def history_source_url(self) -> str:
         """Get the gene_history download URL from config."""
@@ -65,14 +74,14 @@ class NCBIParser(BaseParser):
     def parse(
         self,
         input_path: Path | str | None = None,
-        tax_id: str = "9606",
+        species: str = "9606",
         gene_info_path: Path | str | None = None,
     ) -> Sec2PriMappingSet:
         """Parse NCBI gene_history file into an IdMappingSet.
 
         Args:
             input_path: Path to gene_history file (can be .gz compressed).
-            tax_id: Taxonomy ID to filter by (default: "9606" for human).
+            species: NCBI taxon ID to filter by (default: "9606" for human).
             gene_info_path: Optional path to the gene_info file.  When
                 supplied, ``_primary_ids`` on the returned mapping set is
                 populated with every current ``NCBIGene:<id>`` CURIE for the
@@ -86,9 +95,10 @@ class NCBIParser(BaseParser):
             raise ValueError("input_path must not be None")
         input_path = Path(input_path)
         self._resolve_version(input_path)
+        self.species = species
 
         # Parse gene_history for ID mappings
-        mappings = self._parse_gene_history(input_path, tax_id)
+        mappings = self._parse_gene_history(input_path, species)
 
         # Create IdMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
@@ -98,7 +108,7 @@ class NCBIParser(BaseParser):
             object.__setattr__(
                 mapping_set,
                 "_primary_ids",
-                self._extract_primary_ids(Path(gene_info_path), tax_id),
+                self._extract_primary_ids(Path(gene_info_path), species),
             )
 
         return mapping_set
@@ -106,13 +116,13 @@ class NCBIParser(BaseParser):
     def parse_labels(
         self,
         gene_info_path: Path | str | None,
-        tax_id: str = "9606",
+        species: str = "9606",
     ) -> Sec2PriMappingSet:
         """Parse NCBI gene_info file for label (label) mappings.
 
         Args:
             gene_info_path: Path to gene_info file.
-            tax_id: Taxonomy ID to filter by (default: "9606" for human).
+            species: NCBI taxon ID to filter by (default: "9606" for human).
 
         Returns:
             LabelMappingSet with computed cardinalities based on labels.
@@ -121,25 +131,26 @@ class NCBIParser(BaseParser):
             raise ValueError("gene_info_path must not be None")
         gene_info_path = Path(gene_info_path)
         self._resolve_version(gene_info_path)
+        self.species = species
 
         # Parse gene_info for symbol mappings
-        mappings = self._parse_gene_info(gene_info_path, tax_id)
+        mappings = self._parse_gene_info(gene_info_path, species)
 
         # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
         # Populate full primary symbol set from the same file
         object.__setattr__(
-            mapping_set, "_primary_labels", self._extract_primary_labels(gene_info_path, tax_id)
+            mapping_set, "_primary_labels", self._extract_primary_labels(gene_info_path, species)
         )
         object.__setattr__(
-            mapping_set, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id)
+            mapping_set, "_primary_ids", self._extract_primary_ids(gene_info_path, species)
         )
         return mapping_set
 
     def parse_primary_ids(
         self,
         gene_info_path: Path | str | None,
-        tax_id: str = "9606",
+        species: str = "9606",
     ) -> Sec2PriMappingSet:
         """Return a mapping set containing the full list of current NCBI Gene primary IDs.
 
@@ -149,7 +160,7 @@ class NCBIParser(BaseParser):
 
         Args:
             gene_info_path: Path to the gene_info file (can be .gz compressed).
-            tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+            species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
 
         Returns:
             :class:`~pysec2pri.parsers.base.IdMappingSet` with ``_primary_ids``
@@ -159,14 +170,15 @@ class NCBIParser(BaseParser):
             raise ValueError("gene_info_path must not be None")
         gene_info_path = Path(gene_info_path)
         self._resolve_version(gene_info_path)
+        self.species = species
         ms = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_info_path, tax_id))
+        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_info_path, species))
         return ms
 
     def parse_primary_labels(
         self,
         gene_info_path: Path | str | None,
-        tax_id: str = "9606",
+        species: str = "9606",
     ) -> Sec2PriMappingSet:
         """Return a mapping set containing the full list of current NCBI Gene labels.
 
@@ -176,7 +188,7 @@ class NCBIParser(BaseParser):
 
         Args:
             gene_info_path: Path to the gene_info file (can be .gz compressed).
-            tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+            species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with
@@ -186,9 +198,10 @@ class NCBIParser(BaseParser):
             raise ValueError("gene_info_path must not be None")
         gene_info_path = Path(gene_info_path)
         self._resolve_version(gene_info_path)
+        self.species = species
         ms = self._create_mapping_set([], mapping_type="label")
         object.__setattr__(
-            ms, "_primary_labels", self._extract_primary_labels(gene_info_path, tax_id)
+            ms, "_primary_labels", self._extract_primary_labels(gene_info_path, species)
         )
         return ms
 
@@ -196,32 +209,32 @@ class NCBIParser(BaseParser):
         self,
         gene_history_path: Path | str | None,
         gene_info_path: Path | str | None,
-        tax_id: str = "9606",
+        species: str = "9606",
     ) -> tuple[Sec2PriMappingSet, Sec2PriMappingSet]:
         """Parse both gene_history and gene_info files.
 
         Args:
             gene_history_path: Path to gene_history file.
             gene_info_path: Path to gene_info file.
-            tax_id: Taxonomy ID to filter by.
+            species: NCBI taxon ID to filter by.
 
         Returns:
             Tuple of (IdMappingSet, LabelMappingSet).
         """
-        id_mappings = self.parse(gene_history_path, tax_id, gene_info_path=gene_info_path)
-        label_mappings = self.parse_labels(gene_info_path, tax_id)
+        id_mappings = self.parse(gene_history_path, species, gene_info_path=gene_info_path)
+        label_mappings = self.parse_labels(gene_info_path, species)
         return id_mappings, label_mappings
 
     def _parse_gene_history(
         self,
         file_path: Path,
-        tax_id: str,
+        species: str,
     ) -> list[Mapping]:
         """Parse the gene_history file for ID-to-ID mappings.
 
         Args:
             file_path: Path to gene_history file.
-            tax_id: Taxonomy ID to filter by.
+            species: NCBI taxon ID to filter by.
 
         Returns:
             List of SSSOM Mapping objects.
@@ -233,7 +246,7 @@ class NCBIParser(BaseParser):
                 infer_schema_length=10000,
                 null_values=["-"],
             )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
             .collect()
         )
 
@@ -273,7 +286,7 @@ class NCBIParser(BaseParser):
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
                         "mapping_date": mapping_date,
                         "record_id": self._record_id(
-                            str(self.get_mapping_metadata()["record_id"]),
+                            self._record_namespace(),
                             object_id,
                             subject_id,
                         ),
@@ -290,7 +303,7 @@ class NCBIParser(BaseParser):
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,
                         "mapping_date": mapping_date,
                         "record_id": self._record_id(
-                            str(self.get_mapping_metadata()["record_id"]),
+                            self._record_namespace(),
                             object_id,
                             subject_id,
                         ),
@@ -304,13 +317,13 @@ class NCBIParser(BaseParser):
     def _parse_gene_info(
         self,
         file_path: Path,
-        tax_id: str,
+        species: str,
     ) -> list[Mapping]:
         """Parse the gene_info file for symbol (label) mappings.
 
         Args:
             file_path: Path to gene_info file.
-            tax_id: Taxonomy ID to filter by.
+            species: NCBI taxon ID to filter by.
 
         Returns:
             List of SSSOM Mapping objects for symbol mappings.
@@ -322,7 +335,7 @@ class NCBIParser(BaseParser):
                 infer_schema_length=10000,
                 null_values=["-"],
             )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
             .collect()
         )
 
@@ -363,7 +376,7 @@ class NCBIParser(BaseParser):
                                 "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
                                 "record_id": self._record_id(
-                                    str(self.get_mapping_metadata()["record_id"]),
+                                    self._record_namespace(),
                                     curie_id,
                                     syn,
                                 ),
@@ -383,12 +396,12 @@ class NCBIParser(BaseParser):
         """
         return self.create_mapping_set(mappings, mapping_type)
 
-    def _extract_primary_ids(self, file_path: Path, tax_id: str) -> set[str]:
+    def _extract_primary_ids(self, file_path: Path, species: str) -> set[str]:
         """Extract all current NCBI Gene IDs from gene_info for a given taxonomy.
 
         Args:
             file_path: Path to the gene_info file.
-            tax_id: Taxonomy ID string (e.g. ``"9606"``).
+            species: NCBI taxon ID string (e.g. ``"9606"``).
 
         Returns:
             Set of ``NCBIGene:<id>`` CURIEs.
@@ -400,12 +413,12 @@ class NCBIParser(BaseParser):
                 infer_schema_length=10000,
                 null_values=["-"],
             )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
             .collect()
         )
         return {f"NCBIGene:{v}" for v in df["GeneID"].drop_nulls().cast(pl.Utf8).to_list()}
 
-    def _extract_primary_labels(self, file_path: Path, tax_id: str) -> dict[str, set[str]]:
+    def _extract_primary_labels(self, file_path: Path, species: str) -> dict[str, set[str]]:
         """Extract all current gene symbols from gene_info for a given taxonomy.
 
         Returns a ``dict`` mapping each symbol text to the set of primary
@@ -413,7 +426,7 @@ class NCBIParser(BaseParser):
 
         Args:
             file_path: Path to the gene_info file.
-            tax_id: Taxonomy ID string (e.g. ``"9606"``).
+            species: NCBI taxon ID string (e.g. ``"9606"``).
 
         Returns:
             ``dict[label, set[NCBIGene:<id>]]``
@@ -425,7 +438,7 @@ class NCBIParser(BaseParser):
                 infer_schema_length=10000,
                 null_values=["-"],
             )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == tax_id)
+            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
             .select(["GeneID", "Symbol"])
             .collect()
         )

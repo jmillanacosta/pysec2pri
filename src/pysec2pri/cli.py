@@ -3,7 +3,7 @@
 Commands are registered automatically from the config files: every
 (config_id, kind) pair whose formats list is non-empty gets a subcommand
 inside the corresponding datasource group.  Per-datasource extra options
-(--subset, --tax-id, --entity-type ...) are declared once in ``_EXTRA_OPTS``
+(--subset, --species, --entity-type ...) are declared once in ``_EXTRA_OPTS``
 and forwarded as **kwargs to the matching ``generate_*`` function.
 """
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -50,7 +50,9 @@ _opt_subset = _opt(
     type=click.Choice(["3star", "complete"]),
     help="Compound subset.",
 )
-_opt_tax_id = _opt("--tax-id", default="9606", show_default=True, help="NCBI taxonomy ID.")
+_opt_species = _opt(
+    "--species", default="9606", show_default=True, help="Species as NCBI taxon ID."
+)
 _opt_entity_type = _opt(
     "--entity-type",
     default=None,
@@ -328,10 +330,12 @@ def _build_registry() -> dict[tuple[str, str], tuple[Callable[..., Any], list[Ca
     return {
         ("chebi", "ids"): (api.generate_chebi_ids, [_opt_subset]),
         ("chebi", "labels"): (api.generate_chebi_labels, [_opt_subset]),
+        ("ensembl", "ids"): (api.generate_ensembl_ids, [_opt_species]),
+        ("ensembl", "labels"): (api.generate_ensembl_labels, [_opt_species]),
         ("hgnc", "ids"): (api.generate_hgnc_ids, []),
         ("hgnc", "labels"): (api.generate_hgnc_labels, []),
-        ("ncbi", "ids"): (api.generate_ncbi_ids, [_opt_tax_id]),
-        ("ncbi", "labels"): (api.generate_ncbi_labels, [_opt_tax_id]),
+        ("ncbi", "ids"): (api.generate_ncbi_ids, [_opt_species]),
+        ("ncbi", "labels"): (api.generate_ncbi_labels, [_opt_species]),
         ("hmdb_metabolites", "ids"): (api.generate_hmdb_ids, []),
         ("hmdb_proteins", "ids"): (api.generate_hmdb_proteins_ids, []),
         ("uniprot", "ids"): (api.generate_uniprot_ids, [_opt_delac_file]),
@@ -370,6 +374,59 @@ def main() -> None:
 
 
 _register_datasources(main)
+
+
+# ensembl label-history (cross-release; not a single-release generate_* command)
+
+
+@click.command("label-history")
+@_opt_species
+@click.option("--from-version", default=None, help="Lower bound (inclusive) on the release walk.")
+@click.option("--to-version", default=None, help="Upper bound (inclusive) on the release walk.")
+@_opt_output
+@click.option("--cache-dir", type=PathType, default=None, help="Cache directory.")
+@click.option(
+    "--force", is_flag=True, default=False, help="Re-walk every release, ignoring resume state."
+)
+@_opt_no_progress
+def ensembl_label_history_cmd(
+    species: str,
+    from_version: str | None,
+    to_version: str | None,
+    output: Path | None,
+    cache_dir: Path | None,
+    force: bool,
+    no_progress: bool,
+) -> None:
+    """Derive cross-release previous-symbol -> current-symbol Ensembl mappings.
+
+    Ensembl's core schema has no previous-gene-symbol table, so this walks
+    every historical release (or a bounded --from-version/--to-version
+    range) and diffs each release's primary-label snapshot to recover
+    genuine previous -> current symbol transitions. Network-heavy and
+    resumable; run on demand, not part of normal mapping generation.
+    """
+    from pysec2pri.api import generate_ensembl_label_history
+
+    click.echo("Walking Ensembl releases for label history (this may take a while)...")
+    ms = generate_ensembl_label_history(
+        species=species,
+        from_version=from_version,
+        to_version=to_version,
+        cache_dir=cache_dir,
+        show_progress=not no_progress,
+        force=force,
+    )
+    n = len(ms.mappings or [])
+    click.echo(f"Found {n} previous -> current label transition(s).")
+    if output:
+        ms.save("sssom", output)
+        click.echo(f"Wrote -> {output}")
+    else:
+        click.echo("(Also cached under the consolidate cache directory; see --cache-dir.)")
+
+
+cast(click.Group, main.commands["ensembl"]).add_command(ensembl_label_history_cmd)
 
 
 # diff
@@ -425,10 +482,10 @@ def _show_diff_details(result: object) -> None:
 @main.command("list-versions")
 @click.argument(
     "datasource",
-    type=click.Choice(["chebi", "hgnc", "uniprot"], case_sensitive=False),
+    type=click.Choice(["chebi", "ensembl", "hgnc", "uniprot"], case_sensitive=False),
 )
 def list_versions_cmd(datasource: str) -> None:
-    """List available archive versions for DATASOURCE (chebi, hgnc, uniprot)."""
+    """List available archive versions for DATASOURCE (chebi, ensembl, hgnc, uniprot)."""
     from pysec2pri.api import list_versions as _list_versions
 
     click.echo(f"Fetching available {datasource.upper()} versions...")
@@ -493,76 +550,123 @@ def validate_config_cmd(datasource: str | None) -> None:
         raise click.ClickException("One or more config files failed validation.")
 
 
-# consolidate
+# consolidate (nested per-datasource: only datasources with a versioned
+# archive/per-row date get this command, and --subset/--species are only
+# attached when the datasource's own config declares that axis)
 
 
-@main.command("consolidate")
-@click.argument("datasource", type=click.Choice(["chebi", "hgnc", "ncbi", "uniprot"]))
-@click.option(
-    "--mode",
-    default="release",
-    show_default=True,
-    type=click.Choice(["release", "date"]),
-    help=(
-        "'release': walk every historical release for the first-seen version/date. "
-        "'date': single pass using the source's own per-row date (falls back to "
-        "'release' with a warning if the source has none)."
-    ),
-)
-@_opt_subset
-@click.option(
-    "--mapping-sets",
-    default="ids",
-    show_default=True,
-    type=click.Choice(["ids", "labels"]),
-    help="Which mapping-set kind to consolidate dates for.",
-)
-@_opt_tax_id
-@click.option("--cache-dir", type=PathType, default=None, help="Cache directory.")
-@click.option(
-    "--force", is_flag=True, default=False, help="Re-scan every release, ignoring resume state."
-)
-@_opt_no_progress
-def consolidate_cmd(
-    datasource: str,
-    mode: str,
-    subset: str,
-    mapping_sets: str,
-    tax_id: str,
-    cache_dir: Path | None,
-    force: bool,
-    no_progress: bool,
-) -> None:
-    """Build/update the per-mapping first-seen-date index for DATASOURCE.
+def _consolidate_extra_opts(cfg_id: str) -> list[Callable[..., Any]]:
+    """Return the ``--subset``/``--species`` option(s) *cfg_id*'s config declares.
 
-    In 'release' mode (default), walks every historical release of
-    DATASOURCE once to discover the earliest release each mapping appeared
-    in. This is slow and network-heavy (~250 releases for ChEBI); it's meant
-    to be run as a manual/one-off operation, not as part of normal mapping
-    generation. In 'date' mode, a single current-release pass captures the
-    source's own per-row date directly (fast); DATASOURCE must have no
-    versioned archive at all (e.g. NCBI) to require 'date' mode.
+    Driven by ``DatasourceConfig.subset``/``.species`` (see
+    ``config/<cfg_id>.yaml``) rather than a hardcoded per-datasource list, so
+    e.g. HGNC never shows an irrelevant ``--subset`` flag.
     """
-    from pysec2pri.consolidate import consolidate_mapping_dates
+    cfg = get_datasource_config(cfg_id)
+    opts: list[Callable[..., Any]] = []
+    if cfg.subset:
+        opts.append(_opt_subset)
+    if cfg.species:
+        opts.append(_opt_species)
+    return opts
 
-    click.echo(
-        f"Consolidating {datasource.upper()} mapping dates "
-        f"(mode={mode}, {subset}, {mapping_sets})..."
-    )
-    try:
-        path = consolidate_mapping_dates(
-            datasource,
-            mode=mode,
-            cache_dir=cache_dir,
-            subset=subset,
-            mapping_sets=mapping_sets,
-            tax_id=tax_id,
-            show_progress=not no_progress,
-            force=force,
+
+def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> Callable[..., Any]:
+    """Return a decorated (but not yet click.command-wrapped) ``consolidate`` callable."""
+
+    def _cmd(
+        mode: str,
+        mapping_sets: str,
+        cache_dir: Path | None,
+        force: bool,
+        no_progress: bool,
+        **extra_kwargs: Any,
+    ) -> None:
+        from pysec2pri.consolidate import _sssom_output_path, consolidate_mapping_dates
+
+        extras = ", ".join(f"{k}={v}" for k, v in extra_kwargs.items() if v is not None)
+        click.echo(
+            f"Consolidating {cfg_id.upper()} mapping dates "
+            f"(mode={mode}{', ' + extras if extras else ''}, {mapping_sets})..."
         )
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    click.echo(f"Wrote consolidated mapping-date index -> {path}")
+        try:
+            path = consolidate_mapping_dates(
+                cfg_id,
+                mode=mode,
+                cache_dir=cache_dir,
+                mapping_sets=mapping_sets,
+                show_progress=not no_progress,
+                force=force,
+                **extra_kwargs,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"Wrote consolidated mapping set -> {_sssom_output_path(path)}")
+
+    decorators: list[Callable[..., Any]] = [
+        click.option(
+            "--mode",
+            default="release",
+            show_default=True,
+            type=click.Choice(["release", "date"]),
+            help=(
+                "'release': walk every historical release for the first-seen version/date. "
+                "'date': single pass using the source's own per-row date (falls back to "
+                "'release' with a warning if the source has none)."
+            ),
+        ),
+        *extra_opts,
+        click.option(
+            "--mapping-sets",
+            default="ids",
+            show_default=True,
+            type=click.Choice(["ids", "labels"]),
+            help="Which mapping-set kind to consolidate dates for.",
+        ),
+        click.option("--cache-dir", type=PathType, default=None, help="Cache directory."),
+        click.option(
+            "--force",
+            is_flag=True,
+            default=False,
+            help="Re-scan every release, ignoring resume state.",
+        ),
+        _opt_no_progress,
+    ]
+    for dec in reversed(decorators):
+        _cmd = dec(_cmd)
+
+    _cmd.__name__ = "consolidate"
+    return _cmd
+
+
+def _register_consolidate_commands(parent: click.Group) -> None:
+    """Register a ``consolidate`` subcommand on every supported datasource's group."""
+    from pysec2pri.consolidate import SUPPORTED_DATASOURCES
+
+    for cfg_id in SUPPORTED_DATASOURCES:
+        group = parent.commands.get(cfg_id)
+        if group is None:
+            continue
+        raw_cmd = _make_consolidate_cmd(cfg_id, _consolidate_extra_opts(cfg_id))
+        cast(click.Group, group).add_command(
+            click.command(
+                name="consolidate",
+                help=(
+                    "Build/update the per-mapping first-seen-date index, written as a real "
+                    "SSSOM mapping set whose mapping_date is each mapping's date of first "
+                    "appearance.\n\n"
+                    "In 'release' mode (default), walks every historical release once to "
+                    "discover the earliest release each mapping appeared in. This is slow "
+                    "and network-heavy (~250 releases for ChEBI); meant to be run as a "
+                    "manual/one-off operation, not as part of normal mapping generation. "
+                    "In 'date' mode, a single current-release pass captures the source's "
+                    "own per-row date directly (fast)."
+                ),
+            )(raw_cmd)
+        )
+
+
+_register_consolidate_commands(main)
 
 
 # ambiguous
@@ -838,7 +942,7 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
 @_opt_xref_on
 @_opt_xref_predicate
 @_opt_report
-@_opt_tax_id
+@_opt_species
 @_opt_entity_type
 @_opt_subset
 @_opt_version
@@ -859,7 +963,7 @@ def update_labels_cmd(
     xref_on: str | None,
     xref_predicates: tuple[str, ...],
     report_path: Path | None,
-    tax_id: str,
+    species: str,
     entity_type: str | None,
     subset: str,
     data_version: str | None,
@@ -896,7 +1000,7 @@ def update_labels_cmd(
                 version=data_version, show_progress=not no_progress
             ),
             "ncbi": lambda: generate_ncbi_labels(
-                tax_id=tax_id, version=data_version, show_progress=not no_progress
+                species=species, version=data_version, show_progress=not no_progress
             ),
             "wikidata": lambda: generate_wikidata_labels(
                 entity_type=entity_type, version=data_version, show_progress=not no_progress

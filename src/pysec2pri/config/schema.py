@@ -98,6 +98,8 @@ class DatasourceConfigSchema(BaseModel):
     new_format_version: int | None = None
     distribution_eras: list[DistributionEraSchema] = Field(default_factory=list)
     xref_sources: list[XrefSourceSchema] = Field(default_factory=list)
+    species: dict[str, Any] = Field(default_factory=dict)
+    subset: dict[str, Any] = Field(default_factory=dict)
     mappingset: dict[str, Any] = Field(default_factory=dict)
     mapping: dict[str, Any] = Field(default_factory=dict)
 
