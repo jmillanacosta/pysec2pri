@@ -128,9 +128,48 @@ class DatasourceConfig:
     distribution_eras: list[DistributionEra] = field(default_factory=list)
     # Suggested cross-reference crosswalk sources
     xref_sources: list[XrefSource] = field(default_factory=list)
+    # Species this datasource publishes
+    species: dict[str, Any] = field(default_factory=dict)
+    # Compound/entry subset this datasource publishes (e.g. ChEBI's
+    # 3star/complete). Generic, config-driven counterpart to `species`.
+    subset: dict[str, Any] = field(default_factory=dict)
     # Full metadata from YAML
     mappingset_metadata: dict[str, Any] = field(default_factory=dict)
     mapping_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def species_token(self, taxon_id: str | int) -> str:
+        """Resolve a canonical NCBI taxon ID to this datasource's own species token.
+
+        Reads the ``species.available`` block (see ``ensembl.yaml``), which
+        maps each supported taxon ID to the datasource-specific token used to
+        build download paths/filters (e.g. Ensembl's ``homo_sapiens``).
+
+        Args:
+            taxon_id: Canonical NCBI taxon ID, e.g. ``9606`` or ``"9606"``.
+
+        Returns:
+            The datasource-specific species token.
+
+        Raises:
+            ValueError: If no ``species`` block is configured, or *taxon_id*
+                is not one of its declared entries.
+        """
+        available = {str(k): v for k, v in ((self.species or {}).get("available") or {}).items()}
+        entry = available.get(str(taxon_id))
+        if entry is None:
+            known = ", ".join(sorted(available)) or "(none configured)"
+            raise ValueError(
+                f"Unknown species taxon ID {taxon_id!r} for {self.name!r}. Known: {known}"
+            )
+        return str(entry["token"])
+
+    def default_species(self) -> str | int:
+        """Return the configured default species taxon ID (``9606`` if unset)."""
+        return cast("str | int", (self.species or {}).get("default", 9606))
+
+    def default_subset(self) -> str | None:
+        """Return the configured default subset, or ``None`` if this datasource has none."""
+        return cast("str | None", (self.subset or {}).get("default"))
 
     def xref_source(self, source_id: str) -> XrefSource | None:
         """Return the configured :class:`XrefSource` with id *source_id*, if any."""
@@ -258,6 +297,8 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         new_format_version=raw.get("new_format_version"),
         distribution_eras=eras,
         xref_sources=xref_sources,
+        species=raw.get("species") or {},
+        subset=raw.get("subset") or {},
         mappingset_metadata=raw.get("mappingset", {}),
         mapping_metadata=raw.get("mapping", {}),
     )
@@ -1555,18 +1596,67 @@ class BaseParser(ABC):
                     if hasattr(mapping, key) and value is not None:
                         setattr(mapping, key, value)
 
-    def _record_id(self, namespace: str, pri: str, sec: str) -> str:
-        """Assign a hex ID to a record.
+    @staticmethod
+    def _pair_hash(pri: str, sec: str) -> str:
+        """Version-independent 16-hex-char digest for a (pri, sec) pair.
 
-        Deliberately excludes the release/version: the same (pri, sec) pair
-        must hash to the same ``record_id`` across every release so that
-        mappings can be joined release-over-release (see
-        :mod:`pysec2pri.consolidate`) to discover when each one first/last
-        appeared. Per-release provenance is already on the ``Mapping`` via
-        ``mapping_date``/``subject_source_version``/``object_source_version``.
+        The same pair always hashes identically, regardless of release/
+        version or product (species/subset). This is the join key
+        :mod:`pysec2pri.consolidate` uses to match a mapping across
+        releases (to discover when it first/last appeared) and that
+        sources backed by :func:`pysec2pri.consolidate.load_mapping_dates`
+        (ChEBI, UniProt) use to query that index -- *not* what ends up in
+        the ``record_id`` field (see :meth:`_record_id`).
         """
-        digest = hashlib.sha256(f"{pri}|{sec}".encode()).hexdigest()[:16]
-        return f"{namespace}{digest}"
+        return hashlib.sha256(f"{pri}|{sec}".encode()).hexdigest()[:16]
+
+    def _record_id(self, namespace: str, pri: str, sec: str) -> str:
+        """Mint this row's ``record_id`` -- the row's OWL Axiom IRI in SSSOM's RDF/OWL output.
+
+        Scoped to *namespace* (typically :meth:`_record_namespace`, which
+        folds in the release version and product slug), so the same
+        (pri, sec) pair parsed from a different release/product gets a
+        different ``record_id``. This matters because each
+        :class:`~sssom_schema.Mapping` row is serialised as an
+        ``owl:Axiom``: if record_id didn't vary across releases, loading
+        several releases' SSSOM/RDF into one triplestore would assert
+        contradictory axioms (different predicate, cardinality, confidence,
+        ...) under the same IRI.
+
+        The trailing 16 hex characters are always :func:`_pair_hash`'s
+        version-independent digest -- use that function directly (not this
+        one) for cross-release matching/lookups.
+        """
+        return f"{namespace}{self._pair_hash(pri, sec)}"
+
+    def _product_slug(self) -> str | None:
+        """Extra IRI path segment identifying the run's data product.
+
+        ``None`` for most parsers (one release == one product). Override
+        when a parser option selects a genuinely different dataset rather
+        than just a different output mode -- e.g. species for
+        :class:`~pysec2pri.parsers.ncbi.NCBIParser`/
+        :class:`~pysec2pri.parsers.ensembl.EnsemblParser`, where the same
+        release number produces a disjoint set of mappings per species.
+        Folded into ``mapping_set_id`` and :meth:`_record_namespace` so two
+        runs that differ only in this option don't collide on either IRI.
+        """
+        return None
+
+    def _record_namespace(self) -> str:
+        """Return this run's ``record_id`` namespace: ``{base}/{version}/{slug}/``.
+
+        Mirrors ``mapping_set_id``'s ``{base}/{version}/{slug}`` ordering
+        (see :meth:`create_mapping_set`) so a mapping's ``record_id`` is
+        scoped to the same release/product as the mapping *set* it's
+        asserted in -- use this (instead of reading
+        ``mapping_metadata()["record_id"]`` directly) when building
+        per-row ``record_id`` values.
+        """
+        base = str(self.get_mapping_metadata().get("record_id") or "")
+        version = str(self.version) if self.version else None
+        parts = [p for p in (version, self._product_slug()) if p]
+        return base + "".join(f"{p}/" for p in parts)
 
     def _extract_version_from_file(self, file_path: Path) -> str | None:
         """Extract a version string embedded in a data file's header.
@@ -1940,7 +2030,9 @@ class BaseParser(ABC):
 
         # Annotate ambiguous mappings (primary also appears as secondary)
         mappings = _annotate_ambiguous_mappings(mappings, mapping_type=mapping_type)
-        fix_ms_id = str(ms_meta.get("mapping_set_id")) + f"/{self.version}"
+        product_slug = self._product_slug()
+        version_path = f"/{self.version}/{product_slug}" if product_slug else f"/{self.version}"
+        fix_ms_id = str(ms_meta.get("mapping_set_id")) + version_path
         # Create the mapping set with SSSOM metadata
         mapping_set = mapping_set_class(
             mappings=mappings,

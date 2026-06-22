@@ -7,6 +7,7 @@ from sssom_schema import Mapping
 
 from pysec2pri.parsers import (
     ChEBIParser,
+    EnsemblParser,
     HGNCParser,
     HMDBMetaboliteParser,
     HMDBProteinParser,
@@ -76,6 +77,36 @@ def ncbi_info_path() -> Path:
 def uniprot_sec_ac_path() -> Path:
     """Return the fake UniProt sec_ac.txt test file."""
     return TEST_DATA_DIR / "mock_sec_ac.txt"
+
+
+@pytest.fixture
+def ensembl_stable_id_event_path() -> Path:
+    """Return the fake Ensembl stable_id_event.txt test file (real-data slice)."""
+    return TEST_DATA_DIR / "mock_ensembl_stable_id_event.txt"
+
+
+@pytest.fixture
+def ensembl_mapping_session_path() -> Path:
+    """Return the fake Ensembl mapping_session.txt test file (real-data slice)."""
+    return TEST_DATA_DIR / "mock_ensembl_mapping_session.txt"
+
+
+@pytest.fixture
+def ensembl_gene_path() -> Path:
+    """Return the fake Ensembl gene.txt test file (real-data slice)."""
+    return TEST_DATA_DIR / "mock_ensembl_gene.txt"
+
+
+@pytest.fixture
+def ensembl_xref_path() -> Path:
+    """Return the fake Ensembl xref.txt test file (real-data slice)."""
+    return TEST_DATA_DIR / "mock_ensembl_xref.txt"
+
+
+@pytest.fixture
+def ensembl_external_synonym_path() -> Path:
+    """Return the fake Ensembl external_synonym.txt test file (real-data slice)."""
+    return TEST_DATA_DIR / "mock_ensembl_external_synonym.txt"
 
 
 class TestChEBIParser:
@@ -217,7 +248,7 @@ class TestNCBIParser:
 
     def test_parse(self, ncbi_history_path: Path) -> None:
         """parse() returns a populated mapping set for gene_history."""
-        result = NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606")
+        result = NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606")
         assert isinstance(result, Sec2PriMappingSet)
         assert len(result.mappings) > 0
 
@@ -226,7 +257,7 @@ class TestNCBIParser:
     ) -> None:
         """Passing gene_info_path populates _primary_ids with all current IDs."""
         result = NCBIParser(show_progress=False).parse(
-            ncbi_history_path, tax_id="9606", gene_info_path=ncbi_info_path
+            ncbi_history_path, species="9606", gene_info_path=ncbi_info_path
         )
         pri_ids = result.to_pri_ids()
         assert len(pri_ids) > 0
@@ -234,7 +265,7 @@ class TestNCBIParser:
 
     def test_parse_labels_direction(self, ncbi_info_path: Path) -> None:
         """Label mappings are sec:pri: synonym is subject, current label is object."""
-        result = NCBIParser(show_progress=False).parse_labels(ncbi_info_path, tax_id="9606")
+        result = NCBIParser(show_progress=False).parse_labels(ncbi_info_path, species="9606")
         mappings = result.mappings or []
         subject_labels = {m.subject_label for m in mappings}
         object_labels = {m.object_label for m in mappings}
@@ -242,6 +273,164 @@ class TestNCBIParser:
         assert {"ALT_SYM1", "ALT_SYM2"} <= subject_labels
         assert "GENE1" in object_labels
         assert "GENE1" not in subject_labels
+
+
+class TestEnsemblParser:
+    """Tests for the Ensembl parser.
+
+    Fixtures are real-data slices from Ensembl release 115
+    (homo_sapiens_core_115_38), not hand-authored, so the schema/semantics
+    match the live FTP dumps exactly.
+    """
+
+    def test_parse_skips_identity_and_non_gene_rows(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """Identity rows (old==new) and non-gene types are excluded."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        # mock file has 6 rows: 1 identity (skip), 1 retirement, 1 scored
+        # rename, 1 new-gene with no old id (skip), 1 plain rename, 1
+        # transcript-type row (skip) -> exactly 3 mappings survive.
+        assert len(result.mappings) == 3
+        subject_ids = {m.subject_id for m in result.mappings}
+        assert "ENSEMBL:ENSG00000000003" not in subject_ids  # identity row
+
+    def test_parse_retirement_uses_consider_predicate(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """A row with new_stable_id = N becomes a withdrawn-entry mapping."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        withdrawn = [m for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000000893"]
+        assert len(withdrawn) == 1
+        assert withdrawn[0].predicate_id == "oboInOwl:consider"
+        assert withdrawn[0].object_id == "sssom:NoTermFound"
+        assert withdrawn[0].mapping_date == "2002-09-05"
+
+    def test_parse_rename_uses_replaced_by_predicate_and_confidence(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """A row with old != new becomes a replaced-by mapping with score as confidence."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        scored = [m for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"]
+        assert len(scored) == 1
+        assert scored[0].predicate_id == "IAO:0100001"
+        assert scored[0].predicate_label == "term replaced by"
+        assert scored[0].object_id == "ENSEMBL:ENSG00000206171"
+        assert scored[0].confidence == pytest.approx(0.973291)
+        assert scored[0].mapping_date == "2006-03-10"
+
+    def test_parse_without_mapping_session_has_no_per_row_date(
+        self, ensembl_stable_id_event_path: Path
+    ) -> None:
+        """mapping_session is optional; per-row mapping_date is simply unset without it."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path
+        )
+        assert len(result.mappings) == 3
+        assert all(m.mapping_date is None for m in result.mappings)
+
+    def test_parse_with_gene_path_populates_primary_ids(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+        ensembl_gene_path: Path,
+    ) -> None:
+        """Passing gene_path populates _primary_ids with current gene IDs."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+            gene_path=ensembl_gene_path,
+        )
+        pri_ids = result.to_pri_ids()
+        assert len(pri_ids) == 3
+        assert all(id_.startswith("ENSEMBL:") for id_ in pri_ids)
+
+    def test_parse_labels_direction(
+        self,
+        ensembl_gene_path: Path,
+        ensembl_xref_path: Path,
+        ensembl_external_synonym_path: Path,
+    ) -> None:
+        """Label mappings are sec:pri: synonym is subject, current label is object."""
+        result = EnsemblParser(version="115", show_progress=False).parse_labels(
+            ensembl_gene_path, ensembl_xref_path, ensembl_external_synonym_path
+        )
+        mappings = result.mappings or []
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        # mock_ensembl_external_synonym.txt: MT-RNR1 has synonyms 12S/MOTS-C/MTRNR1.
+        assert {"12S", "MOTS-C", "MTRNR1"} <= subject_labels
+        assert "MT-RNR1" in object_labels
+        assert "MT-RNR1" not in subject_labels
+        assert all(m.predicate_id == "oboInOwl:hasExactSynonym" for m in mappings)
+
+    def test_parse_primary_ids(self, ensembl_gene_path: Path) -> None:
+        """parse_primary_ids() populates only _primary_ids, no mappings."""
+        result = EnsemblParser(version="115", show_progress=False).parse_primary_ids(
+            ensembl_gene_path
+        )
+        assert result.mappings == []
+        assert len(result.to_pri_ids()) == 3
+
+    def test_parse_primary_labels(self, ensembl_gene_path: Path, ensembl_xref_path: Path) -> None:
+        """parse_primary_labels() populates only _primary_labels, no mappings."""
+        result = EnsemblParser(version="115", show_progress=False).parse_primary_labels(
+            ensembl_gene_path, ensembl_xref_path
+        )
+        assert result.mappings == []
+        assert "MT-RNR1" in result._primary_labels
+
+    def test_species_is_folded_into_mapping_set_id_and_record_id(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """Different species at the same release get distinct mapping_set_id/record_id."""
+        human = EnsemblParser(version="115", show_progress=False, species=9606).parse(
+            ensembl_stable_id_event_path, mapping_session_path=ensembl_mapping_session_path
+        )
+        mouse = EnsemblParser(version="115", show_progress=False, species=10090).parse(
+            ensembl_stable_id_event_path, mapping_session_path=ensembl_mapping_session_path
+        )
+        assert human.mapping_set_id != mouse.mapping_set_id
+        assert "9606" in human.mapping_set_id
+        assert "10090" in mouse.mapping_set_id
+        human_rid = human.mappings[0].record_id
+        mouse_rid = mouse.mappings[0].record_id
+        assert human_rid != mouse_rid
+        # Both still end in the same version-independent pair hash, since
+        # the same (pri, sec) pair was parsed in both runs.
+        assert human_rid[-16:] == mouse_rid[-16:]
+
+    def test_parse_label_history_uses_replaced_by_predicate(self) -> None:
+        """parse_label_history() builds IAO:0100001 mappings from precomputed transitions."""
+        parser = EnsemblParser(version="115", show_progress=False, species=9606)
+        result = parser.parse_label_history(
+            [("ENSG00000211459", "OLD-SYM", "MT-RNR1", "2020-01-01")]
+        )
+        assert len(result.mappings) == 1
+        m = result.mappings[0]
+        assert m.predicate_id == "IAO:0100001"
+        assert m.subject_label == "OLD-SYM"
+        assert m.object_label == "MT-RNR1"
+        assert m.object_id == "ENSEMBL:ENSG00000211459"
+        assert m.mapping_date == "2020-01-01"
+        assert "consolidate" in result.mapping_set_id
 
 
 class TestUniProtParser:
@@ -264,14 +453,19 @@ class TestParserIntegration:
         hgnc_withdrawn_path: Path,
         ncbi_history_path: Path,
         uniprot_sec_ac_path: Path,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
     ) -> None:
         """Every parser produces Mapping instances with a subject/predicate, and a correct label."""
         results = [
             ChEBIParser(show_progress=False).parse(chebi_sdf_path),
             HMDBMetaboliteParser(show_progress=False).parse(hmdb_xml_path),
             HGNCParser(show_progress=False).parse(hgnc_withdrawn_path),
-            NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606"),
+            NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606"),
             UniProtParser(show_progress=False).parse(uniprot_sec_ac_path),
+            EnsemblParser(show_progress=False).parse(
+                ensembl_stable_id_event_path, mapping_session_path=ensembl_mapping_session_path
+            ),
         ]
         for result in results:
             assert isinstance(result, Sec2PriMappingSet)
@@ -281,6 +475,42 @@ class TestParserIntegration:
                 assert m.predicate_id is not None
                 if m.predicate_id == "IAO:0100001":
                     assert m.predicate_label == "term replaced by"
+
+
+class TestRecordIdVersioning:
+    """record_id is release-scoped (an OWL Axiom IRI); _pair_hash is the join key.
+
+    record_id must vary across releases of the same (pri, sec) pair, so that
+    unioning several releases' SSSOM/RDF into one triplestore never asserts
+    contradictory axioms under one IRI. Its trailing 16 hex characters are
+    always the version-independent pair hash.
+    """
+
+    def test_pair_hash_is_version_independent(self) -> None:
+        """The same (pri, sec) pair hashes identically regardless of parser version."""
+        older = NCBIParser(version="2020-01-01", show_progress=False)
+        newer = NCBIParser(version="2024-01-01", show_progress=False)
+        assert older._pair_hash("A", "B") == newer._pair_hash("A", "B")
+
+    def test_record_id_differs_across_versions_but_pair_hash_does_not(self) -> None:
+        """record_id differs per version; its trailing pair hash stays stable."""
+        older = ChEBIParser(version="200", show_progress=False)
+        newer = ChEBIParser(version="245", show_progress=False)
+        rid_older = older._record_id(older._record_namespace(), "CHEBI:1", "CHEBI:2")
+        rid_newer = newer._record_id(newer._record_namespace(), "CHEBI:1", "CHEBI:2")
+        assert rid_older != rid_newer
+        assert rid_older[-16:] == rid_newer[-16:] == older._pair_hash("CHEBI:1", "CHEBI:2")
+
+    def test_record_namespace_includes_version_and_product_slug(self) -> None:
+        """_record_namespace mirrors mapping_set_id's {base}/{version}/{slug} ordering."""
+        parser = NCBIParser(version="2026-01-01", show_progress=False)
+        parser.species = "9606"
+        assert parser._record_namespace() == "sec2pri:ncbigene/2026-01-01/9606/"
+
+    def test_record_namespace_without_product_slug_omits_trailing_segment(self) -> None:
+        """Parsers that don't override _product_slug only fold in the version."""
+        parser = HGNCParser(version="2026-04-07", show_progress=False)
+        assert parser._record_namespace() == "sec2pri:hgnc/2026-04-07/"
 
 
 class TestMappingDate:
@@ -335,7 +565,7 @@ class TestPerMappingDate:
 
         mock_gene_history.tsv: GeneID=1001 -> Discontinued_GeneID=100001, Discontinue_Date=20230115.
         """
-        result = NCBIParser(show_progress=False).parse(ncbi_history_path, tax_id="9606")
+        result = NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606")
         matches = [m for m in result.mappings if m.subject_id == "NCBIGene:100001"]
         assert len(matches) == 1
         assert matches[0].mapping_date == "2023-01-15"
@@ -349,11 +579,10 @@ class TestPerMappingDate:
         Only the first is faked into the consolidated cache.
         """
         parser = ChEBIParser(show_progress=False)
-        m_meta = parser.get_mapping_metadata()
-        record_id = parser._record_id(str(m_meta["record_id"]), "CHEBI:10001", "CHEBI:99901")
+        pair_key = parser._pair_hash("CHEBI:10001", "CHEBI:99901")
         monkeypatch.setattr(
             "pysec2pri.consolidate.load_mapping_dates",
-            lambda *args, **kwargs: {record_id: "2013-02-15"},
+            lambda *args, **kwargs: {pair_key: "2013-02-15"},
         )
 
         result = parser.parse(chebi_sdf_path)

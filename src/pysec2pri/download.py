@@ -226,6 +226,36 @@ def check_ncbi_release() -> ReleaseInfo:
     )
 
 
+def check_ensembl_release() -> ReleaseInfo:
+    """Check for the latest Ensembl release.
+
+    The release number is global across every species (Ensembl cuts all
+    species' core databases under the same release number), so this always
+    checks against the default species (human).
+
+    Returns:
+        ReleaseInfo with the latest Ensembl release details.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+    versions = EnsemblDownloader(show_progress=False).list_versions()
+    if not versions:
+        raise ValueError("Could not find Ensembl releases on the FTP server")
+    version = versions[-1]
+
+    urls = _get_ensembl_urls_for_version(version)
+    check_url = urls.get("stable_id_event")
+    release_date = get_file_last_modified(check_url) if check_url else None
+
+    return ReleaseInfo(
+        datasource="ensembl",
+        version=version,
+        release_date=release_date,
+        is_new=True,
+        files=urls,
+    )
+
+
 METALINK_URL = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/RELEASE.metalink"
 NS = {"m": "http://www.metalinker.org/"}
 
@@ -374,6 +404,7 @@ def get_latest_release_info(datasource: str) -> ReleaseInfo:
     """
     checkers = {
         "chebi": check_chebi_release,
+        "ensembl": check_ensembl_release,
         "hmdb": check_hmdb_release,
         "hgnc": check_hgnc_release,
         "ncbi": check_ncbi_release,
@@ -428,6 +459,32 @@ def _get_chebi_urls_for_version(
     return ChEBIDownloader(version=version, subset=subset).get_download_urls(version)
 
 
+def _get_ensembl_urls_for_version(
+    version: str,
+    species: str | int = 9606,
+    assembly: str | None = None,
+) -> dict[str, str]:
+    """Build Ensembl URLs for a specific release/species.
+
+    Delegates to :meth:`~pysec2pri.parsers.ensembl.EnsemblDownloader.get_download_urls`,
+    which resolves *species* to Ensembl's own species token and
+    auto-discovers the assembly suffix when *assembly* is not given.
+
+    Args:
+        version: Ensembl release number (e.g. ``"115"``).
+        species: Canonical NCBI taxon ID.
+        assembly: Force a specific assembly suffix, skipping auto-discovery.
+
+    Returns:
+        Dictionary with file URLs keyed by table name.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblDownloader
+
+    return EnsemblDownloader(version=version, species=species, assembly=assembly).get_download_urls(
+        version
+    )
+
+
 def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
     """Build UniProt URLs for a specific release version.
 
@@ -480,11 +537,13 @@ def list_versions(datasource: str) -> Any:
         )
 
     from pysec2pri.parsers.chebi import ChEBIDownloader
+    from pysec2pri.parsers.ensembl import EnsemblDownloader
     from pysec2pri.parsers.hgnc import HGNCDownloader
     from pysec2pri.parsers.uniprot import UniProtDownloader
 
     _downloader_map = {
         "chebi": ChEBIDownloader,
+        "ensembl": EnsemblDownloader,
         "hgnc": HGNCDownloader,
         "uniprot": UniProtDownloader,
     }
@@ -502,14 +561,17 @@ def list_versions(datasource: str) -> Any:
 def get_download_urls(
     datasource: str,
     version: str | None = None,
-    subset: str = "3star",
+    **kwargs: Any,
 ) -> dict[str, str]:
     """Get download URLs for a datasource.
 
     Args:
         datasource: Name of the datasource.
         version: Specific version to get URLs for.
-        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
+        **kwargs: Datasource-specific knobs (e.g. ``subset`` for ChEBI,
+            ``species`` for Ensembl/NCBI) -- which ones apply depends on the
+            datasource's own config (see ``DatasourceConfig.subset``/
+            ``.species``); irrelevant kwargs are simply ignored.
 
     Returns:
         Dictionary mapping file keys to URLs.
@@ -518,27 +580,14 @@ def get_download_urls(
     config = ALL_DATASOURCES.get(datasource_lower)
     if not config:
         raise ValueError(f"Unknown datasource: {datasource}")
-
-    if datasource_lower == "hgnc":
-        if version:
-            return _get_hgnc_urls_for_version(version)
-        return check_hgnc_release().files
-    elif datasource_lower == "chebi":
-        if version:
-            return _get_chebi_urls_for_version(version, subset=subset)
-        return check_chebi_release().files
-    elif datasource_lower == "uniprot":
-        if version:
-            return _get_uniprot_urls_for_version(version)
-        return dict(config.download_urls)
-    else:
-        return dict(config.download_urls)
+    urls, _ = _get_datasource_urls(datasource_lower, config, version, **kwargs)
+    return urls
 
 
 def resolve_release_date(
     datasource: str,
     version: str | None = None,
-    subset: str = "3star",
+    **kwargs: Any,
 ) -> datetime | None:
     """Resolve the upstream release date for a datasource/version.
 
@@ -551,7 +600,8 @@ def resolve_release_date(
     Args:
         datasource: Name of the datasource.
         version: Specific version, when applicable.
-        subset: For ChEBI: "3star" or "complete".
+        **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
+            for Ensembl/NCBI); see :func:`get_download_urls`.
 
     Returns:
         The release date, or None when it cannot be determined.
@@ -560,7 +610,7 @@ def resolve_release_date(
     config = ALL_DATASOURCES.get(datasource_lower)
     if not config:
         raise ValueError(f"Unknown datasource: {datasource}")
-    _, release_date = _get_datasource_urls(datasource_lower, config, version, subset)
+    _, release_date = _get_datasource_urls(datasource_lower, config, version, **kwargs)
     return release_date
 
 
@@ -593,11 +643,68 @@ _HMDB_RELEASE_DATES: dict[str, datetime] = {
 }
 
 
+def _hgnc_urls_and_date(version: str | None) -> tuple[dict[str, str], datetime | None]:
+    if version:
+        urls = _get_hgnc_urls_for_version(version)
+        # The HGNC archive version is itself the release date (YYYY-MM-DD).
+        release_date = _iso_to_datetime(version)
+        logger.info(f"HGNC version {version}: {urls}")
+    else:
+        release_info = check_hgnc_release()
+        urls = release_info.files
+        release_date = release_info.release_date
+        logger.info(f"HGNC release {release_info.version}: {urls}")
+    return urls, release_date
+
+
+def _chebi_urls_and_date(
+    version: str | None, config: DatasourceConfig, **kwargs: Any
+) -> tuple[dict[str, str], datetime | None]:
+    subset = kwargs.get("subset") or config.default_subset() or "3star"
+    release_date: datetime | None = None
+    if version:
+        urls = _get_chebi_urls_for_version(version, subset=subset)
+        logger.info(f"ChEBI version {version}: {urls}")
+    else:
+        release_info = check_chebi_release()
+        urls = release_info.files
+        release_date = release_info.release_date
+        logger.info(f"ChEBI release {release_info.version}: {urls}")
+    return urls, release_date
+
+
+def _ensembl_urls_and_date(
+    version: str | None, config: DatasourceConfig, **kwargs: Any
+) -> tuple[dict[str, str], datetime | None]:
+    species = kwargs.get("species", config.default_species())
+    release_date: datetime | None = None
+    if version:
+        urls = _get_ensembl_urls_for_version(version, species=species)
+        logger.info(f"Ensembl version {version} (species {species}): {urls}")
+    else:
+        release_info = check_ensembl_release()
+        urls = release_info.files
+        release_date = release_info.release_date
+        logger.info(f"Ensembl release {release_info.version}: {urls}")
+    return urls, release_date
+
+
+def _uniprot_urls_and_date(
+    version: str | None, config: DatasourceConfig
+) -> tuple[dict[str, str], datetime | None]:
+    if version:
+        urls = _get_uniprot_urls_for_version(version)
+        logger.info(f"UniProt version {version}: {urls}")
+    else:
+        urls = dict(config.download_urls)
+    return urls, None
+
+
 def _get_datasource_urls(
     datasource_lower: str,
     config: DatasourceConfig,
     version: str | None = None,
-    subset: str = "3star",
+    **kwargs: Any,
 ) -> tuple[dict[str, str], datetime | None]:
     """Get download URLs and the source release date for a datasource.
 
@@ -611,52 +718,34 @@ def _get_datasource_urls(
         datasource_lower: Lowercase datasource name.
         config: Datasource configuration.
         version: Specific version to get URLs for.
-        subset: For ChEBI: "3star" or "complete" (only affects legacy SDF).
+        **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
+            for Ensembl) -- each per-datasource helper below picks out the
+            one it needs (falling back to the config's own default) and
+            ignores the rest.
 
     Returns:
         Tuple of (file-key -> URL mapping, release date or None).
     """
     urls: dict[str, str]
-    release_date: datetime | None = None
+    release_date: datetime | None
 
     if datasource_lower == "hgnc":
-        if version:
-            urls = _get_hgnc_urls_for_version(version)
-            # The HGNC archive version is itself the release date (YYYY-MM-DD).
-            release_date = _iso_to_datetime(version)
-            logger.info(f"HGNC version {version}: {urls}")
-        else:
-            release_info = check_hgnc_release()
-            urls = release_info.files
-            release_date = release_info.release_date
-            logger.info(f"HGNC release {release_info.version}: {urls}")
-
+        urls, release_date = _hgnc_urls_and_date(version)
     elif datasource_lower == "chebi":
-        if version:
-            urls = _get_chebi_urls_for_version(version, subset=subset)
-            logger.info(f"ChEBI version {version}: {urls}")
-        else:
-            release_info = check_chebi_release()
-            urls = release_info.files
-            release_date = release_info.release_date
-            logger.info(f"ChEBI release {release_info.version}: {urls}")
-
+        urls, release_date = _chebi_urls_and_date(version, config, **kwargs)
+    elif datasource_lower == "ensembl":
+        urls, release_date = _ensembl_urls_and_date(version, config, **kwargs)
     elif datasource_lower == "uniprot":
-        if version:
-            urls = _get_uniprot_urls_for_version(version)
-            logger.info(f"UniProt version {version}: {urls}")
-        else:
-            urls = dict(config.download_urls)
-
+        urls, release_date = _uniprot_urls_and_date(version, config)
     elif datasource_lower in _HMDB_RELEASE_DATES:
         _warn_if_unversioned(datasource_lower, version)
         urls = dict(config.download_urls)
         release_date = _HMDB_RELEASE_DATES[datasource_lower]
-
     else:
         # NCBI - no versioned archives available
         _warn_if_unversioned(datasource_lower, version)
         urls = dict(config.download_urls)
+        release_date = None
 
     # Generic fallback: derive the release date from the file's Last-Modified
     # header when a more specific signal was not available above. Must never
@@ -678,8 +767,8 @@ def download_datasource(
     output_dir: Path,
     decompress: bool = True,
     version: str | None = None,
-    subset: str = "3star",
     keys: list[str] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Path]:
     """Download all files for a datasource.
 
@@ -692,9 +781,10 @@ def download_datasource(
         output_dir: Directory to save files.
         decompress: Whether to decompress .gz files.
         version: Specific version to download. Format depends on datasource.
-        subset: For ChEBI: "3star" or "complete" (for releases using SDF only).
         keys: Optional list of file-key names to download. When given, only
             URLs whose key is in this list are fetched. Defaults to all keys.
+        **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
+            for Ensembl); see :func:`get_download_urls`.
 
     Returns:
         Dictionary mapping file keys to downloaded paths.
@@ -705,7 +795,12 @@ def download_datasource(
         raise ValueError(f"Unknown datasource: {datasource}")
 
     files, _ = download_datasource_with_release(
-        datasource, output_dir, decompress=decompress, version=version, subset=subset, keys=keys
+        datasource,
+        output_dir,
+        decompress=decompress,
+        version=version,
+        keys=keys,
+        **kwargs,
     )
     return files
 
@@ -715,8 +810,8 @@ def download_datasource_with_release(
     output_dir: Path,
     decompress: bool = True,
     version: str | None = None,
-    subset: str = "3star",
     keys: list[str] | None = None,
+    **kwargs: Any,
 ) -> tuple[dict[str, Path], datetime | None]:
     """Download all files for a datasource and report its release date.
 
@@ -729,8 +824,9 @@ def download_datasource_with_release(
         output_dir: Directory to save files.
         decompress: Whether to decompress .gz files.
         version: Specific version to download. Format depends on datasource.
-        subset: For ChEBI: "3star" or "complete" (for releases using SDF only).
         keys: Optional list of file-key names to download.
+        **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
+            for Ensembl); see :func:`get_download_urls`.
 
     Returns:
         Tuple of (file-key -> downloaded path mapping, release date or None).
@@ -741,7 +837,7 @@ def download_datasource_with_release(
         raise ValueError(f"Unknown datasource: {datasource}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    urls, release_date = _get_datasource_urls(datasource_lower, config, version, subset)
+    urls, release_date = _get_datasource_urls(datasource_lower, config, version, **kwargs)
     if keys is not None:
         urls = {k: v for k, v in urls.items() if k in keys}
 

@@ -5,6 +5,7 @@ from pysec2pri.parsers.base import DatasourceConfig, get_datasource_config
 __all__ = [
     "ALL_DATASOURCES",
     "CHEBI",
+    "ENSEMBL",
     "HGNC",
     "NCBI",
     "UNIPROT",
@@ -13,6 +14,7 @@ __all__ = [
 
 # Pre-loaded datasource configurations
 CHEBI: DatasourceConfig = get_datasource_config("chebi")
+ENSEMBL: DatasourceConfig = get_datasource_config("ensembl")
 HGNC: DatasourceConfig = get_datasource_config("hgnc")
 HMDB_PROT: DatasourceConfig = get_datasource_config("hmdb_proteins")
 HMDB_MET: DatasourceConfig = get_datasource_config("hmdb_metabolites")
@@ -23,6 +25,7 @@ WIKIDATA: DatasourceConfig = get_datasource_config("wikidata")
 # Mapping of datasource names to their configurations
 ALL_DATASOURCES: dict[str, DatasourceConfig] = {
     "chebi": CHEBI,
+    "ensembl": ENSEMBL,
     "hgnc": HGNC,
     "hmdb_metabolites": HMDB_MET,
     "hmdb_proteins": HMDB_PROT,

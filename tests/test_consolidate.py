@@ -13,6 +13,8 @@ import pytest
 from pysec2pri import consolidate as consolidate_module
 from pysec2pri.consolidate import (
     SUPPORTED_DATASOURCES,
+    _label_transitions,
+    build_label_history,
     consolidate_mapping_dates,
     default_cache_dir,
     load_mapping_dates,
@@ -42,7 +44,7 @@ class TestLoadMappingDates:
 
     def test_reads_first_seen_date_only(self, tmp_path: Path) -> None:
         """Only ``first_seen_date`` is exposed; last-seen columns are internal."""
-        cache_path = consolidate_module._cache_path(tmp_path, "chebi", "3star", "ids")
+        cache_path = consolidate_module._cache_path(tmp_path, "chebi", "ids", subset="3star")
         consolidate_module._write_cache(
             cache_path,
             {
@@ -62,15 +64,15 @@ class TestLoadMappingDates:
     ) -> None:
         """``ids``/``labels`` and datasource caches don't collide."""
         consolidate_module._write_cache(
-            consolidate_module._cache_path(tmp_path, "chebi", "3star", "ids"),
+            consolidate_module._cache_path(tmp_path, "chebi", "ids"),
             {"r1": {"first_seen_version": "1", "first_seen_date": "2001-01-01"}},
         )
         consolidate_module._write_cache(
-            consolidate_module._cache_path(tmp_path, "chebi", "3star", "labels"),
+            consolidate_module._cache_path(tmp_path, "chebi", "labels"),
             {"r2": {"first_seen_version": "1", "first_seen_date": "2002-02-02"}},
         )
         consolidate_module._write_cache(
-            consolidate_module._cache_path(tmp_path, "uniprot", "3star", "ids"),
+            consolidate_module._cache_path(tmp_path, "uniprot", "ids"),
             {"r3": {"first_seen_version": "1", "first_seen_date": "2003-03-03"}},
         )
         assert load_mapping_dates("chebi", tmp_path, mapping_sets="ids") == {"r1": "2001-01-01"}
@@ -155,7 +157,7 @@ class TestConsolidateByRelease:
         monkeypatch.setattr(
             consolidate_module,
             "_run_one_version",
-            lambda datasource, version, subset, mapping_sets, tax_id: _FakeMappingSet(
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
                 records_by_version[version]
             ),
         )
@@ -170,7 +172,7 @@ class TestConsolidateByRelease:
         assert records["c"]["first_seen_version"] == "2"
         assert records["c"]["last_seen_version"] == "3"
 
-        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "3star", "ids")
+        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "ids")
         assert json.loads(meta_path.read_text())["last_version"] == "3"
 
     def test_resume_skips_seen_versions_unless_forced(
@@ -184,7 +186,7 @@ class TestConsolidateByRelease:
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
 
         def _run(
-            datasource: str, version: str, subset: str, mapping_sets: str, tax_id: str
+            datasource: str, version: str, mapping_sets: str, **kwargs: object
         ) -> _FakeMappingSet:
             seen_versions.append(version)
             return _FakeMappingSet(["a"])
@@ -211,7 +213,7 @@ class TestConsolidateByRelease:
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
 
         def _run(
-            datasource: str, version: str, subset: str, mapping_sets: str, tax_id: str
+            datasource: str, version: str, mapping_sets: str, **kwargs: object
         ) -> _FakeMappingSet:
             if version == "2":
                 raise ValueError("simulated parse failure")
@@ -226,7 +228,7 @@ class TestConsolidateByRelease:
         assert records["a"]["last_seen_version"] == "3"
         assert records["d"]["first_seen_version"] == "3"
 
-        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "3star", "ids")
+        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "ids")
         assert json.loads(meta_path.read_text())["last_version"] == "3"
 
     def test_works_for_any_versioned_datasource_not_just_chebi(
@@ -239,7 +241,7 @@ class TestConsolidateByRelease:
         monkeypatch.setattr(
             consolidate_module,
             "_run_one_version",
-            lambda datasource, version, subset, mapping_sets, tax_id: _FakeMappingSet(["x"]),
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["x"]),
         )
 
         cache_path = consolidate_mapping_dates("hgnc", cache_dir=tmp_path, show_progress=False)
@@ -258,7 +260,7 @@ class TestConsolidateByDate:
         monkeypatch.setattr(
             consolidate_module,
             "_run_one_version",
-            lambda datasource, version, subset, mapping_sets, tax_id: _FakeMappingSet(
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
                 ["a", "b"], dates={"a": "1996-03-01", "b": "2010-05-12"}
             ),
         )
@@ -280,7 +282,7 @@ class TestConsolidateByDate:
         monkeypatch.setattr(
             consolidate_module,
             "_run_one_version",
-            lambda datasource, version, subset, mapping_sets, tax_id: _FakeMappingSet(["a"]),
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
         )
 
         with pytest.warns(UserWarning, match="falling back to mode='release'"):
@@ -290,3 +292,143 @@ class TestConsolidateByDate:
 
         records = consolidate_module._read_cache(cache_path)
         assert records["a"]["first_seen_version"] == "1"
+
+
+class TestLabelTransitions:
+    """Pure-function tests for the Ensembl label-history diff logic."""
+
+    def test_changed_label_is_reported(self) -> None:
+        """A gene present in both snapshots with a different label is reported."""
+        prev = {"G1": "OLD1"}
+        curr = {"G1": "NEW1"}
+        assert _label_transitions(prev, curr) == [("G1", "OLD1", "NEW1")]
+
+    def test_unchanged_label_is_not_reported(self) -> None:
+        """A gene whose label didn't change produces no transition."""
+        prev = {"G1": "SAME"}
+        curr = {"G1": "SAME"}
+        assert _label_transitions(prev, curr) == []
+
+    def test_gene_only_in_one_snapshot_is_not_reported(self) -> None:
+        """A brand-new gene, or one absent from the later snapshot, has nothing to diff."""
+        prev = {"G1": "OLD1", "G2": "GONE"}
+        curr = {"G1": "OLD1", "G3": "NEW"}
+        assert _label_transitions(prev, curr) == []
+
+    def test_multiple_changes_all_reported(self) -> None:
+        """Every changed gene gets its own transition tuple."""
+        prev = {"G1": "OLD1", "G2": "OLD2", "G3": "SAME"}
+        curr = {"G1": "NEW1", "G2": "NEW2", "G3": "SAME"}
+        assert set(_label_transitions(prev, curr)) == {
+            ("G1", "OLD1", "NEW1"),
+            ("G2", "OLD2", "NEW2"),
+        }
+
+
+class TestBuildLabelHistory:
+    """Cross-release Ensembl label-history walk, fully monkeypatched (no network)."""
+
+    def _patch_walk(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        versions: list[str],
+        label_maps: dict[str, dict[str, str]],
+        seen_versions: list[str] | None = None,
+    ) -> None:
+        from pysec2pri.parsers.ensembl import EnsemblParser
+
+        monkeypatch.setitem(
+            consolidate_module._LIST_VERSIONS_FNS, "ensembl", lambda **kwargs: versions
+        )
+        monkeypatch.setattr("pysec2pri.download.resolve_release_date", lambda *a, **kw: None)
+
+        def _fake_download(
+            datasource: str,
+            output_dir: Path,
+            version: str | None = None,
+            species: object = None,
+            keys: list[str] | None = None,
+            **kwargs: object,
+        ) -> tuple[dict[str, Path], None]:
+            return {"gene": Path(f"gene_{version}.txt"), "xref": Path(f"xref_{version}.txt")}, None
+
+        monkeypatch.setattr("pysec2pri.download.download_datasource_with_release", _fake_download)
+
+        def _fake_snapshot(self: EnsemblParser, gene_path: Path, xref_path: Path) -> dict[str, str]:
+            version = Path(gene_path).stem.split("_")[-1]
+            if seen_versions is not None:
+                seen_versions.append(version)
+            return label_maps[version]
+
+        monkeypatch.setattr(EnsemblParser, "current_label_snapshot", _fake_snapshot)
+
+    def test_detects_transitions_across_releases(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Diffing consecutive release snapshots emits one transition per changed gene."""
+        label_maps = {
+            "113": {"G1": "OLD1", "G2": "SAME"},
+            "114": {"G1": "NEW1", "G2": "SAME"},
+            "115": {"G1": "NEW1", "G2": "SAME", "G3": "BRANDNEW"},
+        }
+        self._patch_walk(monkeypatch, ["113", "114", "115"], label_maps)
+
+        ms = build_label_history(species=9606, cache_dir=tmp_path, show_progress=False)
+        seen = {(m.object_id, m.subject_label, m.object_label) for m in ms.mappings}
+        assert seen == {("ENSEMBL:G1", "OLD1", "NEW1")}
+        assert all(m.predicate_id == "IAO:0100001" for m in ms.mappings)
+
+    def test_from_to_version_bounds_the_walk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """from_version/to_version restrict which releases are walked."""
+        label_maps = {
+            "113": {"G1": "A"},
+            "114": {"G1": "B"},
+            "115": {"G1": "C"},
+        }
+        seen: list[str] = []
+        self._patch_walk(monkeypatch, ["113", "114", "115"], label_maps, seen_versions=seen)
+
+        build_label_history(
+            species=9606,
+            from_version="114",
+            to_version="115",
+            cache_dir=tmp_path,
+            show_progress=False,
+        )
+        assert seen == ["114", "115"]
+
+    def test_resume_skips_already_walked_releases(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second run only walks releases past the resumed last_version."""
+        label_maps = {
+            "113": {"G1": "A"},
+            "114": {"G1": "B"},
+            "115": {"G1": "C"},
+        }
+        seen: list[str] = []
+        self._patch_walk(monkeypatch, ["113", "114", "115"], label_maps, seen_versions=seen)
+
+        build_label_history(species=9606, cache_dir=tmp_path, show_progress=False)
+        assert seen == ["113", "114", "115"]
+
+        seen.clear()
+        ms = build_label_history(species=9606, cache_dir=tmp_path, show_progress=False)
+        assert seen == []
+        # Resuming still returns the full set of transitions found so far.
+        assert {(m.subject_label, m.object_label) for m in ms.mappings} == {("A", "B"), ("B", "C")}
+
+    def test_force_rewalks_every_release(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """force=True ignores resume state and re-walks from scratch."""
+        label_maps = {"113": {"G1": "A"}, "114": {"G1": "B"}}
+        seen: list[str] = []
+        self._patch_walk(monkeypatch, ["113", "114"], label_maps, seen_versions=seen)
+
+        build_label_history(species=9606, cache_dir=tmp_path, show_progress=False)
+        seen.clear()
+        build_label_history(species=9606, cache_dir=tmp_path, show_progress=False, force=True)
+        assert seen == ["113", "114"]

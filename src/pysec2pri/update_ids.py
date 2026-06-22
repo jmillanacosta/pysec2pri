@@ -1,7 +1,7 @@
 """Resolve secondary identifiers to primary identifiers using a MappingSet.
 
-Typical usage
--------------
+Typical usage:
+
 Single string (possibly separated by commas/semicolons/pipes/whitespace)::
 
     from pysec2pri import generate_hgnc
@@ -28,7 +28,6 @@ Pandas DataFrame, annotate one or more columns::
     # returns df with "gene_id_primary" and "alt_id_primary" columns added
 
 Notes
------
 * Identifiers that are not found in the mapping set are returned/kept
   as-is.
 * Identifiers separated by common delimiters (``|``, ``,``, ``;``,

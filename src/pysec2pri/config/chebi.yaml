@@ -6,6 +6,15 @@ parser_class: "ChEBIParser"
 prefix: "CHEBI"
 curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
 entity_types: ["chemical entities"]
+
+# Compound subset: which compounds.tsv "star" filter to apply (TSV releases),
+# or which legacy SDF file to use (pre-245 releases). Only ChEBI has this axis.
+subset:
+  default: 3star
+  available:
+    3star: { label: "3-star (curated, reviewed)" }
+    complete: { label: "Complete (all entries, including unreviewed)" }
+
 mappingset:
   sssom_version: null
   curie_map:

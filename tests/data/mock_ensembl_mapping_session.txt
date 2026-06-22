@@ -1,0 +1,5 @@
+352	homo_sapiens_core_120	homo_sapiens_core_3_26	1.2	3	UCSC	NCBI26	2002-09-03 11:19:48
+347	homo_sapiens_core_6_28	homo_sapiens_core_7_29a	6	7	NCBI28	NCBI29	2002-09-05 09:26:21
+356	homo_sapiens_core_18_34	homo_sapiens_core_18_34a	18.1	18.2	NCBI34	NCBI34	2003-12-01 16:04:41
+361	homo_sapiens_core_37_35j	homo_sapiens_core_38_36	37	38	NCBI35	NCBI36	2006-03-10 15:03:22
+388	homo_sapiens_core_66_37	homo_sapiens_core_67_37	66	67	GRCh37	GRCh37	2012-03-20 10:52:24
