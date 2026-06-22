@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -120,25 +120,19 @@ def _fake_release_date(datasource: str, version: str, subset: str = "3star") -> 
 class TestConsolidateMappingDatesValidation:
     """Upfront validation before any download/parse is attempted."""
 
-    def test_unsupported_datasource_raises(self) -> None:
-        """An unknown datasource is rejected immediately."""
-        with pytest.raises(ValueError, match="Unsupported datasource"):
-            consolidate_mapping_dates("not-a-real-source")
-
-    def test_unsupported_mapping_sets_raises(self) -> None:
-        """UniProt only supports 'ids', never 'labels'."""
-        with pytest.raises(ValueError, match="does not support mapping_sets"):
-            consolidate_mapping_dates("uniprot", mapping_sets="labels")
-
-    def test_unknown_mode_raises(self) -> None:
-        """Only 'release' and 'date' are valid modes."""
-        with pytest.raises(ValueError, match="mode must be"):
-            consolidate_mapping_dates("chebi", mode="bogus")
-
-    def test_release_mode_without_archive_raises(self, tmp_path: Path) -> None:
-        """NCBI has no versioned archive; 'release' mode is rejected, not silently degraded."""
-        with pytest.raises(ValueError, match="no versioned archive"):
-            consolidate_mapping_dates("ncbi", mode="release", cache_dir=tmp_path)
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"datasource": "not-a-real-source"}, "Unsupported datasource"),
+            ({"datasource": "uniprot", "mapping_sets": "labels"}, "does not support mapping_sets"),
+            ({"datasource": "chebi", "mode": "bogus"}, "mode must be"),
+            ({"datasource": "ncbi", "mode": "release"}, "no versioned archive"),
+        ],
+    )
+    def test_bad_arguments_raise(self, kwargs: dict[str, Any], match: str) -> None:
+        """Unknown datasource/mapping_sets/mode, and release mode on an unarchived source."""
+        with pytest.raises(ValueError, match=match):
+            consolidate_mapping_dates(**kwargs)
 
     def test_all_supported_datasources_are_known_to_validation(self) -> None:
         """Every entry in SUPPORTED_DATASOURCES has a mapping_sets capability row."""
@@ -179,10 +173,10 @@ class TestConsolidateByRelease:
         meta_path = consolidate_module._meta_path(tmp_path, "chebi", "3star", "ids")
         assert json.loads(meta_path.read_text())["last_version"] == "3"
 
-    def test_resume_skips_already_consolidated_versions(
+    def test_resume_skips_seen_versions_unless_forced(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A second run with the same version list re-scans nothing."""
+        """A second run re-scans nothing; ``force=True`` re-scans everything."""
         seen_versions: list[str] = []
 
         _FakeDownloader.versions = ["1", "2"]
@@ -204,25 +198,6 @@ class TestConsolidateByRelease:
         consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         assert seen_versions == []
 
-    def test_force_rescans_from_scratch(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``force=True`` ignores the resume cursor and re-scans every version."""
-        seen_versions: list[str] = []
-
-        _FakeDownloader.versions = ["1", "2"]
-        monkeypatch.setattr("pysec2pri.parsers.chebi.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-
-        def _run(
-            datasource: str, version: str, subset: str, mapping_sets: str, tax_id: str
-        ) -> _FakeMappingSet:
-            seen_versions.append(version)
-            return _FakeMappingSet(["a"])
-
-        monkeypatch.setattr(consolidate_module, "_run_one_version", _run)
-
-        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         seen_versions.clear()
         consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False, force=True)
         assert seen_versions == ["1", "2"]

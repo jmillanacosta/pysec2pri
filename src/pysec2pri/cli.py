@@ -70,8 +70,95 @@ _opt_delac_file = _opt(
     help="Path to delac_sp.txt (UniProt).",
 )
 
+# Disambiguation-context options, shared by update-ids/update-labels.
+_opt_xref = _opt(
+    "--xref",
+    "xref_cols",
+    default=None,
+    multiple=True,
+    metavar="COLUMN",
+    help="Column with cross-ref tokens (e.g. Ensembl IDs), paired with --at.",
+)
+_opt_xref_file = _opt(
+    "--xref-file",
+    "xref_file",
+    type=ExistingPathType,
+    default=None,
+    help="Crosswalk table (SSSOM or plain TSV) for --xref.",
+)
+_opt_xref_source = _opt(
+    "--xref-source",
+    "xref_source",
+    default=None,
+    help="Use a config-declared suggested crosswalk source (auto-downloaded), e.g. 'hgnc_custom'.",
+)
+_opt_xref_on = _opt(
+    "--xref-on",
+    "xref_on",
+    default=None,
+    help="Which subject column of --xref-source to key on (e.g. ensembl/entrez/refseq/uniprot).",
+)
+_opt_xref_predicate = _opt(
+    "--xref-predicate",
+    "xref_predicates",
+    multiple=True,
+    metavar="PREDICATE",
+    help="Accepted equivalence predicate(s) for xref records. Repeat for multiple. "
+    "Default accepts any predicate (and unannotated records).",
+)
+_opt_report = _opt(
+    "--report",
+    "report_path",
+    type=PathType,
+    default=None,
+    help="Write a per-decision audit log (TSV) for context-based resolutions.",
+)
+
 
 # Shared CLI helpers
+
+
+def _resolve_xref_mapping(
+    xref_file: Path | None,
+    xref_source: str | None,
+    xref_on: str | None,
+    datasource: str,
+) -> object | None:
+    """Resolve the crosswalk table for --xref-file/--xref-source.
+
+    Returns ``None`` when neither is given (caller decides whether that's an
+    error, e.g. when --xref columns were supplied without a table).
+    """
+    from pysec2pri.context import load_xref_mapping
+
+    if xref_file is not None:
+        return load_xref_mapping(xref_file)
+
+    if xref_source is not None:
+        if xref_on is None:
+            raise click.ClickException("--xref-on is required together with --xref-source.")
+        cfg = get_datasource_config(datasource)
+        src = cfg.xref_source(xref_source)
+        if src is None:
+            known = ", ".join(s.id for s in cfg.xref_sources) or "(none configured)"
+            raise click.ClickException(
+                f"Unknown --xref-source {xref_source!r} for {datasource!r}. Known: {known}"
+            )
+        subject_col = src.subject_id_cols.get(xref_on)
+        if subject_col is None:
+            known_keys = ", ".join(sorted(src.subject_id_cols)) or "(none)"
+            raise click.ClickException(
+                f"Unknown --xref-on {xref_on!r} for xref-source"
+                f" {xref_source!r}. Known: {known_keys}"
+            )
+        if src.note:
+            click.echo(f"Note: {src.note}")
+        click.echo(f"Downloading xref source {src.id!r}...")
+        from pysec2pri.context import download_xref_source
+
+        return download_xref_source(src, subject_col, show_progress=False)
+
+    return None
 
 
 def _version_base(ms: object, data_version: str | None, prefix: str) -> tuple[str, str]:
@@ -99,18 +186,34 @@ def _emit(ms: object, fmt: str, output: Path | None, base: str) -> None:
         click.echo(f"Wrote {n} mappings -> {path}")
 
 
+def _pad_cols(cols: tuple[str, ...], n: int) -> list[str | None]:
+    """Pad/truncate *cols* to length *n*, filling missing entries with ``None``."""
+    padded: list[str | None] = list(cols) + [None] * max(0, n - len(cols))
+    return padded[:n]
+
+
+def _report_path_for(base: Path | None, col: str, multi: bool) -> Path | None:
+    """Return *base*, or a per-column variant when several --at columns share one --report."""
+    if base is None or not multi:
+        return base
+    return base.with_name(f"{base.stem}_{col}{base.suffix}")
+
+
 def _resolve_and_print(
     input_file: Path,
     ms: Sec2PriMappingSet,
-    col_syn_pairs: list[tuple[str, str | None]],
+    col_specs: list[tuple[str, str | None, str | None]],
     output_path: Path | None,
     suffix: str,
     sep: str | None,
     label_ms: Sec2PriMappingSet | None = None,
     *,
     mode: str = "ids",
+    xref_mapping: object | None = None,
+    xref_predicates: set[str] | None = None,
+    report_path: Path | None = None,
 ) -> None:
-    """Read *input_file* and resolve each (column, synonym_col) pair."""
+    """Read *input_file* and resolve each (column, synonym_col, xref_col) triple."""
     import pandas as pd
 
     from pysec2pri.update_ids import update_ids, update_labels
@@ -120,20 +223,34 @@ def _resolve_and_print(
     df = pd.read_csv(input_file, sep=read_sep, dtype=str)
     assert isinstance(df, pd.DataFrame)
     result: pd.DataFrame = df.copy()
-    click.echo(f"Resolving column(s): {', '.join(c for c, _ in col_syn_pairs)}")
-    for col, syn_col in col_syn_pairs:
-        hint = f" (hints from {syn_col!r})" if syn_col else ""
+    click.echo(f"Resolving column(s): {', '.join(c for c, _, _ in col_specs)}")
+    multi = len(col_specs) > 1
+    for col, syn_col, xref_col in col_specs:
+        hints = [f"hints from {syn_col!r}"] if syn_col else []
+        if xref_col:
+            hints.append(f"xref from {xref_col!r}")
+        hint = f" ({', '.join(hints)})" if hints else ""
         click.echo(f"  {col!r}{hint}")
+        col_report = _report_path_for(report_path, col, multi)
+        kwargs: dict[str, Any] = {
+            "at": col,
+            "suffix": suffix,
+            "synonyms": syn_col,
+            "xref": xref_col,
+            "xref_mapping": xref_mapping if xref_col else None,
+            "xref_predicates": set(xref_predicates) if xref_col and xref_predicates else None,
+            "report_path": col_report,
+        }
         partial: pd.DataFrame = (
-            update_ids(
-                result, ms, at=col, suffix=suffix, synonyms=syn_col, label_mapping_set=label_ms
-            )
+            update_ids(result, ms, label_mapping_set=label_ms, **kwargs)
             if mode == "ids"
-            else update_labels(result, ms, at=col, suffix=suffix, synonyms=syn_col)
+            else update_labels(result, ms, **kwargs)
         )
         for new_col in partial.columns:
             if new_col not in result.columns:
                 result[new_col] = partial[new_col]
+        if col_report is not None:
+            click.echo(f"    Wrote decision log -> {col_report}")
     if output_path is not None:
         out_sep = "\t" if output_path.suffix.lower() == ".tsv" else ","
         result.to_csv(output_path, sep=out_sep, index=False)
@@ -335,6 +452,45 @@ def list_versions_cmd(datasource: str) -> None:
     else:
         for v in versions:
             click.echo(f"  {v}")
+
+
+# validate-config
+
+
+@main.command("validate-config")
+@click.argument("datasource", required=False, default=None)
+def validate_config_cmd(datasource: str | None) -> None:
+    """Validate one (or, if omitted, every) shipped datasource config YAML.
+
+    Examples::
+
+        pysec2pri validate-config
+        pysec2pri validate-config hgnc
+    """
+    from pysec2pri.config.schema import ConfigValidationError, validate_config_file
+    from pysec2pri.parsers.base import CONFIG_DIR
+
+    if datasource:
+        paths = [CONFIG_DIR / f"{datasource.lower()}.yaml"]
+    else:
+        paths = sorted(CONFIG_DIR.glob("*.yaml"))
+
+    failed = False
+    for path in paths:
+        if not path.exists():
+            click.echo(f"  {path.name}: NOT FOUND", err=True)
+            failed = True
+            continue
+        try:
+            validate_config_file(path)
+        except ConfigValidationError as exc:
+            click.echo(f"  {path.name}: INVALID -- {exc}", err=True)
+            failed = True
+        else:
+            click.echo(f"  {path.name}: OK")
+
+    if failed:
+        raise click.ClickException("One or more config files failed validation.")
 
 
 # consolidate
@@ -541,6 +697,12 @@ _LABEL_GENERATORS_FOR_IDS: dict[str, str] = {
     default=None,
     help="Pre-built label/label mapping file for alias resolution.",
 )
+@_opt_xref
+@_opt_xref_file
+@_opt_xref_source
+@_opt_xref_on
+@_opt_xref_predicate
+@_opt_report
 @_opt_version
 @_opt_no_progress
 def update_ids_cmd(
@@ -553,15 +715,23 @@ def update_ids_cmd(
     mapping_file: Path | None,
     synonyms_cols: tuple[str, ...],
     synonyms_mapping_file: Path | None,
+    xref_cols: tuple[str, ...],
+    xref_file: Path | None,
+    xref_source: str | None,
+    xref_on: str | None,
+    xref_predicates: tuple[str, ...],
+    report_path: Path | None,
     data_version: str | None,
     no_progress: bool,
 ) -> None:
-    """Resolve secondary IDs in INPUT_FILE to primary IDs using DATASOURCE.
+    r"""Resolve secondary IDs in INPUT_FILE to primary IDs using DATASOURCE.
 
     Examples::
 
         pysec2pri update-ids genes.tsv hgnc --at gene_id -o out.tsv
         pysec2pri update-ids genes.tsv hgnc --at gene_id --synonyms label
+        pysec2pri update-ids genes.tsv hgnc --at gene_id --xref ensembl \\
+            --xref-source hgnc_custom --xref-on ensembl --report decisions.tsv
     """
     from pysec2pri.api import load_label_mapping, load_mapping
 
@@ -596,16 +766,24 @@ def update_ids_cmd(
                 err=True,
             )
 
-    padded = list(synonyms_cols) + [None] * max(0, len(columns) - len(synonyms_cols))
+    xref_mapping = _resolve_xref_mapping(xref_file, xref_source, xref_on, datasource)
+    if xref_cols and xref_mapping is None:
+        raise click.ClickException("--xref requires --xref-file or --xref-source.")
+
+    syn_padded = _pad_cols(synonyms_cols, len(columns))
+    xref_padded = _pad_cols(xref_cols, len(columns))
     _resolve_and_print(
         input_file,
         ms,
-        list(zip(columns, padded[: len(columns)], strict=False)),
+        list(zip(columns, syn_padded, xref_padded, strict=True)),
         output_path,
         suffix,
         sep,
         label_ms,
         mode="ids",
+        xref_mapping=xref_mapping,
+        xref_predicates=set(xref_predicates) if xref_predicates else None,
+        report_path=report_path,
     )
 
 
@@ -654,6 +832,12 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
     default=None,
     help="Pre-built mapping file for alias resolution.",
 )
+@_opt_xref
+@_opt_xref_file
+@_opt_xref_source
+@_opt_xref_on
+@_opt_xref_predicate
+@_opt_report
 @_opt_tax_id
 @_opt_entity_type
 @_opt_subset
@@ -669,18 +853,26 @@ def update_labels_cmd(
     mapping_file: Path | None,
     synonyms_cols: tuple[str, ...],
     synonyms_mapping_file: Path | None,
+    xref_cols: tuple[str, ...],
+    xref_file: Path | None,
+    xref_source: str | None,
+    xref_on: str | None,
+    xref_predicates: tuple[str, ...],
+    report_path: Path | None,
     tax_id: str,
     entity_type: str | None,
     subset: str,
     data_version: str | None,
     no_progress: bool,
 ) -> None:
-    """Resolve previous/alias labels in INPUT_FILE to current labels using DATASOURCE.
+    r"""Resolve previous/alias labels in INPUT_FILE to current labels using DATASOURCE.
 
     Examples::
 
         pysec2pri update-labels genes.tsv hgnc --at label -o out.tsv
         pysec2pri update-labels genes.tsv hgnc --at label --mapping labels.tsv
+        pysec2pri update-labels genes.tsv hgnc --at label --xref ensembl \\
+            --xref-source hgnc_custom --xref-on ensembl --report decisions.tsv
     """
     from pysec2pri.api import (
         generate_chebi_labels,
@@ -731,17 +923,141 @@ def update_labels_cmd(
         else:
             click.echo(f"Warning: --synonyms not supported for {datasource!r}.", err=True)
 
-    padded = list(synonyms_cols) + [None] * max(0, len(columns) - len(synonyms_cols))
+    xref_mapping = _resolve_xref_mapping(xref_file, xref_source, xref_on, datasource)
+    if xref_cols and xref_mapping is None:
+        raise click.ClickException("--xref requires --xref-file or --xref-source.")
+
+    syn_padded = _pad_cols(synonyms_cols, len(columns))
+    xref_padded = _pad_cols(xref_cols, len(columns))
     _resolve_and_print(
         input_file,
         ms,
-        list(zip(columns, padded[: len(columns)], strict=False)),
+        list(zip(columns, syn_padded, xref_padded, strict=True)),
         output_path,
         suffix,
         sep,
         label_ms,
         mode="labels",
+        xref_mapping=xref_mapping,
+        xref_predicates=set(xref_predicates) if xref_predicates else None,
+        report_path=report_path,
     )
+
+
+# crosswalk
+
+
+def _crosswalk_vocab() -> list[str]:
+    """``--from`` vocabulary: ``symbol`` plus every key declared in HGNC's xref-source."""
+    cfg = get_datasource_config("hgnc")
+    src = cfg.xref_source("hgnc_custom")
+    keys = sorted(src.subject_id_cols) if src else []
+    return ["symbol", *keys]
+
+
+@main.command("crosswalk")
+@click.argument("input_file", type=ExistingPathType, required=False, default=None)
+@click.option(
+    "--value", default=None, help="A single identifier to look up (instead of INPUT_FILE)."
+)
+@click.option(
+    "--from",
+    "frm",
+    required=True,
+    type=click.Choice(_crosswalk_vocab()),
+    help="Source vocabulary.",
+)
+@click.option(
+    "--to",
+    default="hgnc_id",
+    show_default=True,
+    type=click.Choice(["hgnc_id", "symbol"]),
+    help="Target vocabulary.",
+)
+@click.option(
+    "--at", "at_col", default=None, metavar="COLUMN", help="Column with --from values (file mode)."
+)
+@_opt_output
+@click.option("--sep", default=None, help="Delimiter (inferred from extension if omitted).")
+@_opt_xref_file
+@_opt_xref_source
+@_opt_report
+@_opt_version
+@_opt_no_progress
+def crosswalk_cmd(
+    input_file: Path | None,
+    value: str | None,
+    frm: str,
+    to: str,
+    at_col: str | None,
+    output: Path | None,
+    sep: str | None,
+    xref_file: Path | None,
+    xref_source: str | None,
+    report_path: Path | None,
+    data_version: str | None,
+    no_progress: bool,
+) -> None:
+    """Map a gene identifier between vocabularies via HGNC.
+
+    Vocabularies: symbol, hgnc_id, and any cross-reference key HGNC's
+    custom-download crosswalk declares (typically ensembl, entrez, refseq,
+    uniprot). A ``symbol`` lookup resolves through the temporal-aware,
+    ambiguity-safe label resolver; others resolve through HGNC's own
+    cross-reference table.
+
+    Examples::
+
+        pysec2pri crosswalk --value TP53 --from symbol --to hgnc_id
+        pysec2pri crosswalk genes.tsv --from ensembl --to hgnc_id --at ensembl_id -o out.tsv
+    """
+    from pysec2pri.api import crosswalk as _crosswalk
+    from pysec2pri.context import load_xref_mapping
+
+    xref_mapping = load_xref_mapping(xref_file) if xref_file is not None else None
+
+    if value is not None:
+        looked_up = _crosswalk(
+            value,
+            frm=frm,
+            to=to,
+            version=data_version,
+            xref_mapping=xref_mapping,
+            xref_source=xref_source or "hgnc_custom",
+            report_path=report_path,
+            show_progress=not no_progress,
+        )
+        click.echo(looked_up.get(value, "") if isinstance(looked_up, dict) else looked_up)
+        return
+
+    if input_file is None:
+        raise click.ClickException("Provide INPUT_FILE or --value.")
+    if at_col is None:
+        raise click.ClickException("--at is required with INPUT_FILE.")
+
+    import pandas as pd
+
+    read_sep = sep if sep is not None else ("\t" if input_file.suffix.lower() == ".tsv" else ",")
+    df = pd.read_csv(input_file, sep=read_sep, dtype=str)
+    result_df = _crosswalk(
+        df,
+        frm=frm,
+        to=to,
+        at=at_col,
+        version=data_version,
+        xref_mapping=xref_mapping,
+        xref_source=xref_source or "hgnc_custom",
+        report_path=report_path,
+        show_progress=not no_progress,
+    )
+    assert isinstance(result_df, pd.DataFrame)  # guaranteed: input_data was a DataFrame
+    if output is not None:
+        out_sep = "\t" if output.suffix.lower() == ".tsv" else ","
+        result_df.to_csv(output, sep=out_sep, index=False)
+        click.echo(f"Wrote {len(result_df)} rows -> {output}")
+    else:
+        out_sep = "\t" if (sep or "\t") == "\t" else ","
+        click.echo(result_df.to_csv(sep=out_sep, index=False))
 
 
 if __name__ == "__main__":

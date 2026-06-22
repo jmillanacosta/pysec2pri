@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pysec2pri.context import ContextSpec, load_xref_mapping
 from pysec2pri.exports import (
     write_json,
     write_name2synonym,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from pysec2pri.context import DecisionRecord, XrefMapping
     from pysec2pri.diff import MappingDiff
     from pysec2pri.parsers.base import Sec2PriMappingSet
 
@@ -35,7 +37,9 @@ from pysec2pri.parsers.base import AmbiguousMappingSet, IdMappingSet, LabelMappi
 
 __all__ = [
     # Utilities
+    "ContextSpec",
     "combine_mapping_sets",
+    "crosswalk",
     "find_ambiguous",
     # Need to remove at some point the old functions
     # (see aliased functions at the bottom)
@@ -72,6 +76,7 @@ __all__ = [
     "list_versions",
     "load_label_mapping",
     "load_mapping",
+    "load_xref_mapping",
     "resolve_ids",
     "resolve_labels",
     "save",
@@ -1047,6 +1052,9 @@ def resolve_ids(
     sep: str | None = None,
     synonyms: str | None = None,
     label_mapping_set: Sec2PriMappingSet | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    report_path: Path | str | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve secondary IDs to primary IDs.
 
@@ -1077,6 +1085,13 @@ def resolve_ids(
             (default ``"_primary"``).
         sep: Delimiter for reading the file.  Inferred from the extension
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
+        xref: *DataFrame mode only.* Column with a per-row cross-reference
+            token, passed through to :func:`~pysec2pri.update_ids.update_ids`.
+        xref_mapping: The :class:`~pysec2pri.context.XrefMapping` crosswalk
+            table to resolve *xref* tokens against. Required when *xref* is
+            given.
+        report_path: When given, every disambiguation attempt (from
+            *synonyms* and/or *xref*) is logged to this TSV.
 
     Returns:
         A resolved identifier string, a list of resolved strings (direct-lookup
@@ -1115,6 +1130,9 @@ def resolve_ids(
         lookup=lkp,
         synonyms=synonyms,
         label_mapping_set=label_mapping_set,
+        xref=xref,
+        xref_mapping=xref_mapping,
+        report_path=report_path,
     )
 
     if output_path is not None:
@@ -1134,6 +1152,9 @@ def resolve_labels(
     suffix: str = "_current",
     sep: str | None = None,
     synonyms: str | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    report_path: Path | str | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve previous/alias labels to current labels.
 
@@ -1163,6 +1184,14 @@ def resolve_labels(
             (default ``"_current"``).
         sep: Delimiter for reading the file.  Inferred from the extension
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
+        xref: *DataFrame mode only.* Column with a per-row cross-reference
+            token, passed through to
+            :func:`~pysec2pri.update_ids.update_labels`.
+        xref_mapping: The :class:`~pysec2pri.context.XrefMapping` crosswalk
+            table to resolve *xref* tokens against. Required when *xref* is
+            given.
+        report_path: When given, every disambiguation attempt (from
+            *synonyms* and/or *xref*) is logged to this TSV.
 
     Returns:
         A resolved label string, a list of resolved strings (direct-lookup
@@ -1194,7 +1223,17 @@ def resolve_labels(
     df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
     lkp = build_label_lookup(mapping_set)
     result = pd.DataFrame(
-        update_labels(df, mapping_set, at=at, suffix=suffix, lookup=lkp, synonyms=synonyms)
+        update_labels(
+            df,
+            mapping_set,
+            at=at,
+            suffix=suffix,
+            lookup=lkp,
+            synonyms=synonyms,
+            xref=xref,
+            xref_mapping=xref_mapping,
+            report_path=report_path,
+        )
     )
 
     if output_path is not None:
@@ -1232,6 +1271,261 @@ def list_versions(datasource: str) -> Any:
     from pysec2pri.download import list_versions as _list_versions
 
     return _list_versions(datasource)
+
+
+def _crosswalk_via_xref(
+    tokens: list[str],
+    xref_mapping: XrefMapping,
+    to: str,
+    decisions: list[DecisionRecord],
+) -> dict[str, str]:
+    """Resolve each of *tokens* through a flat ``subject_id -> object_*`` crosswalk.
+
+    Unlike the secondary/primary ambiguity handled by
+    :mod:`pysec2pri.update_ids`, a crosswalk table can itself carry more than
+    one distinct target for the same token; that case is also left
+    unresolved (and logged) rather than guessed.
+    """
+    from pysec2pri.context import DecisionRecord
+
+    index = xref_mapping.by_subject()
+    result: dict[str, str] = {}
+    for tok in tokens:
+        if tok in result:
+            continue
+        candidates = index.get(tok) or []
+        if not candidates:
+            result[tok] = ""
+            decisions.append(
+                DecisionRecord("xref_crosswalk", tok, None, None, False, "no crossreference entry")
+            )
+            continue
+        targets = {(c.object_id, c.object_label or "") for c in candidates}
+        if len(targets) > 1:
+            result[tok] = ""
+            decisions.append(
+                DecisionRecord(
+                    "xref_crosswalk",
+                    tok,
+                    None,
+                    None,
+                    False,
+                    f"ambiguous crosswalk: {len(targets)} distinct targets",
+                )
+            )
+            continue
+        record = candidates[0]
+        value = record.object_id if to == "hgnc_id" else (record.object_label or "")
+        result[tok] = value
+        decisions.append(
+            DecisionRecord(
+                "xref_crosswalk", tok, record.predicate_id, value, True, "unique crosswalk match"
+            )
+        )
+    return result
+
+
+def _crosswalk_symbol(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    to: str,
+    at: str | None,
+    version: str | None,
+    label_mapping_set: Sec2PriMappingSet | None,
+    report_path: Path | str | None,
+    show_progress: bool,
+) -> dict[str, str] | pd.DataFrame:
+    """``frm == "symbol"`` branch of :func:`crosswalk`."""
+    from pysec2pri.context import DecisionRecord, write_decision_log
+    from pysec2pri.update_ids import (
+        build_ambiguous_labels_set,
+        build_primary_token_to_id,
+        update_labels,
+    )
+
+    label_ms = label_mapping_set or generate_hgnc_labels(
+        version=version, show_progress=show_progress
+    )
+    token_to_id = build_primary_token_to_id(label_ms)
+    ambiguous_symbols = build_ambiguous_labels_set(label_ms)
+
+    def _log_ambiguous(values: set[str]) -> None:
+        if report_path is None:
+            return
+        decisions = [
+            DecisionRecord("symbol", v, None, None, False, "ambiguous symbol, no context provided")
+            for v in sorted(values & ambiguous_symbols)
+        ]
+        write_decision_log(decisions, report_path)
+
+    if isinstance(input_data, (str, list)):
+        resolved = update_labels(input_data, label_ms)
+        _log_ambiguous(set(resolved))
+        if to == "symbol":
+            return resolved
+        return {k: (token_to_id.get(v, "") if v else "") for k, v in resolved.items()}
+
+    if at is None:
+        raise TypeError("crosswalk() requires 'at' when input_data is a DataFrame")
+    result = update_labels(input_data, label_ms, at=at)
+    result[f"{at}_symbol"] = result[f"{at}_current"]
+    result[f"{at}_hgnc_id"] = result[f"{at}_symbol"].map(
+        lambda v: token_to_id.get(v, "") if v else ""
+    )
+    _log_ambiguous(set(input_data[at].astype(str)))
+    return result
+
+
+def _resolve_crosswalk_xref_mapping(
+    frm: str,
+    xref_mapping: XrefMapping | None,
+    xref_source: str,
+    show_progress: bool,
+) -> XrefMapping:
+    """Return *xref_mapping*, or download the configured *xref_source* for it."""
+    from pysec2pri.context import download_xref_source
+    from pysec2pri.parsers.base import get_datasource_config
+
+    if xref_mapping is not None:
+        return xref_mapping
+
+    cfg = get_datasource_config("hgnc")
+    src = cfg.xref_source(xref_source)
+    if src is None:
+        known = ", ".join(s.id for s in cfg.xref_sources) or "(none configured)"
+        raise ValueError(f"Unknown xref_source {xref_source!r}. Known: {known}")
+    subject_col = src.subject_id_cols.get(frm)
+    if subject_col is None:
+        known_keys = ", ".join(sorted(src.subject_id_cols)) or "(none)"
+        raise ValueError(
+            f"Unsupported 'frm' vocabulary {frm!r} for xref_source {xref_source!r}. "
+            f"Known: {known_keys}"
+        )
+    return download_xref_source(src, subject_col, show_progress=show_progress)
+
+
+def _crosswalk_xref(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    frm: str,
+    to: str,
+    at: str | None,
+    xref_mapping: XrefMapping | None,
+    xref_source: str,
+    report_path: Path | str | None,
+    show_progress: bool,
+) -> dict[str, str] | pd.DataFrame:
+    """Non-``"symbol"`` ``frm`` branch of :func:`crosswalk`: a flat crosswalk-table lookup."""
+    from pysec2pri.context import write_decision_log
+
+    mapping = _resolve_crosswalk_xref_mapping(frm, xref_mapping, xref_source, show_progress)
+    decisions: list[DecisionRecord] = []
+
+    if isinstance(input_data, str):
+        result_dict = _crosswalk_via_xref([input_data], mapping, to, decisions)
+    elif isinstance(input_data, list):
+        result_dict = _crosswalk_via_xref(list(dict.fromkeys(input_data)), mapping, to, decisions)
+    else:
+        if at is None:
+            raise TypeError("crosswalk() requires 'at' when input_data is a DataFrame")
+        if at not in input_data.columns:
+            raise KeyError(f"Column {at!r} not found in DataFrame.")
+        unique_tokens = [str(v) for v in input_data[at].dropna().unique()]
+        lookup = _crosswalk_via_xref(unique_tokens, mapping, to, decisions)
+        result = input_data.copy()
+        result[f"{at}_{to}"] = result[at].astype(str).map(lambda v: lookup.get(v, ""))
+        if report_path is not None:
+            write_decision_log(decisions, report_path)
+        return result
+
+    if report_path is not None:
+        write_decision_log(decisions, report_path)
+    return result_dict
+
+
+def crosswalk(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    frm: str,
+    to: str = "hgnc_id",
+    at: str | None = None,
+    version: str | None = None,
+    label_mapping_set: Sec2PriMappingSet | None = None,
+    xref_mapping: XrefMapping | None = None,
+    xref_source: str = "hgnc_custom",
+    report_path: Path | str | None = None,
+    show_progress: bool = True,
+) -> dict[str, str] | pd.DataFrame:
+    r"""Map a gene identifier from one vocabulary to another, via HGNC.
+
+    A thin convenience wrapper, not a separate resolver: ``frm="symbol"``
+    resolves through :func:`generate_hgnc_labels` +
+    :func:`~pysec2pri.update_ids.update_labels`, so a *previous* HGNC symbol
+    still resolves to its current identity (the temporal aspect) and a
+    genuinely ambiguous symbol is left blank and reported rather than
+    guessed. ``frm`` in ``"ensembl"``, ``"entrez"``, ``"refseq"``, or
+    ``"uniprot"`` resolves through HGNC's own cross-reference crosswalk
+    table, downloaded from the ``xref_sources`` declared in
+    ``config/hgnc.yaml`` unless *xref_mapping* is supplied explicitly.
+
+    Args:
+        input_data: A single identifier string, a list of identifier
+            strings, or a :class:`pandas.DataFrame` (requires *at*).
+        frm: Source vocabulary: ``"symbol"``, ``"ensembl"``, ``"entrez"``,
+            ``"refseq"``, or ``"uniprot"``.
+        to: Target vocabulary: ``"hgnc_id"`` (default) or ``"symbol"``.
+        at: *DataFrame mode only.* Column containing the *frm* values.
+        version: HGNC release version to resolve against (``None`` = latest).
+            Ignored when *label_mapping_set* is given.
+        label_mapping_set: Pre-built :class:`~pysec2pri.parsers.base.LabelMappingSet`
+            for ``frm == "symbol"`` (e.g. the result of
+            ``generate_hgnc_labels()``), to avoid re-downloading. When
+            ``None``, it is generated automatically.
+        xref_mapping: Pre-built crosswalk table for non-``"symbol"`` *frm*
+            values. When ``None``, it is downloaded automatically (see
+            *xref_source*); ignored when ``frm == "symbol"``.
+        xref_source: Which ``xref_sources`` entry declared in
+            ``config/hgnc.yaml`` to download when *xref_mapping* is not
+            given (default ``"hgnc_custom"``).
+        report_path: When given, every disambiguation attempt is logged as a
+            TSV (see :func:`pysec2pri.context.write_decision_log`).
+        show_progress: Forwarded to the HGNC generator / downloader.
+
+    Returns:
+        dict[str, str]: when *input_data* is a ``str``/``list[str]``, mapping
+        each unique input value to its resolved target (``""`` when
+        unresolved/ambiguous).
+
+        pandas.DataFrame: when *input_data* is a ``DataFrame``, a copy with
+        the columns :func:`~pysec2pri.update_ids.update_labels` adds
+        (``<at>_current``/``<at>_current_id``) for ``frm="symbol"``, plus a
+        uniform ``<at>_symbol``/``<at>_hgnc_id`` pair; for other *frm*
+        values, a single ``<at>_<to>`` column.
+    """
+    if to not in ("hgnc_id", "symbol"):
+        raise ValueError(f"Unsupported 'to' vocabulary: {to!r}. Choose 'hgnc_id' or 'symbol'.")
+
+    if frm == "symbol":
+        return _crosswalk_symbol(
+            input_data,
+            to=to,
+            at=at,
+            version=version,
+            label_mapping_set=label_mapping_set,
+            report_path=report_path,
+            show_progress=show_progress,
+        )
+
+    return _crosswalk_xref(
+        input_data,
+        frm=frm,
+        to=to,
+        at=at,
+        xref_mapping=xref_mapping,
+        xref_source=xref_source,
+        report_path=report_path,
+        show_progress=show_progress,
+    )
 
 
 def find_ambiguous(

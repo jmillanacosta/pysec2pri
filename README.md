@@ -192,6 +192,84 @@ flowchart TD
     Check -->|no match| Blank
 ```
 
+### Disambiguation with context (label / id / xref)
+
+Alias hints are one kind of *context*: a per-row piece of independent evidence
+that helps decide which entity an ambiguous name actually means. `update_ids`
+and `update_labels` support three kinds, via `pysec2pri.context.ContextSpec`:
+
+- **`label`** -- an alias/synonym string (the `synonyms=`/`--synonyms` shown
+  above).
+- **`id`** -- a related/foreign identifier string, matched the same way.
+- **`xref`** -- a cross-reference token (e.g. an Ensembl ID) resolved through
+  an independent crosswalk table (`pysec2pri.context.XrefMapping`), rather
+  than the mapping set's own alias index.
+
+All three only ever touch cells already flagged ambiguous, and every attempt
+can be written to an auditable decision log:
+
+```python
+from pysec2pri import generate_hgnc_labels, update_labels
+from pysec2pri.context import load_xref_mapping
+
+label_ms = generate_hgnc_labels()
+ensembl_to_hgnc = load_xref_mapping("ensembl_to_hgnc.tsv")  # subject_id/object_id/object_label
+
+resolved = update_labels(
+    df, label_ms, at="gene_name",
+    xref="ensembl",                # column with each row's Ensembl ID
+    xref_mapping=ensembl_to_hgnc,
+    report_path="decisions.tsv",   # stage, token, predicate_id, candidate, accepted, reason
+)
+```
+
+`xref_predicates` restricts which SSSOM-style equivalence predicates from the
+crosswalk are trusted (by default any predicate is accepted, and an
+unannotated record is assumed to be an equivalence). `context=` accepts a list
+of `ContextSpec` for cases the `synonyms=`/`xref=` shortcuts don't cover (e.g.
+several cross-reference columns); specs are tried in order and the first one
+that resolves a cell wins.
+
+The same options are available on the CLI:
+
+```bash
+pysec2pri update-labels genes.tsv hgnc --at gene_name \
+  --xref ensembl --xref-source hgnc_custom --xref-on ensembl \
+  --report decisions.tsv
+```
+
+`--xref-source`/`--xref-on` auto-download a crosswalk that a datasource config
+suggests (see `xref_sources` in `config/hgnc.yaml`) instead of requiring a
+pre-built `--xref-file`. Run `pysec2pri validate-config` to check that every
+shipped config (including its `xref_sources`) is well-formed.
+
+See
+[`notebooks/hgnc_ensembl_context_showcase.ipynb`](notebooks/hgnc_ensembl_context_showcase.ipynb)
+for a full, real-data walkthrough (GTEx gene symbols disambiguated against
+HGNC's own Ensembl crosswalk).
+
+### `crosswalk`: a direct identifier lookup helper
+
+For the common case of "map this one column of identifiers to an HGNC ID (or
+back to a symbol)", `crosswalk` is a thin wrapper over the same machinery:
+
+```bash
+pysec2pri crosswalk --value TP53 --from symbol --to hgnc_id
+pysec2pri crosswalk genes.tsv --from ensembl --to hgnc_id --at ensembl_id -o out.tsv
+```
+
+```python
+from pysec2pri import crosswalk
+crosswalk("TP53", frm="symbol", to="hgnc_id")          # {'TP53': 'HGNC:11998'}
+crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own crosswalk
+```
+
+`frm="symbol"` resolves through the same temporal-aware, ambiguity-safe label
+resolver as `update_labels` (a *previous* symbol still resolves to its current
+identity); `frm` in `ensembl`/`entrez`/`refseq`/`uniprot` resolves through
+HGNC's custom-download crosswalk table. Genuinely ambiguous input is left
+blank and reported, never guessed.
+
 ## Documentation
 
 Full documentation: <https://pysec2pri.readthedocs.io/>
