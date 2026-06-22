@@ -138,3 +138,19 @@ input_file_types:
 source: "NCBI Gene"
 homepage: "https://www.ncbi.nlm.nih.gov/gene"
 data_license: "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+
+# Suggested cross-reference crosswalk source(s) for disambiguation context
+# (see pysec2pri.context.ContextSpec, kind="xref")
+xref_sources:
+  - id: hgnc_custom
+    name: "HGNC custom download -- Ensembl/Entrez/RefSeq/UniProt/etc. crosswalk"
+    url: "https://www.genenames.org/cgi-bin/download/custom?col=gd_hgnc_id&col=gd_app_sym&col=gd_app_name&col=gd_status&col=gd_prev_sym&col=gd_pub_refseq_ids&col=md_eg_id&col=md_ensembl_id&col=md_mim_id&col=md_vega_id&col=md_refseq_id&col=md_ucsc_id&col=md_prot_id&status=Approved&status=Entry%20Withdrawn&hgnc_dbtag=on&order_by=gd_app_sym_sort&format=text&submit=submit"
+    format: tsv
+    object_id_col: "HGNC ID"
+    object_label_col: "Approved symbol"
+    subject_id_cols:
+      ensembl: "Ensembl ID(supplied by Ensembl)"
+      entrez: "NCBI Gene ID(supplied by NCBI)"
+      refseq: "RefSeq IDs"
+      uniprot: "UniProt ID(supplied by UniProt)"
+    note: "Source of truth for cross-references varies; this is a suggested default, not authoritative."

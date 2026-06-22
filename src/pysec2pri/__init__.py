@@ -6,6 +6,7 @@ databases including ChEBI, HMDB, HGNC, NCBI Gene, and UniProt.
 """
 
 from pysec2pri.api import (
+    crosswalk,
     find_ambiguous,
     generate_chebi,
     generate_chebi_synonyms,
@@ -31,6 +32,13 @@ from pysec2pri.api import (
     write_sec2pri,
     write_sssom,
 )
+from pysec2pri.context import (
+    ContextSpec,
+    DecisionRecord,
+    XrefMapping,
+    XrefRecord,
+    load_xref_mapping,
+)
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
@@ -55,14 +63,20 @@ __all__ = [
     "WITHDRAWN_ENTRY_LABEL",
     # Mapping Set classes
     "AmbiguousMappingSet",
+    # Disambiguation context (symbol/id/xref)
+    "ContextSpec",
+    "DecisionRecord",
     "IdMappingSet",
     "LabelMappingSet",
     "Sec2PriMappingSet",
+    "XrefMapping",
+    "XrefRecord",
     # ID resolution
     "build_alias_index",
     "build_label_lookup",
     "build_lookup",
     "build_primary_token_to_id",
+    "crosswalk",
     "find_ambiguous",
     # generate_* (download + parse in one call)
     "generate_chebi",
@@ -78,6 +92,7 @@ __all__ = [
     "generate_wikidata",
     "generate_wikidata_labels",
     "list_versions",
+    "load_xref_mapping",
     "resolve_ambiguous_with_hints",
     "resolve_ids",
     "resolve_labels",

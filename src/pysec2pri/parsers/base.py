@@ -57,6 +57,25 @@ class DistributionEra:
     wayback: bool = False  # declarative only for now -- no resolver yet
 
 
+@dataclass
+class XrefSource:
+    """A suggested cross-reference crosswalk source for a datasource.
+
+    Passed to :func:`pysec2pri.context.load_xref_mapping` after downloading
+    *url* and renaming *object_id_col*/*object_label_col*/the chosen
+    *subject_id_cols* entry to ``object_id``/``object_label``/``subject_id``.
+    """
+
+    id: str
+    name: str = ""
+    url: str = ""
+    format: str = "tsv"
+    object_id_col: str = "object_id"
+    object_label_col: str = "object_label"
+    subject_id_cols: dict[str, str] = field(default_factory=dict)
+    note: str = ""
+
+
 def _cmp_versions(a: str, b: str) -> int:
     """Compare two version strings, numerically when possible.
 
@@ -107,9 +126,18 @@ class DatasourceConfig:
     # Historical distribution "shapes" this datasource has had (different URL
     # templates, formats, or archive locations across its lifetime).
     distribution_eras: list[DistributionEra] = field(default_factory=list)
+    # Suggested cross-reference crosswalk sources
+    xref_sources: list[XrefSource] = field(default_factory=list)
     # Full metadata from YAML
     mappingset_metadata: dict[str, Any] = field(default_factory=dict)
     mapping_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def xref_source(self, source_id: str) -> XrefSource | None:
+        """Return the configured :class:`XrefSource` with id *source_id*, if any."""
+        for src in self.xref_sources:
+            if src.id == source_id:
+                return src
+        return None
 
     def formats_for(self, kind: str) -> Any:
         """Return the list of supported output formats for a mapping-set kind.
@@ -156,13 +184,16 @@ def load_config(datasource_name: str) -> dict[str, Any]:
     Raises:
         FileNotFoundError: If the config file does not exist.
     """
+    from pysec2pri.config.schema import validate_config_dict
+
     config_path = CONFIG_DIR / f"{datasource_name.lower()}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with config_path.open("r", encoding="utf-8") as f:
         result: dict[str, Any] = yaml.safe_load(f)
-        return result
+    validate_config_dict(result, config_path.name)
+    return result
 
 
 def get_datasource_config(datasource_name: str) -> DatasourceConfig:
@@ -189,6 +220,20 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         for era in raw.get("distribution_eras", [])
     ]
 
+    xref_sources = [
+        XrefSource(
+            id=src.get("id", ""),
+            name=src.get("name", ""),
+            url=src.get("url", ""),
+            format=src.get("format", "tsv"),
+            object_id_col=src.get("object_id_col", "object_id"),
+            object_label_col=src.get("object_label_col", "object_label"),
+            subject_id_cols=src.get("subject_id_cols") or {},
+            note=src.get("note", ""),
+        )
+        for src in raw.get("xref_sources", [])
+    ]
+
     return DatasourceConfig(
         name=raw.get("name", ""),
         prefix=raw.get("prefix", ""),
@@ -212,6 +257,7 @@ def get_datasource_config(datasource_name: str) -> DatasourceConfig:
         queries=raw.get("queries", {}),
         new_format_version=raw.get("new_format_version"),
         distribution_eras=eras,
+        xref_sources=xref_sources,
         mappingset_metadata=raw.get("mappingset", {}),
         mapping_metadata=raw.get("mapping", {}),
     )
@@ -1950,6 +1996,7 @@ __all__ = [
     "IdMappingSet",
     "LabelMappingSet",
     "Sec2PriMappingSet",
+    "XrefSource",
     "get_datasource_config",
     "load_config",
 ]

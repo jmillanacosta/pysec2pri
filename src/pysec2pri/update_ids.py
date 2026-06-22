@@ -47,8 +47,19 @@ import re
 from typing import TYPE_CHECKING, Union, overload
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pandas as pd
 
+from pysec2pri.context import (
+    ContextSpec,
+    DecisionRecord,
+    XrefMapping,
+    XrefRecord,
+    load_xref_mapping,
+    resolve_ambiguous_with_xref,
+    write_decision_log,
+)
 from pysec2pri.logging import logger
 from pysec2pri.parsers.base import Sec2PriMappingSet
 
@@ -83,9 +94,7 @@ def _build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
     return lookup
 
 
-# ---------------------------------------------------------------------------
 # Synonym-hint helpers (public)
-# ---------------------------------------------------------------------------
 
 
 def build_alias_index(mapping_set: Sec2PriMappingSet) -> dict[str, list[str]]:
@@ -467,20 +476,66 @@ def _update_dataframe(
     return result
 
 
-def _resolve_cell_with_hints(
+def _raw_context_value(df: pd.DataFrame, idx: int, column: str) -> str:
+    """Return the row's evidence value for *column*, or ``""`` when absent/NaN."""
+    if column not in df.columns:
+        return ""
+    raw = str(df.iloc[idx][column])
+    return raw if raw.strip() not in {"", "nan"} else ""
+
+
+def _hint_decision(
+    ambiguous_token: str,
+    user_aliases: list[str],
+    lkp: dict[str, str],
+    alias_index: dict[str, list[str]],
+    token_to_id: dict[str, str] | None,
+    stage: str,
+) -> tuple[str, str | None, DecisionRecord]:
+    """Resolve via :func:`resolve_ambiguous_with_hints`, with a decision record.
+
+    Thin wrapper so the ``label``/``id`` context kinds produce the same
+    :class:`~pysec2pri.context.DecisionRecord` shape as
+    :func:`~pysec2pri.context.resolve_ambiguous_with_xref`, for a unified
+    decision log.
+    """
+    token = "|".join(user_aliases)
+    resolved_tok, resolved_id = resolve_ambiguous_with_hints(
+        ambiguous_token, user_aliases, lkp, alias_index, token_to_id
+    )
+    if not resolved_tok:
+        reason = (
+            "no alias hints given" if not user_aliases else "no alias hint matched either identity"
+        )
+        return "", None, DecisionRecord(stage, token, None, None, False, reason)
+    reason = (
+        "alias hint matched secondary target"
+        if resolved_tok != ambiguous_token
+        else "alias hint matched own primary identity"
+    )
+    return resolved_tok, resolved_id, DecisionRecord(stage, token, None, resolved_tok, True, reason)
+
+
+def _resolve_cell_with_context(
     cell: str,
     lkp: dict[str, str],
     amb: set[str],
-    user_aliases: list[str],
+    specs: list[ContextSpec],
+    raw_values: list[str],
+    xref_indices: list[dict[str, list[XrefRecord]] | None],
     alias_index: dict[str, list[str]],
     token_to_id: dict[str, str] | None,
     ambiguous_found: set[str],
+    decisions: list[DecisionRecord],
 ) -> tuple[str, str | None]:
-    """Resolve one cell value, using *user_aliases* to solve ambiguities.
+    """Resolve one cell, trying each of *specs* in order on ambiguous tokens.
+
+    The first :class:`~pysec2pri.context.ContextSpec` that resolves a given
+    ambiguous token wins; every attempt (successful or not) is appended to
+    *decisions* for an auditable log.
 
     Returns a ``(resolved_value, resolved_id)`` tuple where *resolved_id* is
-    the primary ID of the resolved token when the hint identified a secondary
-    usage, and ``None`` otherwise.
+    the primary ID of the resolved token, and ``None`` when unresolved.
     """
     sep_match = re.search(r"[|,;\s]", cell)
     sep = sep_match.group(0) if sep_match else ""
@@ -489,9 +544,28 @@ def _resolve_cell_with_hints(
     resolved_id: str | None = None
     for tok in tokens:
         if tok in amb:
-            hint_tok, hint_id = resolve_ambiguous_with_hints(
-                tok, user_aliases, lkp, alias_index, token_to_id
-            )
+            hint_tok = ""
+            hint_id: str | None = None
+            for spec, raw_val, xref_index in zip(specs, raw_values, xref_indices, strict=True):
+                if spec.kind == "xref":
+                    if xref_index is None:
+                        continue
+                    hint_tok, hint_id, decision = resolve_ambiguous_with_xref(
+                        tok,
+                        raw_val,
+                        lkp,
+                        xref_index,
+                        token_to_id,
+                        accepted_predicates=spec.predicates,
+                    )
+                else:
+                    user_aliases = _split_ids(raw_val) if raw_val else []
+                    hint_tok, hint_id, decision = _hint_decision(
+                        tok, user_aliases, lkp, alias_index, token_to_id, stage=spec.kind
+                    )
+                decisions.append(decision)
+                if hint_tok:
+                    break
             if hint_tok:
                 resolved.append(hint_tok)
                 resolved_id = hint_id
@@ -508,7 +582,7 @@ def _resolve_cell_with_hints(
     return sep.join(resolved), resolved_id
 
 
-def _update_dataframe_with_synonyms(
+def _update_dataframe_with_context(
     df: pd.DataFrame,
     at: str | list[str] | None,
     suffix: str,
@@ -516,11 +590,18 @@ def _update_dataframe_with_synonyms(
     amb: set[str],
     kind: str,
     col_label: str,
-    synonyms_col: str,
+    specs: list[ContextSpec],
     alias_index: dict[str, list[str]],
     token_to_id: dict[str, str] | None,
+    report_path: Path | str | None,
 ) -> pd.DataFrame:
-    """Like :func:`_update_dataframe` but uses *synonyms_col* for per-row hints."""
+    """Like :func:`_update_dataframe` but resolves ambiguous cells using *specs*.
+
+    Each :class:`~pysec2pri.context.ContextSpec` names a column carrying
+    per-row evidence (an alias string for ``"label"``/``"id"``, or a
+    cross-reference token for ``"xref"``). When *report_path* is given, every
+    disambiguation attempt is written there as a TSV decision log.
+    """
     import pandas as pd
 
     if not isinstance(df, pd.DataFrame):
@@ -538,25 +619,99 @@ def _update_dataframe_with_synonyms(
     if missing:
         raise KeyError(f"Column(s) not found in DataFrame: {missing}")
 
-    has_syn_col = synonyms_col in df.columns
+    xref_indices: list[dict[str, list[XrefRecord]] | None] = [
+        spec.xref_mapping.by_subject() if spec.kind == "xref" and spec.xref_mapping else None
+        for spec in specs
+    ]
+
     result = df.copy()
+    decisions: list[DecisionRecord] = []
     for col in columns:
         ambiguous_found: set[str] = set()
         new_values: list[str] = []
         new_ids: list[str | None] = []
         for idx in range(len(result)):
             cell = str(result.iloc[idx][col])
-            raw_syn = str(result.iloc[idx][synonyms_col]) if has_syn_col else ""
-            user_aliases = _split_ids(raw_syn) if raw_syn.strip() not in {"", "nan"} else []
-            val, rid = _resolve_cell_with_hints(
-                cell, lkp, amb, user_aliases, alias_index, token_to_id, ambiguous_found
+            raw_values = [_raw_context_value(result, idx, spec.column) for spec in specs]
+            val, rid = _resolve_cell_with_context(
+                cell,
+                lkp,
+                amb,
+                specs,
+                raw_values,
+                xref_indices,
+                alias_index,
+                token_to_id,
+                ambiguous_found,
+                decisions,
             )
             new_values.append(val)
             new_ids.append(rid)
         result[col + suffix] = new_values
         result[col + suffix + "_id"] = new_ids
         _warn_ambiguous(ambiguous_found, kind=kind)
+
+    if report_path is not None:
+        write_decision_log(decisions, report_path)
+
     return result
+
+
+def _update_dataframe_with_synonyms(
+    df: pd.DataFrame,
+    at: str | list[str] | None,
+    suffix: str,
+    lkp: dict[str, str],
+    amb: set[str],
+    kind: str,
+    col_label: str,
+    synonyms_col: str,
+    alias_index: dict[str, list[str]],
+    token_to_id: dict[str, str] | None,
+) -> pd.DataFrame:
+    """Like :func:`_update_dataframe_with_context` for a single ``label`` hint column."""
+    spec = ContextSpec(kind="label", column=synonyms_col)
+    return _update_dataframe_with_context(
+        df,
+        at,
+        suffix,
+        lkp,
+        amb,
+        kind,
+        col_label,
+        [spec],
+        alias_index,
+        token_to_id,
+        report_path=None,
+    )
+
+
+def _build_context_specs(
+    synonyms: str | list[str] | None,
+    xref: str | None,
+    xref_mapping: XrefMapping | None,
+    xref_predicates: set[str] | None,
+    context: ContextSpec | list[ContextSpec] | None,
+) -> list[ContextSpec]:
+    """Assemble the ``synonyms=``/``xref=``/``context=`` convenience kwargs into specs.
+
+    *specs* are tried in order per ambiguous cell; the first one that
+    resolves a given token wins (see :func:`_resolve_cell_with_context`).
+    """
+    specs: list[ContextSpec] = []
+    if isinstance(synonyms, str):
+        specs.append(ContextSpec(kind="label", column=synonyms))
+    if xref is not None:
+        if xref_mapping is None:
+            raise ValueError("'xref_mapping' is required when 'xref' is given.")
+        specs.append(
+            ContextSpec(
+                kind="xref", column=xref, xref_mapping=xref_mapping, predicates=xref_predicates
+            )
+        )
+    if context is not None:
+        specs.extend([context] if isinstance(context, ContextSpec) else list(context))
+    return specs
 
 
 @overload
@@ -598,6 +753,11 @@ def update_ids(
     ambiguous: set[str] | None = ...,
     synonyms: str | list[str] | None = ...,
     label_mapping_set: Sec2PriMappingSet | None = ...,
+    xref: str | None = ...,
+    xref_mapping: XrefMapping | None = ...,
+    xref_predicates: set[str] | None = ...,
+    report_path: Path | str | None = ...,
+    context: ContextSpec | list[ContextSpec] | None = ...,
 ) -> pd.DataFrame:
     """Update IDs from pd.DataFrame."""
     ...
@@ -613,6 +773,11 @@ def update_ids(
     ambiguous: set[str] | None = None,
     synonyms: str | list[str] | None = None,
     label_mapping_set: Sec2PriMappingSet | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    xref_predicates: set[str] | None = None,
+    report_path: Path | str | None = None,
+    context: ContextSpec | list[ContextSpec] | None = None,
 ) -> dict[str, str] | pd.DataFrame:
     """Resolve secondary identifiers to primary identifiers.
 
@@ -661,8 +826,37 @@ def update_ids(
     label_mapping_set:
         A :class:`~pysec2pri.parsers.base.LabelMappingSet` used to build
         the alias index when *synonyms* is provided.  When ``None`` and
-        *synonyms* is set, hint-based resolution is skipped (ambiguous
-        IDs remain blank) and a warning is emitted.
+        *synonyms* is set, hint-based resolution falls back to direct
+        token/ID matches only and a warning is emitted.
+
+    xref:
+        *DataFrame mode only.* Name of a column in the DataFrame that
+        contains a per-row cross-reference token (e.g. an Ensembl ID).
+        When provided (with *xref_mapping*), :func:`pysec2pri.context.
+        resolve_ambiguous_with_xref` is called for every ambiguous cell,
+        looking the token up in *xref_mapping* to confirm whether the row
+        is using the secondary or the primary identity.
+
+    xref_mapping:
+        The :class:`~pysec2pri.context.XrefMapping` crosswalk table to
+        resolve *xref* tokens against.  Required when *xref* is given.
+
+    xref_predicates:
+        Equivalence predicates accepted from *xref_mapping* records.
+        ``None`` (default) accepts any predicate (and unannotated records,
+        see :data:`pysec2pri.context.DEFAULT_TRUST_UNANNOTATED`).
+
+    report_path:
+        *DataFrame mode only.* When given, every disambiguation attempt
+        (from *synonyms*, *xref*, and/or *context*) is written to this path
+        as a TSV decision log (see :func:`pysec2pri.context.write_decision_log`).
+
+    context:
+        *DataFrame mode only.* One or more explicit
+        :class:`~pysec2pri.context.ContextSpec` entries, for cases not
+        covered by the *synonyms*/*xref* convenience kwargs (e.g. multiple
+        cross-reference columns). Specs are tried in order per ambiguous
+        cell; combined with any spec implied by *synonyms*/*xref*.
 
     Returns
     -------
@@ -677,7 +871,8 @@ def update_ids(
         When *ids* is a ``DataFrame``: a copy of the DataFrame with one
         new ``<col><suffix>`` column per entry in *at*.  Ambiguous cells
         are set to ``""``; a warning is emitted after all columns are
-        processed.
+        processed.  When *synonyms*, *xref*, or *context* is given, a
+        companion ``<col><suffix>_id`` column is also added.
     """
     lkp = lookup if lookup is not None else _build_lookup(mapping_set)
     amb = ambiguous if ambiguous is not None else build_ambiguous_set(mapping_set)
@@ -688,27 +883,31 @@ def update_ids(
         return _update_list(ids, lkp, amb, kind="ID")
 
     # DataFrame mode
-    if synonyms is not None and isinstance(synonyms, str):
-        if label_mapping_set is None:
-            logger.warning(
-                "update_ids: 'synonyms' column %r specified but no 'label_mapping_set' "
-                "was provided, hint-based ambiguity resolution will be skipped.",
-                synonyms,
-            )
-        else:
-            alias_index = build_alias_index(label_mapping_set)
-            return _update_dataframe_with_synonyms(
-                ids,
-                at,
-                suffix,
-                lkp,
-                amb,
-                kind="ID",
-                col_label="ids",
-                synonyms_col=synonyms,
-                alias_index=alias_index,
-                token_to_id=None,  # IDs are their own keys in alias_index
-            )
+    specs = _build_context_specs(synonyms, xref, xref_mapping, xref_predicates, context)
+    if specs:
+        alias_index: dict[str, list[str]] = {}
+        if any(spec.kind in ("label", "id") for spec in specs):
+            if label_mapping_set is None:
+                logger.warning(
+                    "update_ids: a 'label'/'id' context spec was given but no "
+                    "'label_mapping_set' was provided; hint-based ambiguity "
+                    "resolution will be limited to direct token/ID matches.",
+                )
+            else:
+                alias_index = build_alias_index(label_mapping_set)
+        return _update_dataframe_with_context(
+            ids,
+            at,
+            suffix,
+            lkp,
+            amb,
+            kind="ID",
+            col_label="ids",
+            specs=specs,
+            alias_index=alias_index,
+            token_to_id=None,  # IDs are their own keys
+            report_path=report_path,
+        )
     return _update_dataframe(ids, at, suffix, lkp, amb, kind="ID", col_label="ids")
 
 
@@ -774,6 +973,11 @@ def update_labels(
     lookup: dict[str, str] | None = ...,
     ambiguous: set[str] | None = ...,
     synonyms: str | list[str] | None = ...,
+    xref: str | None = ...,
+    xref_mapping: XrefMapping | None = ...,
+    xref_predicates: set[str] | None = ...,
+    report_path: Path | str | None = ...,
+    context: ContextSpec | list[ContextSpec] | None = ...,
 ) -> pd.DataFrame:
     """Input as pd.DataFrame."""
     ...
@@ -788,6 +992,11 @@ def update_labels(
     lookup: dict[str, str] | None = None,
     ambiguous: set[str] | None = None,
     synonyms: str | list[str] | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    xref_predicates: set[str] | None = None,
+    report_path: Path | str | None = None,
+    context: ContextSpec | list[ContextSpec] | None = None,
 ) -> dict[str, str] | pd.DataFrame:
     """Resolve previous/alias gene labels to current labels.
 
@@ -835,6 +1044,35 @@ def update_labels(
         every ambiguous cell using that row's alias list.  The alias index
         is built from *mapping_set* itself (non-IAO entries).
 
+    xref:
+        *DataFrame mode only.* Name of a column in the DataFrame that
+        contains a per-row cross-reference token (e.g. an Ensembl ID).
+        When provided (with *xref_mapping*), :func:`pysec2pri.context.
+        resolve_ambiguous_with_xref` is called for every ambiguous cell,
+        looking the token up in *xref_mapping* to confirm whether the row
+        is using the secondary or the primary identity.
+
+    xref_mapping:
+        The :class:`~pysec2pri.context.XrefMapping` crosswalk table to
+        resolve *xref* tokens against.  Required when *xref* is given.
+
+    xref_predicates:
+        Equivalence predicates accepted from *xref_mapping* records.
+        ``None`` (default) accepts any predicate (and unannotated records,
+        see :data:`pysec2pri.context.DEFAULT_TRUST_UNANNOTATED`).
+
+    report_path:
+        *DataFrame mode only.* When given, every disambiguation attempt
+        (from *synonyms*, *xref*, and/or *context*) is written to this path
+        as a TSV decision log (see :func:`pysec2pri.context.write_decision_log`).
+
+    context:
+        *DataFrame mode only.* One or more explicit
+        :class:`~pysec2pri.context.ContextSpec` entries, for cases not
+        covered by the *synonyms*/*xref* convenience kwargs (e.g. multiple
+        cross-reference columns). Specs are tried in order per ambiguous
+        cell; combined with any spec implied by *synonyms*/*xref*.
+
     Returns
     -------
     dict[str, str]
@@ -847,7 +1085,8 @@ def update_labels(
         When *labels* is a ``DataFrame``: a copy of the DataFrame with one
         new ``<col><suffix>`` column per entry in *at*.  Ambiguous cells
         are set to ``""``; a warning is emitted after all columns are
-        processed.
+        processed.  When *synonyms*, *xref*, or *context* is given, a
+        companion ``<col><suffix>_id`` column is also added.
     """
     lkp = lookup if lookup is not None else build_label_lookup(mapping_set)
     amb = ambiguous if ambiguous is not None else build_ambiguous_labels_set(mapping_set)
@@ -858,10 +1097,15 @@ def update_labels(
         return _update_list(labels, lkp, amb, kind="label")
 
     # DataFrame mode
-    if synonyms is not None and isinstance(synonyms, str):
-        alias_index = build_alias_index(mapping_set)
+    specs = _build_context_specs(synonyms, xref, xref_mapping, xref_predicates, context)
+    if specs:
         token_to_id = build_primary_token_to_id(mapping_set)
-        return _update_dataframe_with_synonyms(
+        alias_index: dict[str, list[str]] = (
+            build_alias_index(mapping_set)
+            if any(spec.kind in ("label", "id") for spec in specs)
+            else {}
+        )
+        return _update_dataframe_with_context(
             labels,
             at,
             suffix,
@@ -869,20 +1113,25 @@ def update_labels(
             amb,
             kind="label",
             col_label="labels",
-            synonyms_col=synonyms,
+            specs=specs,
             alias_index=alias_index,
             token_to_id=token_to_id,
+            report_path=report_path,
         )
     return _update_dataframe(labels, at, suffix, lkp, amb, kind="label", col_label="labels")
 
 
 __all__ = [
+    "ContextSpec",
+    "XrefMapping",
+    "XrefRecord",
     "build_alias_index",
     "build_ambiguous_labels_set",
     "build_ambiguous_set",
     "build_label_lookup",
     "build_lookup",
     "build_primary_token_to_id",
+    "load_xref_mapping",
     "resolve_ambiguous_with_hints",
     "update_ids",
     "update_labels",
