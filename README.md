@@ -194,19 +194,19 @@ flowchart TD
 
 ### Disambiguation with context (label / id / xref)
 
-Alias hints are one kind of *context*: a per-row piece of independent evidence
+Alias hints are one kind of _context_: a per-row piece of independent evidence
 that helps decide which entity an ambiguous name actually means. `update_ids`
 and `update_labels` support three kinds, via `pysec2pri.context.ContextSpec`:
 
 - **`label`** -- an alias/synonym string (the `synonyms=`/`--synonyms` shown
   above).
 - **`id`** -- a related/foreign identifier string, matched the same way.
-- **`xref`** -- a cross-reference token (e.g. an Ensembl ID) resolved through
-  an independent crosswalk table (`pysec2pri.context.XrefMapping`), rather
-  than the mapping set's own alias index.
+- **`xref`** -- a cross-reference token (e.g. an Ensembl ID) resolved through an
+  independent crosswalk table (`pysec2pri.context.XrefMapping`), rather than the
+  mapping set's own alias index.
 
-All three only ever touch cells already flagged ambiguous, and every attempt
-can be written to an auditable decision log:
+All three only ever touch cells already flagged ambiguous, and every attempt can
+be written to an auditable decision log:
 
 ```python
 from pysec2pri import generate_hgnc_labels, update_labels
@@ -224,9 +224,9 @@ resolved = update_labels(
 ```
 
 `xref_predicates` restricts which SSSOM-style equivalence predicates from the
-crosswalk are trusted (by default any predicate is accepted, and an
-unannotated record is assumed to be an equivalence). `context=` accepts a list
-of `ContextSpec` for cases the `synonyms=`/`xref=` shortcuts don't cover (e.g.
+crosswalk are trusted (by default any predicate is accepted, and an unannotated
+record is assumed to be an equivalence). `context=` accepts a list of
+`ContextSpec` for cases the `synonyms=`/`xref=` shortcuts don't cover (e.g.
 several cross-reference columns); specs are tried in order and the first one
 that resolves a cell wins.
 
@@ -265,10 +265,10 @@ crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own cross
 ```
 
 `frm="symbol"` resolves through the same temporal-aware, ambiguity-safe label
-resolver as `update_labels` (a *previous* symbol still resolves to its current
+resolver as `update_labels` (a _previous_ symbol still resolves to its current
 identity); `frm` in `ensembl`/`entrez`/`refseq`/`uniprot` resolves through
-HGNC's custom-download crosswalk table. Genuinely ambiguous input is left
-blank and reported, never guessed.
+HGNC's custom-download crosswalk table. Genuinely ambiguous input is left blank
+and reported, never guessed.
 
 ## Documentation
 
