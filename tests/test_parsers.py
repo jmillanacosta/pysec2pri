@@ -13,6 +13,7 @@ from pysec2pri.parsers import (
     HMDBProteinParser,
     NCBIParser,
     UniProtParser,
+    VGNCParser,
 )
 from pysec2pri.parsers.base import Sec2PriMappingSet
 
@@ -77,6 +78,18 @@ def ncbi_info_path() -> Path:
 def uniprot_sec_ac_path() -> Path:
     """Return the fake UniProt sec_ac.txt test file."""
     return TEST_DATA_DIR / "mock_sec_ac.txt"
+
+
+@pytest.fixture
+def vgnc_withdrawn_path() -> Path:
+    """Return the fake VGNC withdrawn test file."""
+    return TEST_DATA_DIR / "mock_vgnc_withdrawn.tsv"
+
+
+@pytest.fixture
+def vgnc_gene_set_path() -> Path:
+    """Return the fake VGNC gene-set test file."""
+    return TEST_DATA_DIR / "mock_vgnc_gene_set.tsv"
 
 
 @pytest.fixture
@@ -241,6 +254,80 @@ class TestHGNCParser:
         assert {"BRCC1", "RNF53", "P53"} <= synonyms
         assert "PSCP" not in synonyms and "tumor_p53" not in synonyms
         assert {"BRCC1", "PSCP", "tumor_p53"} <= all_secondary
+
+
+class TestVGNCParser:
+    """Tests for the VGNC parser."""
+
+    def test_parse(self, vgnc_withdrawn_path: Path) -> None:
+        """parse() returns a populated mapping set for withdrawn IDs, never species-filtered.
+
+        mock_vgnc_withdrawn.tsv: VGNC:9001 withdrawn with no replacement;
+        VGNC:9002 merged into VGNC:9501/CHIMPGENE1.
+        """
+        result = VGNCParser(show_progress=False).parse(vgnc_withdrawn_path)
+        assert isinstance(result, Sec2PriMappingSet)
+        by_subject = {m.subject_id: m for m in result.mappings}
+        assert by_subject["VGNC:9001"].object_id == "sssom:NoTermFound"
+        assert by_subject["VGNC:9001"].predicate_id == "oboInOwl:consider"
+        assert by_subject["VGNC:9002"].object_id == "VGNC:9501"
+        assert by_subject["VGNC:9002"].predicate_id == "IAO:0100001"
+
+    def test_parse_with_gene_set_populates_primary_ids_across_all_species(
+        self, vgnc_withdrawn_path: Path, vgnc_gene_set_path: Path
+    ) -> None:
+        """complete_set_path populates _primary_ids with every species' IDs, unfiltered."""
+        result = VGNCParser(show_progress=False).parse(
+            vgnc_withdrawn_path, complete_set_path=vgnc_gene_set_path
+        )
+        pri_ids = result.to_pri_ids()
+        # mock_vgnc_gene_set.tsv has chimp (9598) and dog (9615) entries: both present.
+        assert {"VGNC:9501", "VGNC:9502", "VGNC:9503", "VGNC:9504"} <= set(pri_ids)
+
+    def test_species_scoping_avoids_cross_species_symbol_collision(
+        self, vgnc_gene_set_path: Path
+    ) -> None:
+        """Symbols are scoped per species: the same symbol in two species isn't ambiguous.
+
+        mock_vgnc_gene_set.tsv: "SHAREDSYM" is the approved symbol for both
+        VGNC:9503 (chimp, 9598) and VGNC:9504 (dog, 9615) -- orthologous
+        genes sharing a name. Filtered per species, each view sees only its
+        own ID for that symbol.
+        """
+        chimp = VGNCParser(show_progress=False).parse_primary_labels(
+            vgnc_gene_set_path, species="9598"
+        )
+        dog = VGNCParser(show_progress=False).parse_primary_labels(
+            vgnc_gene_set_path, species="9615"
+        )
+        assert chimp._primary_labels["SHAREDSYM"] == {"VGNC:9503"}
+        assert dog._primary_labels["SHAREDSYM"] == {"VGNC:9504"}
+
+    def test_parse_labels_direction_and_species_filter(self, vgnc_gene_set_path: Path) -> None:
+        """Label mappings are sec:pri (synonym is subject); the other species' rows are excluded."""
+        result = VGNCParser(show_progress=False).parse_labels(vgnc_gene_set_path, species="9598")
+        mappings = result.mappings or []
+        by_label = {m.subject_label: m for m in mappings}
+        assert {"ALTC1", "OLDCHIMP"} <= set(by_label)
+        assert "OLDDOG" not in by_label and "ALTD1" not in by_label
+        assert by_label["ALTC1"].predicate_id == "oboInOwl:hasExactSynonym"
+        assert by_label["OLDCHIMP"].predicate_id == "IAO:0100001"
+        assert by_label["OLDCHIMP"].mapping_date == "2015-06-01"
+        assert by_label["OLDCHIMP"].object_label == "CHIMPGENE1"
+
+    def test_species_is_folded_into_mapping_set_id_and_record_id(
+        self, vgnc_gene_set_path: Path
+    ) -> None:
+        """Different species at the same release get distinct mapping_set_id/record_id."""
+        chimp = VGNCParser(version="2026-06-21", show_progress=False).parse_labels(
+            vgnc_gene_set_path, species="9598"
+        )
+        dog = VGNCParser(version="2026-06-21", show_progress=False).parse_labels(
+            vgnc_gene_set_path, species="9615"
+        )
+        assert chimp.mapping_set_id != dog.mapping_set_id
+        assert "9598" in chimp.mapping_set_id
+        assert "9615" in dog.mapping_set_id
 
 
 class TestNCBIParser:

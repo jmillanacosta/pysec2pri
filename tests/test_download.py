@@ -112,15 +112,50 @@ class TestEnsemblDownloader:
         urls = downloader.get_download_urls("115")
         assert "mus_musculus_core_115_39" in urls["gene"]
 
-    def test_get_download_urls_unknown_species_raises(self) -> None:
-        """An undeclared taxon ID raises rather than silently building a bad URL."""
-        from pysec2pri.parsers.ensembl import EnsemblDownloader
+    def test_get_download_urls_unknown_species_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A taxon ID unknown both statically and via the live fallback raises."""
+        from pysec2pri.parsers import ensembl as ensembl_module
 
-        downloader = EnsemblDownloader(
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FailingHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(
             version="115", species=99999, assembly="1", show_progress=False
         )
         with pytest.raises(ValueError, match="Unknown species"):
             downloader.get_download_urls("115")
+
+    def test_get_download_urls_falls_back_to_live_species_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A taxon ID absent from config/ensembl.yaml resolves via the live REST fallback."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        class _FakeSpeciesResponse(_FakeHttpResponse):
+            def json(self) -> dict[str, object]:
+                """Return a fake Ensembl REST species list with two dog breed entries."""
+                return {
+                    "species": [
+                        {"name": "canis_lupus_familiaris", "taxon_id": "9615"},
+                        {"name": "canis_lupus_familiarisboxer", "taxon_id": "9615"},
+                    ]
+                }
+
+        class _FakeSpeciesClient(_FakeHttpClient):
+            def get(self, url: str) -> _FakeHttpResponse:
+                """Return the fake species list for the REST URL, else the base fake response."""
+                if "rest.ensembl.org" in url:
+                    return _FakeSpeciesResponse()
+                return super().get(url)
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeSpeciesClient)
+        downloader = ensembl_module.EnsemblDownloader(
+            version="115", species=9615, assembly="1", show_progress=False
+        )
+        urls = downloader.get_download_urls("115")
+        assert "canis_lupus_familiaris_core_115_1" in urls["gene"]
+        # The breed-specific entry must not win over the shorter canonical name.
+        assert "canis_lupus_familiarisboxer" not in urls["gene"]
 
     def test_get_download_urls_without_explicit_assembly_calls_discovery(
         self, monkeypatch: pytest.MonkeyPatch

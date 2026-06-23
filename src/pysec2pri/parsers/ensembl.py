@@ -122,6 +122,46 @@ def _scan_ensembl_tsv(
     )
 
 
+_ENSEMBL_REST_SPECIES_URL = "https://rest.ensembl.org/info/species?content-type=application/json"
+
+
+def _lookup_ensembl_species_token(taxon_id: str | int) -> str | None:
+    """Resolve a taxon ID to its Ensembl species token via Ensembl's own REST API.
+
+    ``config/ensembl.yaml``'s ``species.available`` only curates a handful
+    of species for CLI defaults/help; Ensembl itself publishes 300+ (e.g.
+    dog, pig, chicken). This is the live fallback for anything not in that
+    static list, queried on demand rather than hardcoded, since the list
+    changes every release.
+
+    Several taxon IDs map to more than one entry (per-breed/per-strain
+    assemblies, e.g. multiple dog breeds): the *shortest* matching name is
+    returned, which is reliably the canonical species-level entry (breed/
+    strain variants always have additional characters appended).
+
+    Args:
+        taxon_id: Canonical NCBI taxon ID.
+
+    Returns:
+        The Ensembl species token (e.g. ``"canis_lupus_familiaris"``), or
+        ``None`` if the REST API is unreachable or has no matching entry.
+    """
+    try:
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(_ENSEMBL_REST_SPECIES_URL)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError:
+        return None
+
+    matches = [
+        str(entry["name"])
+        for entry in data.get("species", [])
+        if entry.get("name") and str(entry.get("taxon_id")) == str(taxon_id)
+    ]
+    return min(matches, key=len) if matches else None
+
+
 def _ensembl_date_to_iso(value: object) -> str | None:
     """Convert a ``mapping_session.created`` timestamp to ISO ``YYYY-MM-DD``.
 
@@ -342,11 +382,14 @@ class EnsemblParser(BaseParser):
         Returns:
             List of SSSOM Mapping objects.
         """
-        df = (
-            _scan_ensembl_tsv(file_path, _STABLE_ID_EVENT_COLUMNS, _STABLE_ID_EVENT_DTYPES)
-            .filter(pl.col("type") == "gene")
-            .collect()
-        )
+        try:
+            df = (
+                _scan_ensembl_tsv(file_path, _STABLE_ID_EVENT_COLUMNS, _STABLE_ID_EVENT_DTYPES)
+                .filter(pl.col("type") == "gene")
+                .collect()
+            )
+        except pl.exceptions.NoDataError:
+            return []
         if df.is_empty():
             return []
 
@@ -677,6 +720,44 @@ class EnsemblDownloader(BaseDownloader):
         )
         return match.group(1) if match else default_assembly
 
+    def _resolve_species_token(self, taxon_id: str | int) -> str:
+        """Resolve *taxon_id* to its Ensembl species token.
+
+        Tries ``config/ensembl.yaml``'s static ``species.available`` map
+        first (no network); falls back to a live lookup against Ensembl's
+        REST species list (see :func:`_lookup_ensembl_species_token`) for
+        taxon IDs not curated there -- Ensembl publishes 300+ species, of
+        which ``available`` only lists a handful for CLI defaults/help.
+
+        Args:
+            taxon_id: Canonical NCBI taxon ID.
+
+        Returns:
+            The Ensembl species token.
+
+        Raises:
+            ValueError: If *taxon_id* is unknown both statically and live.
+        """
+        if self._config:
+            try:
+                return self._config.species_token(taxon_id)
+            except ValueError:
+                pass
+
+        token = _lookup_ensembl_species_token(taxon_id)
+        if token is not None:
+            return token
+
+        known = ""
+        if self._config:
+            available = (self._config.species or {}).get("available") or {}
+            known = ", ".join(sorted(str(k) for k in available))
+        raise ValueError(
+            f"Unknown species taxon ID {taxon_id!r} for Ensembl: not in config/ensembl.yaml's "
+            f"static list ({known or '(none configured)'}) and not found via Ensembl's live "
+            "species list either."
+        )
+
     def get_download_urls(
         self,
         version: str | None = None,
@@ -698,7 +779,7 @@ class EnsemblDownloader(BaseDownloader):
             raise ValueError("Ensembl config not loaded")
 
         species = kwargs.get("species", self.species)
-        token = self._config.species_token(species)
+        token = self._resolve_species_token(species)
         assembly = kwargs.get("assembly") or self.assembly or self._resolve_core_dir(str(v), token)
 
         return {

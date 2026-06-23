@@ -54,8 +54,8 @@ __all__ = [
 ]
 
 # Datasources this module knows how to download+parse per release.
-# NCBI has no versioned archive, so only mode="date" applies to it.
-SUPPORTED_DATASOURCES = ("chebi", "ensembl", "hgnc", "ncbi", "uniprot")
+# NCBI and VGNC have no versioned archive, so only mode="date" applies to them.
+SUPPORTED_DATASOURCES = ("chebi", "ensembl", "hgnc", "ncbi", "uniprot", "vgnc")
 
 # mapping_sets kinds each datasource's parser actually supports.
 _SUPPORTED_MAPPING_SETS: dict[str, tuple[str, ...]] = {
@@ -64,6 +64,7 @@ _SUPPORTED_MAPPING_SETS: dict[str, tuple[str, ...]] = {
     "hgnc": ("ids", "labels"),
     "ncbi": ("ids", "labels"),
     "uniprot": ("ids",),
+    "vgnc": ("ids", "labels"),
 }
 
 
@@ -273,6 +274,9 @@ def _parse_mapping_set(
         return _parse_ensembl_version(files, version, mapping_sets, species)
     if datasource == "uniprot":
         return _parse_uniprot_version(files, version, mapping_sets)
+    if datasource == "vgnc":
+        species = kwargs.get("species", config.default_species() if config else "9598")
+        return _parse_vgnc_version(files, version, mapping_sets, species)
     raise ValueError(f"Unsupported datasource for consolidation: {datasource!r}")
 
 
@@ -343,6 +347,17 @@ def _parse_uniprot_version(files: dict[str, Path], version: str | None, mapping_
         raise ValueError("uniprot only supports mapping_sets='ids'")
     parser = UniProtParser(version=version, show_progress=False)
     return parser.parse(files.get("sec_ac"), delac_path=files.get("delac_sp"))
+
+
+def _parse_vgnc_version(
+    files: dict[str, Path], version: str | None, mapping_sets: str, species: str
+) -> Any:
+    from pysec2pri.parsers.vgnc import VGNCParser
+
+    parser = VGNCParser(version=version, show_progress=False)
+    if mapping_sets == "ids":
+        return parser.parse(files["withdrawn"], complete_set_path=files.get("complete"))
+    return parser.parse_labels(files["complete"], species=species)
 
 
 def _run_one_version(

@@ -75,6 +75,11 @@ __all__ = [
     "generate_uniprot",
     "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
+    "generate_vgnc",
+    "generate_vgnc_ids",
+    "generate_vgnc_labels",
+    "generate_vgnc_primary_ids",
+    "generate_vgnc_primary_labels",
     "generate_wikidata",
     "generate_wikidata_ids",
     "generate_wikidata_labels",
@@ -314,6 +319,147 @@ def generate_hgnc_labels(
     parser = HGNCParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
     return parser.parse_labels(Path(input_path), statuses=statuses)
+
+
+def generate_vgnc(
+    input_path: Path | str | None = None,
+    complete_set_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return VGNC secondary to primary ID mappings.
+
+    Downloads the withdrawn and gene-set files automatically when
+    ``input_path`` / ``complete_set_path`` are omitted. Never filtered by
+    species: VGNC IDs are unique across all species (like HGNC IDs), and
+    the withdrawn file's ``taxon_id`` column is not populated upstream (see
+    :mod:`pysec2pri.parsers.vgnc`). The gene-set file is used to populate the
+    full list of current primary IDs (across every species) so that
+    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids` returns the
+    authoritative list rather than just the primaries that happen to have a
+    secondary.
+
+    Args:
+        input_path: Local VGNC withdrawn TSV. Auto-downloaded if ``None``.
+        complete_set_path: Local VGNC gene-set TSV. Auto-downloaded if
+            ``None``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+
+    release_date = None
+    if input_path is None or complete_set_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        if input_path is None:
+            input_path = files["withdrawn"]
+        if complete_set_path is None:
+            complete_set_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse(Path(input_path), complete_set_path=Path(complete_set_path))
+
+
+def generate_vgnc_primary_ids(
+    input_path: Path | str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current VGNC primary IDs.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_ids`` store is populated
+    with every current VGNC ID across all species (not filtered by species,
+    see :mod:`pysec2pri.parsers.vgnc`).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_primary_ids(Path(input_path))
+
+
+def generate_vgnc_primary_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set with the full list of current VGNC primary symbols for one species.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_labels`` store is
+    populated with every current approved symbol for ``species``.
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_primary_labels(Path(input_path), species=species)
+
+
+def generate_vgnc_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+    statuses: list[str] | None = None,
+) -> Sec2PriMappingSet:
+    """Return VGNC label to previous-label mappings for one species.
+
+    Downloads the gene-set file automatically when ``input_path`` is
+    omitted. Symbols are not unique across species (the same approved
+    symbol can legitimately name orthologous genes in different species),
+    so ``species`` scopes ambiguity detection and ``to_pri_labels()`` to one
+    species' own namespace (see :mod:`pysec2pri.parsers.vgnc`).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+        statuses: Entry statuses to include (e.g. ``["Approved"]``).
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_labels(Path(input_path), species=species, statuses=statuses)
 
 
 def generate_chebi_primary_ids(
@@ -1804,5 +1950,6 @@ generate_ncbi_labels = generate_ncbi_labels
 generate_hmdb_ids = generate_hmdb
 generate_hmdb_proteins_ids = generate_hmdb_proteins
 generate_uniprot_ids = generate_uniprot
+generate_vgnc_ids = generate_vgnc
 generate_wikidata_ids = generate_wikidata
 generate_wikidata_labels = generate_wikidata_labels
