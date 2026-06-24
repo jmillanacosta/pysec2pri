@@ -50,9 +50,57 @@ _opt_subset = _opt(
     type=click.Choice(["3star", "complete"]),
     help="Compound subset.",
 )
-_opt_species = _opt(
-    "--species", default="9606", show_default=True, help="Species as NCBI taxon ID."
-)
+
+
+_MAX_INLINE_SPECIES = 40
+
+
+def _species_choices_text(cfg_id: str, limit: int = _MAX_INLINE_SPECIES) -> str:
+    """Return a ``"<taxon_id>=<label>, ..."`` list from ``<cfg_id>.yaml``'s ``species.available``.
+
+    These are commonly-used species curated for CLI help/defaults, not a
+    hard restriction -- NCBI and VGNC accept any taxon ID they have data
+    for, and Ensembl resolves anything beyond this list via its own live
+    species index (see ``EnsemblDownloader._resolve_species_token``).
+
+    Truncated to *limit* entries when ``available`` is large (e.g.
+    Ensembl's 270+) so ``--help`` output stays readable; the remainder is
+    summarized with a pointer to the full config file instead of dumped
+    inline.
+    """
+    cfg = get_datasource_config(cfg_id)
+    available = (cfg.species or {}).get("available") or {}
+    pairs = sorted(available.items(), key=lambda kv: str(kv[0]))
+    shown = pairs[:limit]
+    text = ", ".join(f"{tid}={(info or {}).get('label', tid)}" for tid, info in shown)
+    remaining = len(pairs) - len(shown)
+    if remaining > 0:
+        text += f", and {remaining} more. See config/{cfg_id}.yaml for the full list"
+    return text
+
+
+def _opt_species_for(cfg_id: str) -> Callable[..., Any]:
+    """Build a ``--species`` option defaulting to ``<cfg_id>.yaml``'s ``species.default``.
+
+    Config-yaml-centric: each species-aware datasource (ensembl, ncbi, vgnc)
+    declares its own ``species.default`` in its own config file (see
+    ``DatasourceConfig.default_species``), rather than this module
+    hardcoding a single literal for every datasource. The help text lists
+    every species curated in that datasource's ``species.available``.
+    """
+    default = str(get_datasource_config(cfg_id).default_species())
+    choices = _species_choices_text(cfg_id)
+    help_text = "Species as NCBI taxon ID, or 'all' to process every species."
+    if choices:
+        help_text += f" Known: {choices}."
+    if cfg_id == "ensembl":
+        help_text += (
+            " Other taxon IDs are resolved via Ensembl's own live species list; "
+            "'all' downloads and combines all ~276 species (slow, network-heavy)."
+        )
+    return _opt("--species", default=default, show_default=True, help=help_text)
+
+
 _opt_entity_type = _opt(
     "--entity-type",
     default=None,
@@ -288,7 +336,11 @@ def _make_generate_cmd(
             show_progress=not no_progress,
             **extra_kwargs,
         )
-        _, base = _version_base(ms, data_version, f"{config_id}_{kind}")
+        prefix = f"{config_id}_{kind}"
+        species = extra_kwargs.get("species")
+        if species is not None:
+            prefix = f"{prefix}_{species}"
+        _, base = _version_base(ms, data_version, prefix)
         _emit(ms, output_format, output, base)
 
     # Apply Click decorators
@@ -330,15 +382,17 @@ def _build_registry() -> dict[tuple[str, str], tuple[Callable[..., Any], list[Ca
     return {
         ("chebi", "ids"): (api.generate_chebi_ids, [_opt_subset]),
         ("chebi", "labels"): (api.generate_chebi_labels, [_opt_subset]),
-        ("ensembl", "ids"): (api.generate_ensembl_ids, [_opt_species]),
-        ("ensembl", "labels"): (api.generate_ensembl_labels, [_opt_species]),
+        ("ensembl", "ids"): (api.generate_ensembl_ids, [_opt_species_for("ensembl")]),
+        ("ensembl", "labels"): (api.generate_ensembl_labels, [_opt_species_for("ensembl")]),
         ("hgnc", "ids"): (api.generate_hgnc_ids, []),
         ("hgnc", "labels"): (api.generate_hgnc_labels, []),
-        ("ncbi", "ids"): (api.generate_ncbi_ids, [_opt_species]),
-        ("ncbi", "labels"): (api.generate_ncbi_labels, [_opt_species]),
+        ("ncbi", "ids"): (api.generate_ncbi_ids, [_opt_species_for("ncbi")]),
+        ("ncbi", "labels"): (api.generate_ncbi_labels, [_opt_species_for("ncbi")]),
         ("hmdb_metabolites", "ids"): (api.generate_hmdb_ids, []),
         ("hmdb_proteins", "ids"): (api.generate_hmdb_proteins_ids, []),
         ("uniprot", "ids"): (api.generate_uniprot_ids, [_opt_delac_file]),
+        ("vgnc", "ids"): (api.generate_vgnc_ids, [_opt_species_for("vgnc")]),
+        ("vgnc", "labels"): (api.generate_vgnc_labels, [_opt_species_for("vgnc")]),
         ("wikidata", "ids"): (api.generate_wikidata_ids, [_opt_entity_type, _opt_test_subset]),
         ("wikidata", "labels"): (
             api.generate_wikidata_labels,
@@ -357,7 +411,12 @@ def _register_datasources(parent: click.Group) -> None:
 
     for cfg_id, kinds in by_config.items():
         cfg = get_datasource_config(cfg_id)
-        grp = click.Group(cfg_id.replace("_", "-"), help=f"{cfg.name} mappings.")
+        group_help = f"{cfg.name} mappings."
+        if cfg.species:
+            choices = _species_choices_text(cfg_id)
+            if choices:
+                group_help += f" Species: {choices}."
+        grp = click.Group(cfg_id.replace("_", "-"), help=group_help)
         for kind, (fn, extra_opts) in kinds.items():
             raw_cmd = _make_generate_cmd(cfg_id, kind, fn, extra_opts)
             grp.add_command(click.command(name=kind)(raw_cmd))
@@ -380,7 +439,7 @@ _register_datasources(main)
 
 
 @click.command("label-history")
-@_opt_species
+@_opt_species_for("ensembl")
 @click.option("--from-version", default=None, help="Lower bound (inclusive) on the release walk.")
 @click.option("--to-version", default=None, help="Upper bound (inclusive) on the release walk.")
 @_opt_output
@@ -567,7 +626,7 @@ def _consolidate_extra_opts(cfg_id: str) -> list[Callable[..., Any]]:
     if cfg.subset:
         opts.append(_opt_subset)
     if cfg.species:
-        opts.append(_opt_species)
+        opts.append(_opt_species_for(cfg_id))
     return opts
 
 
@@ -762,6 +821,7 @@ _LABEL_GENERATORS_FOR_IDS: dict[str, str] = {
     "chebi": "generate_chebi_labels",
     "hgnc": "generate_hgnc_labels",
     "ncbi": "generate_ncbi_labels",
+    "vgnc": "generate_vgnc_labels",
 }
 
 
@@ -897,6 +957,7 @@ _LABELS_DATASOURCES = sorted(cfg for cfg, kind in _build_registry() if kind == "
 _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
     "hgnc": "generate_hgnc_ids",
     "ncbi": "generate_ncbi_ids",
+    "vgnc": "generate_vgnc_ids",
 }
 
 
@@ -942,7 +1003,14 @@ _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
 @_opt_xref_on
 @_opt_xref_predicate
 @_opt_report
-@_opt_species
+@click.option(
+    "--species",
+    default=None,
+    help=(
+        "Species as NCBI taxon ID. Defaults to DATASOURCE's own config default when omitted; "
+        "run 'pysec2pri DATASOURCE labels --help' to see its known species."
+    ),
+)
 @_opt_entity_type
 @_opt_subset
 @_opt_version
@@ -963,7 +1031,7 @@ def update_labels_cmd(
     xref_on: str | None,
     xref_predicates: tuple[str, ...],
     report_path: Path | None,
-    species: str,
+    species: str | None,
     entity_type: str | None,
     subset: str,
     data_version: str | None,
@@ -982,10 +1050,15 @@ def update_labels_cmd(
         generate_chebi_labels,
         generate_hgnc_labels,
         generate_ncbi_labels,
+        generate_vgnc_labels,
         generate_wikidata_labels,
         load_label_mapping,
         load_mapping,
     )
+
+    if species is None:
+        ds_cfg = get_datasource_config(datasource)
+        species = str(ds_cfg.default_species()) if ds_cfg.species else "9606"
 
     if mapping_file is not None:
         click.echo(f"Loading label mappings from {mapping_file}...")
@@ -1000,6 +1073,9 @@ def update_labels_cmd(
                 version=data_version, show_progress=not no_progress
             ),
             "ncbi": lambda: generate_ncbi_labels(
+                species=species, version=data_version, show_progress=not no_progress
+            ),
+            "vgnc": lambda: generate_vgnc_labels(
                 species=species, version=data_version, show_progress=not no_progress
             ),
             "wikidata": lambda: generate_wikidata_labels(

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from sssom_schema import Mapping
 
+from pysec2pri import api as api_module
 from pysec2pri.download import CloudflareBlockedError, _get_datasource_urls, resolve_release_date
 
 
@@ -112,15 +116,50 @@ class TestEnsemblDownloader:
         urls = downloader.get_download_urls("115")
         assert "mus_musculus_core_115_39" in urls["gene"]
 
-    def test_get_download_urls_unknown_species_raises(self) -> None:
-        """An undeclared taxon ID raises rather than silently building a bad URL."""
-        from pysec2pri.parsers.ensembl import EnsemblDownloader
+    def test_get_download_urls_unknown_species_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A taxon ID unknown both statically and via the live fallback raises."""
+        from pysec2pri.parsers import ensembl as ensembl_module
 
-        downloader = EnsemblDownloader(
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FailingHttpClient)
+        downloader = ensembl_module.EnsemblDownloader(
             version="115", species=99999, assembly="1", show_progress=False
         )
         with pytest.raises(ValueError, match="Unknown species"):
             downloader.get_download_urls("115")
+
+    def test_get_download_urls_falls_back_to_live_species_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A taxon ID absent from config/ensembl.yaml resolves via the live REST fallback."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        class _FakeSpeciesResponse(_FakeHttpResponse):
+            def json(self) -> dict[str, object]:
+                """Return a fake Ensembl REST species list with two dog breed entries."""
+                return {
+                    "species": [
+                        {"name": "canis_lupus_familiaris", "taxon_id": "9615"},
+                        {"name": "canis_lupus_familiarisboxer", "taxon_id": "9615"},
+                    ]
+                }
+
+        class _FakeSpeciesClient(_FakeHttpClient):
+            def get(self, url: str) -> _FakeHttpResponse:
+                """Return the fake species list for the REST URL, else the base fake response."""
+                if "rest.ensembl.org" in url:
+                    return _FakeSpeciesResponse()
+                return super().get(url)
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeSpeciesClient)
+        downloader = ensembl_module.EnsemblDownloader(
+            version="115", species=9615, assembly="1", show_progress=False
+        )
+        urls = downloader.get_download_urls("115")
+        assert "canis_lupus_familiaris_core_115_1" in urls["gene"]
+        # The breed-specific entry must not win over the shorter canonical name.
+        assert "canis_lupus_familiarisboxer" not in urls["gene"]
 
     def test_get_download_urls_without_explicit_assembly_calls_discovery(
         self, monkeypatch: pytest.MonkeyPatch
@@ -164,3 +203,174 @@ class TestEnsemblDownloader:
         monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
         downloader = ensembl_module.EnsemblDownloader(show_progress=False)
         assert downloader._resolve_core_dir("115", "mus_musculus") == "38"
+
+
+_DOG_LISTING = (
+    '<a href="homo_sapiens_core_115_38/">homo_sapiens_core_115_38/</a>\n'
+    '<a href="canis_lupus_familiaris_core_115_1/">canis_lupus_familiaris_core_115_1/</a>\n'
+    '<a href="canis_lupus_familiarisboxer_core_115_1/">'
+    "canis_lupus_familiarisboxer_core_115_1/</a>\n"
+)
+_DOG_REST_SPECIES = {
+    "species": [
+        {"name": "canis_lupus_familiaris", "taxon_id": "9615"},
+        {"name": "canis_lupus_familiarisboxer", "taxon_id": "9615"},
+    ]
+}
+
+
+class TestDiscoverEnsemblSpecies:
+    """Tests for the ``species="all"`` bulk-discovery primitive, fully mocked."""
+
+    def test_dedupes_breed_variants_to_canonical_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A breed-specific assembly sharing its species' taxon ID is deduped away."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        class _RestSpeciesResponse(_FakeHttpResponse):
+            def json(self) -> dict[str, list[dict[str, str]]] | dict[str, object]:
+                """Return a fake REST species list tagging both dog tokens with one taxon ID."""
+                return _DOG_REST_SPECIES
+
+        class _RestClient(_FakeHttpClient):
+            def get(self, url: str) -> _FakeHttpResponse:
+                """Serve the REST species list, or the FTP listing for any other URL."""
+                if "rest.ensembl.org" in url:
+                    return _RestSpeciesResponse()
+                return _FakeHttpResponse(_DOG_LISTING)
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _RestClient)
+
+        species = ensembl_module.discover_ensembl_species("115")
+
+        assert set(species) == {("homo_sapiens", "38"), ("canis_lupus_familiaris", "1")}
+
+    def test_falls_back_to_unfiltered_listing_when_rest_api_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the REST species list can't be fetched, every FTP entry is kept (no dedup)."""
+        from pysec2pri.parsers import ensembl as ensembl_module
+
+        class _NoRestClient(_FailingHttpClient):
+            def get(self, url: str) -> _FakeHttpResponse:
+                """Fail the REST call, but still serve the FTP listing."""
+                if "rest.ensembl.org" in url:
+                    return super().get(url)
+                return _FakeHttpResponse(_DOG_LISTING)
+
+        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _NoRestClient)
+
+        species = ensembl_module.discover_ensembl_species("115")
+
+        assert set(species) == {
+            ("homo_sapiens", "38"),
+            ("canis_lupus_familiaris", "1"),
+            ("canis_lupus_familiarisboxer", "1"),
+        }
+
+
+## Ensembl species orchestration
+
+
+class _FakeMappingSet:
+    """Stand-in for a Sec2PriMappingSet exposing just what the orchestration needs."""
+
+    def __init__(
+        self,
+        mappings: list[Mapping] | None = None,
+        primary_ids: set[str] | None = None,
+        primary_labels: dict[str, set[str]] | None = None,
+    ) -> None:
+        """Store mappings and optional primary-ID/label stores."""
+        self.mappings = mappings or []
+        self._primary_ids = primary_ids or set()
+        self._primary_labels = primary_labels or {}
+
+
+def _fake_mapping(token: str) -> Mapping:
+    """Build a minimal valid Mapping tagged with *token*, for orchestration tests."""
+    return Mapping(
+        subject_id=f"ENSEMBL:{token}_OLD",
+        object_id=f"ENSEMBL:{token}_NEW",
+        predicate_id="IAO:0100001",
+        mapping_justification="semapv:BackgroundKnowledgeBasedMatching",
+    )
+
+
+def _patch_species_discovery(monkeypatch: pytest.MonkeyPatch, tokens: list[str]) -> None:
+    """Stub discovery/release-resolution so every test exercises the real version=None path.
+
+    Every real caller invokes the bulk path with ``version=None``, relying
+    on ``check_ensembl_release()`` to resolve "latest" -- rather than
+    hardcoding an arbitrary version literal per test, every test here goes
+    through that same resolution, just against a fake "latest".
+    """
+    monkeypatch.setattr(
+        "pysec2pri.download.check_ensembl_release", lambda: SimpleNamespace(version="999-test")
+    )
+    monkeypatch.setattr(
+        "pysec2pri.parsers.ensembl.discover_ensembl_species",
+        lambda version: [(t, "1") for t in tokens],
+    )
+    monkeypatch.setattr("pysec2pri.download.resolve_release_date", lambda *a, **kw: None)
+
+
+class TestGenerateEnsemblAllSpecies:
+    """Tests for ``_generate_ensembl_all_species``, fully mocked (no network)."""
+
+    def test_combines_successful_species_and_skips_failures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Successful species combine into one mapping set; a failed one is skipped."""
+        _patch_species_discovery(monkeypatch, ["species_a", "species_b", "species_fail"])
+
+        def fake_process(
+            kind: str, version: str, species: str, assembly: str, release_date: object
+        ) -> _FakeMappingSet:
+            """Succeed for every species except "species_fail", which raises."""
+            if species == "species_fail":
+                raise RuntimeError("simulated failure")
+            return _FakeMappingSet([_fake_mapping(species)], primary_ids={f"ENSEMBL:{species}_NEW"})
+
+        monkeypatch.setattr(api_module, "_process_one_ensembl_species", fake_process)
+
+        result = api_module._generate_ensembl_all_species("ids", None, show_progress=False)
+
+        assert {m.subject_id for m in result.mappings} == {
+            "ENSEMBL:species_a_OLD",
+            "ENSEMBL:species_b_OLD",
+        }
+        assert result._primary_ids == {"ENSEMBL:species_a_NEW", "ENSEMBL:species_b_NEW"}
+        assert result.mapping_set_id.endswith("/999-test/all")
+
+    def test_merges_primary_labels_across_species(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Per-species ``_primary_labels`` dicts are unioned by label across species."""
+        _patch_species_discovery(monkeypatch, ["species_a", "species_b"])
+        monkeypatch.setattr(
+            api_module,
+            "_process_one_ensembl_species",
+            lambda kind, version, token, assembly, release_date: _FakeMappingSet(
+                primary_labels={"SHAREDSYM": {f"ENSEMBL:{token}_NEW"}}
+            ),
+        )
+
+        result = api_module._generate_ensembl_all_species("labels", None, show_progress=False)
+
+        assert result._primary_labels["SHAREDSYM"] == {
+            "ENSEMBL:species_a_NEW",
+            "ENSEMBL:species_b_NEW",
+        }
+
+    def test_raises_when_every_species_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A run where no species could be processed raises, rather than returning empty."""
+        _patch_species_discovery(monkeypatch, ["species_a"])
+
+        def fake_process(*args: Any, **kwargs: Any) -> _FakeMappingSet:
+            """Fail regardless of which species is requested."""
+            raise RuntimeError("simulated failure")
+
+        monkeypatch.setattr(api_module, "_process_one_ensembl_species", fake_process)
+
+        with pytest.raises(ValueError, match="No Ensembl species could be processed"):
+            api_module._generate_ensembl_all_species("ids", None, show_progress=False)

@@ -17,6 +17,7 @@ from pysec2pri.parsers.hgnc import HGNCParser
 from pysec2pri.parsers.hmdb import HMDBMetaboliteParser, HMDBProteinParser
 from pysec2pri.parsers.ncbi import NCBIParser
 from pysec2pri.parsers.uniprot import UniProtParser
+from pysec2pri.parsers.vgnc import VGNCParser
 from pysec2pri.parsers.wikidata import WikidataParser
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "NCBIParser",
     "Sec2PriMappingSet",
     "UniProtParser",
+    "VGNCParser",
     "WikidataParser",
     "get_datasource_config",
     "load_config",

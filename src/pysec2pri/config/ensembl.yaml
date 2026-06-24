@@ -9,13 +9,290 @@ entity_types: ["genes"]
 
 # Canonical key = NCBI taxon ID. `token` is Ensembl's own species directory
 # component (e.g. https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/).
+# `default: "all"` processes every species Ensembl publishes for the
+# release and combines them into one mapping set (see
+# pysec2pri.api._generate_ensembl_all_species) -- network-heavy (~276
+# species, one download each); pass an explicit taxon ID for a fast,
+# single-species run.
 species:
-  default: 9606
+  default: "all"
   available:
-    9606: { token: homo_sapiens, label: Human }
-    10090: { token: mus_musculus, label: Mouse }
-    10116: { token: rattus_norvegicus, label: Rat }
-    7955: { token: danio_rerio, label: Zebrafish }
+    106734: { token: 'chelonoidis_abingdonii',  label: 'Abingdon island giant tortoise'}
+    441894: { token: 'struthio_camelus_australis',  label: 'African ostrich'}
+    38772: { token: 'gopherus_agassizii',  label: "Agassiz's desert tortoise"}
+    30538: { token: 'vicugna_pacos',  label: 'Alpaca'}
+    9994: { token: 'marmota_marmota_marmota',  label: 'Alpine marmot'}
+    48698: { token: 'poecilia_formosa',  label: 'Amazon molly'}
+    51338: { token: 'castor_canadensis',  label: 'American beaver'}
+    43346: { token: 'bison_bison_bison',  label: 'American bison'}
+    9643: { token: 'ursus_americanus',  label: 'American black bear'}
+    452646: { token: 'neovison_vison',  label: 'American mink'}
+    336983: { token: 'colobus_angolensis_palliatus',  label: 'Angola colobus'}
+    9838: { token: 'camelus_dromedarius',  label: 'Arabian camel'}
+    9999: { token: 'urocitellus_parryii',  label: 'Arctic ground squirrel'}
+    96440: { token: 'salvator_merianae',  label: 'Argentine black and white tegu'}
+    9361: { token: 'dasypus_novemcinctus',  label: 'Armadillo'}
+    113540: { token: 'scleropages_formosus',  label: 'Asian bonytongue'}
+    441215: { token: 'ursus_thibetanus_thibetanus',  label: 'Asiatic black bear'}
+    8049: { token: 'gadus_morhua',  label: 'Gadus morhua (Celtic Sea) - GCA_010882105.1'}
+    7950: { token: 'clupea_harengus',  label: 'Atlantic herring'}
+    8030: { token: 'salmo_salar',  label: 'Atlantic salmon - North American origin Brian'}
+    8502: { token: 'crocodylus_porosus',  label: 'Australian saltwater crocodile'}
+    56723: { token: 'labrus_bergylta',  label: 'Ballan wrasse'}
+    8187: { token: 'lates_calcarifer',  label: 'Barramundi perch'}
+    9749: { token: 'delphinapterus_leucas',  label: 'Beluga whale'}
+    40157: { token: 'lonchura_striata_domestica',  label: 'Bengalese finch'}
+    144197: { token: 'stegastes_partitus',  label: 'Bicolor damselfish'}
+    61621: { token: 'rhinopithecus_bieti',  label: 'Black snub-nosed monkey'}
+    1608454: { token: 'sinocyclocheilus_anshuiensis',  label: 'Blind barbel'}
+    47969: { token: 'oreochromis_aureus',  label: 'Blue tilapia'}
+    156563: { token: 'cyanistes_caeruleus',  label: 'Blue tit'}
+    9771: { token: 'balaenoptera_musculus',  label: 'Blue whale'}
+    321398: { token: 'lepidothrix_coronata',  label: 'Blue-crowned manakin'}
+    8630: { token: 'laticauda_laticaudata',  label: 'Blue-ringed sea krait'}
+    441366: { token: 'gouania_willdenowi',  label: 'Blunt-snouted clingfish'}
+    39432: { token: 'saimiri_boliviensis_boliviensis',  label: 'Bolivian squirrel monkey'}
+    9597: { token: 'pan_paniscus',  label: 'Bonobo'}
+    37548: { token: 'cavia_aperea',  label: 'Brazilian guinea pig'}
+    8032: { token: 'salmo_trutta',  label: 'Brown trout'}
+    13146: { token: 'melopsittacus_undulatus',  label: 'Budgerigar'}
+    194338: { token: 'athene_cunicularia',  label: 'Burrowing owl'}
+    8153: { token: 'haplochromis_burtoni',  label: "Burton's mouthbrooder"}
+    30611: { token: 'otolemur_garnettii',  label: 'Bushbaby'}
+    7719: { token: 'ciona_intestinalis',  label: 'C.intestinalis'}
+    51511: { token: 'ciona_savignyi',  label: 'C.savignyi'}
+    6239: { token: 'caenorhabditis_elegans',  label: 'Caenorhabditis elegans (Nematode, N2)'}
+    9704: { token: 'zalophus_californianus',  label: 'California sea lion'}
+    61383: { token: 'lynx_canadensis',  label: 'Canada lynx'}
+    9685: { token: 'felis_catus',  label: 'Domestic cat'}
+    9913: { token: 'bos_taurus',  label: 'Cattle - Wagyu'}
+    103695: { token: 'pogona_vitticeps',  label: 'Central bearded dragon'}
+    51154: { token: 'catagonus_wagneri',  label: 'Chacoan peccary'}
+    56716: { token: 'cottoperca_gobio',  label: 'Channel bull blenny'}
+    7998: { token: 'ictalurus_punctatus',  label: 'Channel catfish'}
+    9031: { token: 'gallus_gallus',  label: 'Chicken (paternal White leghorn layer)'}
+    30464: { token: 'nothoprocta_perdicaria',  label: 'Chilean tinamou'}
+    9598: { token: 'pan_troglodytes',  label: 'Chimpanzee'}
+    10029: { token: 'cricetulus_griseus',  label: 'Chinese hamster PICR'}
+    183150: { token: 'oryzias_sinensis',  label: 'Chinese medaka'}
+    13735: { token: 'pelodiscus_sinensis',  label: 'Chinese softshell turtle'}
+    74940: { token: 'oncorhynchus_tshawytscha',  label: 'Chinook salmon'}
+    64144: { token: 'anabas_testudineus',  label: 'Climbing perch'}
+    80972: { token: 'amphiprion_ocellaris',  label: 'Clown anemonefish'}
+    7897: { token: 'latimeria_chalumnae',  label: 'Coelacanth'}
+    8019: { token: 'oncorhynchus_kisutch',  label: 'Coho salmon'}
+    59894: { token: 'ficedula_albicollis',  label: 'Collared flycatcher'}
+    9135: { token: 'serinus_canaria',  label: 'Common canary'}
+    630221: { token: 'cyprinus_carpio_carpio',  label: 'Common carp'}
+    7962: { token: 'cyprinus_carpio',  label: 'Common carp huanghe'}
+    100819: { token: 'falco_tinnunculus',  label: 'Common kestrel'}
+    8475: { token: 'chelydra_serpentina',  label: 'Common snapping turtle'}
+    64176: { token: 'podarcis_muralis',  label: 'Common wall lizard'}
+    29139: { token: 'vombatus_ursinus',  label: 'Common wombat'}
+    379532: { token: 'propithecus_coquereli',  label: "Coquerel's sifaka"}
+    9541: { token: 'macaca_fascicularis',  label: 'Crab-eating macaque'}
+    885580: { token: 'fukomys_damarensis',  label: 'Damara mole rat'}
+    40217: { token: 'junco_hyemalis',  label: 'Dark-eyed junco'}
+    99837: { token: 'spermophilus_dauricus',  label: 'Daurian ground squirrel'}
+    10160: { token: 'octodon_degus',  label: 'Degu'}
+    299321: { token: 'denticeps_clupeoides',  label: 'Denticle herring'}
+    286419: { token: 'canis_lupus_dingo',  label: 'Dingo'}
+    9615: { token: 'canis_lupus_familiaris',  label: 'Dog - Great Dane'}
+    9739: { token: 'tursiops_truncatus',  label: 'Dolphin'}
+    30521: { token: 'bos_grunniens',  label: 'Domestic yak'}
+    9793: { token: 'equus_asinus',  label: 'Donkey (EquAss-T2T_v2)'}
+    9568: { token: 'mandrillus_leucophaeus',  label: 'Drill'}
+    7227: { token: 'drosophila_melanogaster',  label: 'Drosophila melanogaster - (Fruit fly)'}
+    8840: { token: 'anas_platyrhynchos_platyrhynchos',  label: 'Duck'}
+    8673: { token: 'pseudonaja_textilis',  label: 'Eastern brown snake'}
+    224669: { token: 'buteo_japonicus',  label: 'Eastern buzzard'}
+    8154: { token: 'astatotilapia_calliptera',  label: 'Eastern happy'}
+    75864: { token: 'anas_zonorhyncha',  label: 'Eastern spot-billed duck'}
+    8005: { token: 'electrophorus_electricus',  label: 'Electric eel'}
+    9785: { token: 'loxodonta_africana',  label: 'Elephant'}
+    7868: { token: 'callorhinchus_milii',  label: 'Elephant shark'}
+    8790: { token: 'dromaius_novaehollandiae',  label: 'Emu'}
+    30461: { token: 'bubo_bubo',  label: 'Eurasian eagle-owl'}
+    55149: { token: 'sciurus_vulgaris',  label: 'Eurasian red squirrel'}
+    211598: { token: 'accipiter_nisus',  label: 'Eurasian sparrowhawk'}
+    13489: { token: 'dicentrarchus_labrax',  label: 'European seabass'}
+    9669: { token: 'mustela_putorius_furo',  label: 'Ferret'}
+    31033: { token: 'takifugu_rubripes',  label: 'Fugu'}
+    9565: { token: 'theropithecus_gelada',  label: 'Gelada'}
+    9646: { token: 'ailuropoda_melanoleuca',  label: 'Giant panda'}
+    61853: { token: 'nomascus_leucogenys',  label: 'Gibbon'}
+    8175: { token: 'sparus_aurata',  label: 'Gilthead seabream'}
+    9925: { token: 'capra_hircus',  label: 'Goat - Xinong Saanen Dairy'}
+    10036: { token: 'mesocricetus_auratus',  label: 'Golden Hamster'}
+    223781: { token: 'aquila_chrysaetos_chrysaetos',  label: 'Golden eagle'}
+    9089: { token: 'chrysolophus_pictus',  label: 'Golden pheasant'}
+    61622: { token: 'rhinopithecus_roxellana',  label: 'Golden snub-nosed monkey'}
+    328815: { token: 'manacus_vitellinus',  label: 'Golden-collared manakin'}
+    75366: { token: 'sinocyclocheilus_grahami',  label: 'Golden-line barbel'}
+    7957: { token: 'carassius_auratus',  label: 'Goldfish'}
+    1825980: { token: 'gopherus_evgoodei',  label: 'Goodes thornscrub tortoise'}
+    9595: { token: 'gorilla_gorilla_gorilla',  label: 'Gorilla'}
+    44316: { token: 'erythrura_gouldiae',  label: 'Gouldian finch'}
+    9157: { token: 'parus_major',  label: 'Great Tit'}
+    8823: { token: 'apteryx_haastii',  label: 'Great spotted kiwi'}
+    41447: { token: 'seriola_dumerili',  label: 'Greater amberjack'}
+    1328070: { token: 'prolemur_simus',  label: 'Greater bamboo lemur'}
+    59479: { token: 'rhinolophus_ferrumequinum',  label: 'Greater horseshoe bat'}
+    28377: { token: 'anolis_carolinensis',  label: 'Green anole'}
+    10141: { token: 'cavia_porcellus',  label: 'Guinea Pig'}
+    8081: { token: 'poecilia_reticulata',  label: 'Guppy'}
+    7764: { token: 'eptatretus_burgeri',  label: 'Hagfish'}
+    9365: { token: 'erinaceus_europaeus',  label: 'Hedgehog'}
+    8996: { token: 'numida_meleagris',  label: 'Helmeted guineafowl'}
+    307959: { token: 'sinocyclocheilus_rhinocerous',  label: 'Horned golden-line barbel'}
+    9796: { token: 'equus_caballus',  label: 'Horse'}
+    62062: { token: 'hucho_hucho',  label: 'Huchen'}
+    9606: { token: 'homo_sapiens',  label: 'Human'}
+    30522: { token: 'bos_indicus_x_bos_taurus',  label: 'Hybrid - Bos Taurus'}
+    9813: { token: 'procavia_capensis',  label: 'Hyrax'}
+    35670: { token: 'naja_naja',  label: 'Indian cobra'}
+    210632: { token: 'parambassis_ranga',  label: 'Indian glassy fish'}
+    30732: { token: 'oryzias_melastigma',  label: 'Indian medaka'}
+    9049: { token: 'pavo_cristatus',  label: 'Indian peafowl'}
+    8090: { token: 'oryzias_latipes',  label: 'Japanese medaka HdrR'}
+    93934: { token: 'coturnix_japonica',  label: 'Japanese quail'}
+    123683: { token: 'oryzias_javanicus',  label: 'Javanese ricefish'}
+    181472: { token: 'salarias_fasciatus',  label: 'Jewelled blenny'}
+    2489341: { token: 'strigops_habroptila',  label: 'Kakapo'}
+    10020: { token: 'dipodomys_ordii',  label: 'Kangaroo rat'}
+    38626: { token: 'phascolarctos_cinereus',  label: 'Koala'}
+    61221: { token: 'varanus_komodoensis',  label: 'Komodo dragon'}
+    7757: { token: 'petromyzon_marinus',  label: 'Lamprey'}
+    215358: { token: 'larimichthys_crocea',  label: 'Large yellow croaker'}
+    445787: { token: 'leptobrachium_leishanense',  label: 'Leishan spiny toad'}
+    9691: { token: 'panthera_pardus',  label: 'Leopard'}
+    51337: { token: 'jaculus_jaculus',  label: 'Lesser Egyptian jerboa'}
+    9371: { token: 'echinops_telfairi',  label: 'Lesser hedgehog tenrec'}
+    9689: { token: 'panthera_leo',  label: 'Lion'}
+    8824: { token: 'apteryx_owenii',  label: 'Little spotted kiwi'}
+    173247: { token: 'echeneis_naucrates',  label: 'Live sharksucker'}
+    34839: { token: 'chinchilla_lanigera',  label: 'Long-tailed chinchilla'}
+    8103: { token: 'cyclopterus_lumpus',  label: 'Lumpfish'}
+    32507: { token: 'neolamprologus_brichardi',  label: 'Lyretail cichlid'}
+    37293: { token: 'aotus_nancymaae',  label: "Ma's night monkey"}
+    9544: { token: 'macaca_mulatta',  label: 'Macaque'}
+    8663: { token: 'notechis_scutatus',  label: 'Mainland tiger snake'}
+    303518: { token: 'pundamilia_nyererei',  label: 'Makobe Island cichlid'}
+    8839: { token: 'anas_platyrhynchos',  label: 'Mallard'}
+    37003: { token: 'kryptolebias_marmoratus',  label: 'Mangrove rivulus'}
+    48883: { token: 'geospiza_fortis',  label: 'Medium ground-finch'}
+    37032: { token: 'suricata_suricatta',  label: 'Meerkat'}
+    132908: { token: 'pteropus_vampyrus',  label: 'Megabat'}
+    7994: { token: 'astyanax_mexicanus',  label: 'Pachon cavefish'}
+    59463: { token: 'myotis_lucifugus',  label: 'Microbat'}
+    61819: { token: 'amphilophus_citrinellus',  label: 'Midas cichlid'}
+    10047: { token: 'meriones_unguiculatus',  label: 'Mongolian gerbil'}
+    32473: { token: 'xiphophorus_couchianus',  label: 'Monterrey platyfish'}
+    10090: { token: 'mus_musculus',  label: 'Mouse NZO/HlLtJ'}
+    10091: { token: 'mus_musculus_castaneus',  label: 'Mouse CAST/EiJ'}
+    57486: { token: 'mus_musculus_molossinus',  label: 'Mouse JF1/MsJ'}
+    30608: { token: 'microcebus_murinus',  label: 'Mouse Lemur'}
+    39442: { token: 'mus_musculus_musculus',  label: 'Mouse PWK/PhJ'}
+    10092: { token: 'mus_musculus_domesticus',  label: 'Mouse WSB/EiJ'}
+    8078: { token: 'fundulus_heteroclitus',  label: 'Mummichog'}
+    8855: { token: 'cairina_moschata_domestica',  label: 'Muscovy Duck (domestic type)'}
+    10181: { token: 'heterocephalus_glaber',  label: 'Naked mole-rat male'}
+    40151: { token: 'monodon_monoceros',  label: 'Narwhal'}
+    1196302: { token: 'corvus_moneduloides',  label: 'New Caledonian crow'}
+    8128: { token: 'oreochromis_niloticus',  label: 'Nile tilapia'}
+    230844: { token: 'peromyscus_maniculatus_bairdii',  label: 'Northern American deer mouse'}
+    8010: { token: 'esox_lucius',  label: 'Northern pike'}
+    311401: { token: 'strix_occidentalis_caurina',  label: 'Northern spotted owl'}
+    10116: { token: 'rattus_norvegicus',  label: 'Rat - WKY/Bbb RGD_1581635'}
+    94237: { token: 'mola_mola',  label: 'Ocean sunfish'}
+    308060: { token: 'apteryx_rowi',  label: 'Okarito brown kiwi'}
+    9555: { token: 'papio_anubis',  label: 'Olive baboon'}
+    13616: { token: 'monodelphis_domestica',  label: 'Opossum'}
+    161767: { token: 'amphiprion_percula',  label: 'Orange clownfish'}
+    375764: { token: 'sphaeramia_orbicularis',  label: 'Orbiculate cardinalfish'}
+    257818: { token: 'otus_sunia',  label: 'Oriental scops-owl'}
+    9940: { token: 'ovis_aries',  label: 'Sheep - White dorper'}
+    8478: { token: 'chrysemys_picta_bellii',  label: 'Painted turtle'}
+    2715852: { token: 'cebus_imitator',  label: 'Panamanian white-faced capuchin'}
+    1676925: { token: 'paramormyrops_kingsleyae',  label: 'P. kingsleyae'}
+    409849: { token: 'periophthalmus_magnuspinnatus',  label: 'P. magnuspinnatus'}
+    9823: { token: 'sus_scrofa',  label: 'Pig USMARC'}
+    9825: { token: 'sus_scrofa_domesticus',  label: 'Pig - Ningxiang'}
+    9545: { token: 'macaca_nemestrina',  label: 'Pig-tailed macaque'}
+    9978: { token: 'ochotona_princeps',  label: 'Pika'}
+    283035: { token: 'sander_lucioperca',  label: 'Pike-perch'}
+    586833: { token: 'myripristis_murdjan',  label: 'Pinecone soldierfish'}
+    132585: { token: 'anser_brachyrhynchus',  label: 'Pink-footed goose'}
+    8083: { token: 'xiphophorus_maculatus',  label: 'Platyfish'}
+    9258: { token: 'ornithorhynchus_anatinus',  label: 'Platypus'}
+    29073: { token: 'ursus_maritimus',  label: 'Polar bear'}
+    79684: { token: 'microtus_ochrogaster',  label: 'Prairie vole'}
+    9986: { token: 'oryctolagus_cuniculus',  label: 'Rabbit'}
+    8022: { token: 'oncorhynchus_mykiss',  label: 'Rainbow trout'}
+    9627: { token: 'vulpes_vulpes',  label: 'Red fox'}
+    42514: { token: 'pygocentrus_nattereri',  label: 'Red-bellied piranha'}
+    27687: { token: 'erpetoichthys_calabaricus',  label: 'Reedfish'}
+    9054: { token: 'phasianus_colchicus',  label: 'Ring-necked pheasant'}
+    47308: { token: 'neogobius_melanostomus',  label: 'Round goby'}
+    198806: { token: 'calidris_pugnax',  label: 'Ruff'}
+    181631: { token: 'cyanoderma_ruficeps',  label: 'Rufous-capped babbler'}
+    10089: { token: 'mus_caroli',  label: 'Ryukyu mouse'}
+    559292: { token: 'saccharomyces_cerevisiae',  label: 'S. cerevisiae'}
+    48699: { token: 'poecilia_latipinna',  label: 'Sailfin molly'}
+    28743: { token: 'cyprinodon_variegatus',  label: 'Sheepshead minnow'}
+    48701: { token: 'poecilia_mexicana',  label: 'Shortfin molly'}
+    42254: { token: 'sorex_araneus',  label: 'Shrew'}
+    10093: { token: 'mus_pahari',  label: 'Shrew mouse'}
+    158456: { token: 'betta_splendens',  label: 'Siamese fighting fish'}
+    68415: { token: 'moschus_moschiferus',  label: 'Siberian musk deer'}
+    1220523: { token: 'zosterops_lateralis_melanops',  label: 'Silver-eye'}
+    9358: { token: 'choloepus_hoffmanni',  label: 'Sloth'}
+    87175: { token: 'camarhynchus_parvulus',  label: 'Small tree finch'}
+    9531: { token: 'cercocebus_atys',  label: 'Sooty mangabey'}
+    9755: { token: 'physeter_catodon',  label: 'Sperm whale'}
+    80966: { token: 'acanthochromis_polyacanthus',  label: 'Spiny chromis'}
+    425635: { token: 'calidris_pygmaea',  label: 'Spoon-billed sandpiper'}
+    7918: { token: 'lepisosteus_oculatus',  label: 'Spotted gar'}
+    43179: { token: 'ictidomys_tridecemlineatus',  label: 'Squirrel'}
+    10103: { token: 'mus_spicilegus',  label: 'Steppe mouse'}
+    481459: { token: 'gasterosteus_aculeatus_aculeatus',  label: 'Stickleback'}
+    9601: { token: 'pongo_abelii',  label: 'Sumatran orangutan'}
+    2593467: { token: 'malurus_cyaneus_samueli',  label: 'Superb fairywren'}
+    91951: { token: 'catharus_ustulatus',  label: "Swainson's thrush"}
+    43700: { token: 'monopterus_albus',  label: 'Swamp eel'}
+    8845: { token: 'anser_cygnoides',  label: 'Swan goose'}
+    1868482: { token: 'carlito_syrichta',  label: 'Tarsier'}
+    9305: { token: 'sarcophilus_harrisii',  label: 'Tasmanian devil'}
+    99883: { token: 'tetraodon_nigroviridis',  label: 'Tetraodon'}
+    69293: { token: 'gasterosteus_aculeatus',  label: 'Three-spined sticklebacki - Marine SYL'}
+    2587831: { token: 'terrapene_carolina_triunguis',  label: 'Three-toed box turtle'}
+    74533: { token: 'panthera_tigris_altaica',  label: 'Tiger'}
+    109280: { token: 'hippocampus_comes',  label: 'Tiger tail seahorse'}
+    244447: { token: 'cynoglossus_semilaevis',  label: 'Tongue sole'}
+    37347: { token: 'tupaia_belangeri',  label: 'Tree Shrew'}
+    8364: { token: 'xenopus_tropicalis',  label: 'Tropical clawed frog'}
+    8508: { token: 'sphenodon_punctatus',  label: 'Tuatara'}
+    52904: { token: 'scophthalmus_maximus',  label: 'Turbot'}
+    9103: { token: 'meleagris_gallopavo',  label: 'Turkey'}
+    105023: { token: 'nothobranchius_furzeri',  label: 'Turquoise killifish'}
+    591936: { token: 'piliocolobus_tephrosceles',  label: 'Ugandan red Colobus'}
+    1026970: { token: 'nannospalax_galili',  label: 'Upper Galilee mountains blind mole rat'}
+    42100: { token: 'phocoena_sinus',  label: 'Vaquita'}
+    60711: { token: 'chlorocebus_sabaeus',  label: 'Vervet-AGM'}
+    9315: { token: 'notamacropus_eugenii',  label: 'Wallaby'}
+    367368: { token: 'pelusios_castaneus',  label: 'West African mud turtle'}
+    33528: { token: 'gambusia_affinis',  label: 'Western mosquitofish'}
+    10096: { token: 'mus_spretus',  label: 'Western wild mouse'}
+    44394: { token: 'zonotrichia_albicollis',  label: 'White-throated sparrow'}
+    9483: { token: 'callithrix_jacchus',  label: 'White-tufted-ear marmoset'}
+    72004: { token: 'bos_mutus',  label: 'Wild yak'}
+    84702: { token: 'cervus_hanglu_yarkandensis',  label: 'Yarkand deer'}
+    241587: { token: 'amazona_collaria',  label: 'Yellow-billed parrot'}
+    1841481: { token: 'seriola_lalandi_dorsalis',  label: 'Yellowtail amberjack'}
+    59729: { token: 'taeniopygia_guttata',  label: 'Zebra finch'}
+    106582: { token: 'maylandia_zebra',  label: 'Zebra mbuna'}
+    7955: { token: 'danio_rerio',  label: 'Zebrafish'}
+    205130: { token: 'mastacembelus_armatus',  label: 'Zig-zag eel'}
 
 mappingset:
   sssom_version: null

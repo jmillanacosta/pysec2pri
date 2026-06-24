@@ -9,6 +9,7 @@ __all__ = [
     "HGNC",
     "NCBI",
     "UNIPROT",
+    "VGNC",
     "WIKIDATA",
 ]
 
@@ -20,6 +21,7 @@ HMDB_PROT: DatasourceConfig = get_datasource_config("hmdb_proteins")
 HMDB_MET: DatasourceConfig = get_datasource_config("hmdb_metabolites")
 NCBI: DatasourceConfig = get_datasource_config("ncbi")
 UNIPROT: DatasourceConfig = get_datasource_config("uniprot")
+VGNC: DatasourceConfig = get_datasource_config("vgnc")
 WIKIDATA: DatasourceConfig = get_datasource_config("wikidata")
 
 # Mapping of datasource names to their configurations
@@ -31,5 +33,6 @@ ALL_DATASOURCES: dict[str, DatasourceConfig] = {
     "hmdb_proteins": HMDB_PROT,
     "ncbi": NCBI,
     "uniprot": UNIPROT,
+    "vgnc": VGNC,
     "wikidata": WIKIDATA,
 }

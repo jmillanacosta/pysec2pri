@@ -37,6 +37,9 @@ If possible, you can also add automated download in ``src/pysec2pri/download.py`
    * - **UniProt**
      - ``sec_ac.txt``, ``delac_sp.txt``
      - ``parse()``
+   * - **VGNC**
+     - ``all_vgnc_gene_set_All.tsv``, ``all_vgnc_withdrawn.tsv``
+     - ``parse()``, ``parse_labels()``, ``parse_all()``
    * - **Wikidata**
      - SPARQL endpoint (live) or pre-fetched JSON
      - ``parse()``, ``parse_all()``, ``parse_from_file()``
@@ -60,6 +63,9 @@ Module Reference
     :members:
 
 .. autoclass:: pysec2pri.parsers.uniprot.UniProtParser
+    :members:
+
+.. autoclass:: pysec2pri.parsers.vgnc.VGNCParser
     :members:
 
 .. autoclass:: pysec2pri.parsers.wikidata.WikidataParser

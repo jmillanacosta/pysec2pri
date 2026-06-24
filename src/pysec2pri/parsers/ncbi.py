@@ -21,6 +21,22 @@ from pysec2pri.parsers.base import (
     Sec2PriMappingSet,
 )
 
+#: Sentinel accepted by every species-filtered method: skip the taxon
+#: filter entirely and process every organism in the file.
+ALL_SPECIES = "all"
+
+
+def _filter_by_taxon(lazy: pl.LazyFrame, species: str) -> pl.LazyFrame:
+    """Filter *lazy* to ``#tax_id == species``, or return it unfiltered for :data:`ALL_SPECIES`.
+
+    NCBI's ``gene_info``/``gene_history`` are global files covering every
+    organism NCBI tracks; ``species="all"`` processes every row instead of
+    one taxon, which is a much larger (and slower) operation.
+    """
+    if species == ALL_SPECIES:
+        return lazy
+    return lazy.filter(pl.col("#tax_id").cast(pl.Utf8) == species)
+
 
 def _ncbi_date_to_iso(value: object) -> str | None:
     """Convert an NCBI ``YYYYMMDD`` date (str or int) to ISO ``YYYY-MM-DD``.
@@ -81,7 +97,8 @@ class NCBIParser(BaseParser):
 
         Args:
             input_path: Path to gene_history file (can be .gz compressed).
-            species: NCBI taxon ID to filter by (default: "9606" for human).
+            species: NCBI taxon ID to filter by, or "all" to skip filtering
+                entirely (default: "9606" for human).
             gene_info_path: Optional path to the gene_info file.  When
                 supplied, ``_primary_ids`` on the returned mapping set is
                 populated with every current ``NCBIGene:<id>`` CURIE for the
@@ -122,7 +139,8 @@ class NCBIParser(BaseParser):
 
         Args:
             gene_info_path: Path to gene_info file.
-            species: NCBI taxon ID to filter by (default: "9606" for human).
+            species: NCBI taxon ID to filter by, or "all" to skip filtering
+                entirely (default: "9606" for human).
 
         Returns:
             LabelMappingSet with computed cardinalities based on labels.
@@ -160,7 +178,8 @@ class NCBIParser(BaseParser):
 
         Args:
             gene_info_path: Path to the gene_info file (can be .gz compressed).
-            species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
+            species: NCBI taxon ID to filter by, or ``"all"`` to skip
+                filtering entirely (default: ``"9606"`` for human).
 
         Returns:
             :class:`~pysec2pri.parsers.base.IdMappingSet` with ``_primary_ids``
@@ -188,7 +207,8 @@ class NCBIParser(BaseParser):
 
         Args:
             gene_info_path: Path to the gene_info file (can be .gz compressed).
-            species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
+            species: NCBI taxon ID to filter by, or ``"all"`` to skip
+                filtering entirely (default: ``"9606"`` for human).
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with
@@ -216,7 +236,8 @@ class NCBIParser(BaseParser):
         Args:
             gene_history_path: Path to gene_history file.
             gene_info_path: Path to gene_info file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or ``"all"`` to process
+                every organism in the file (see :data:`ALL_SPECIES`).
 
         Returns:
             Tuple of (IdMappingSet, LabelMappingSet).
@@ -234,21 +255,21 @@ class NCBIParser(BaseParser):
 
         Args:
             file_path: Path to gene_history file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or ``"all"`` to process
+                every organism in the file (see :data:`ALL_SPECIES`).
 
         Returns:
             List of SSSOM Mapping objects.
         """
-        df = (
+        df = _filter_by_taxon(
             pl.scan_csv(
                 file_path,
                 separator="\t",
                 infer_schema_length=10000,
                 null_values=["-"],
-            )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
-            .collect()
-        )
+            ),
+            species,
+        ).collect()
 
         if df.is_empty():
             return []
@@ -323,21 +344,21 @@ class NCBIParser(BaseParser):
 
         Args:
             file_path: Path to gene_info file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or ``"all"`` to process
+                every organism in the file (see :data:`ALL_SPECIES`).
 
         Returns:
             List of SSSOM Mapping objects for symbol mappings.
         """
-        df = (
+        df = _filter_by_taxon(
             pl.scan_csv(
                 file_path,
                 separator="\t",
                 infer_schema_length=10000,
                 null_values=["-"],
-            )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
-            .collect()
-        )
+            ),
+            species,
+        ).collect()
 
         if df.is_empty():
             return []
@@ -401,21 +422,20 @@ class NCBIParser(BaseParser):
 
         Args:
             file_path: Path to the gene_info file.
-            species: NCBI taxon ID string (e.g. ``"9606"``).
+            species: NCBI taxon ID string (e.g. ``"9606"``), or ``"all"``.
 
         Returns:
             Set of ``NCBIGene:<id>`` CURIEs.
         """
-        df = (
+        df = _filter_by_taxon(
             pl.scan_csv(
                 file_path,
                 separator="\t",
                 infer_schema_length=10000,
                 null_values=["-"],
-            )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
-            .collect()
-        )
+            ),
+            species,
+        ).collect()
         return {f"NCBIGene:{v}" for v in df["GeneID"].drop_nulls().cast(pl.Utf8).to_list()}
 
     def _extract_primary_labels(self, file_path: Path, species: str) -> dict[str, set[str]]:
@@ -426,19 +446,21 @@ class NCBIParser(BaseParser):
 
         Args:
             file_path: Path to the gene_info file.
-            species: NCBI taxon ID string (e.g. ``"9606"``).
+            species: NCBI taxon ID string (e.g. ``"9606"``), or ``"all"``.
 
         Returns:
             ``dict[label, set[NCBIGene:<id>]]``
         """
         df = (
-            pl.scan_csv(
-                file_path,
-                separator="\t",
-                infer_schema_length=10000,
-                null_values=["-"],
+            _filter_by_taxon(
+                pl.scan_csv(
+                    file_path,
+                    separator="\t",
+                    infer_schema_length=10000,
+                    null_values=["-"],
+                ),
+                species,
             )
-            .filter(pl.col("#tax_id").cast(pl.Utf8) == species)
             .select(["GeneID", "Symbol"])
             .collect()
         )

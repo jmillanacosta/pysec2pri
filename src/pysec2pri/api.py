@@ -75,6 +75,11 @@ __all__ = [
     "generate_uniprot",
     "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
+    "generate_vgnc",
+    "generate_vgnc_ids",
+    "generate_vgnc_labels",
+    "generate_vgnc_primary_ids",
+    "generate_vgnc_primary_labels",
     "generate_wikidata",
     "generate_wikidata_ids",
     "generate_wikidata_labels",
@@ -316,6 +321,161 @@ def generate_hgnc_labels(
     return parser.parse_labels(Path(input_path), statuses=statuses)
 
 
+def generate_vgnc(
+    input_path: Path | str | None = None,
+    complete_set_path: Path | str | None = None,
+    species: str | None = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return VGNC secondary to primary ID mappings.
+
+    Downloads the withdrawn and gene-set files automatically when
+    ``input_path`` / ``complete_set_path`` are omitted. The withdrawn
+    file's own ``taxon_id`` column is not populated upstream (see
+    :mod:`pysec2pri.parsers.vgnc`), so the *full* set is always parsed
+    first; *species* (when not ``"all"``) then subsets the output by
+    resolving each mapping's primary VGNC ID against the gene-set file.
+    The gene-set file is also used to populate the full list of current
+    primary IDs (for *species*, or across every species when *species* is
+    ``"all"``) so that
+    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids` returns the
+    authoritative list rather than just the primaries that happen to have a
+    secondary.
+
+    Args:
+        input_path: Local VGNC withdrawn TSV. Auto-downloaded if ``None``.
+        complete_set_path: Local VGNC gene-set TSV. Auto-downloaded if
+            ``None``.
+        species: NCBI taxon ID to subset the output to, or ``"all"``
+            (default) for the full, unfiltered set across every species.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+    from pysec2pri.parsers.vgnc import ALL_SPECIES
+
+    release_date = None
+    if input_path is None or complete_set_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        if input_path is None:
+            input_path = files["withdrawn"]
+        if complete_set_path is None:
+            complete_set_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    parse_species = None if species in (None, ALL_SPECIES) else species
+    return parser.parse(
+        Path(input_path), complete_set_path=Path(complete_set_path), species=parse_species
+    )
+
+
+def generate_vgnc_primary_ids(
+    input_path: Path | str | None = None,
+    species: str | None = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set containing the full list of current VGNC primary IDs.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_ids`` store is populated
+    with every current VGNC ID for *species*, or across all species when
+    *species* is ``"all"`` (default).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to subset the result to, or ``"all"``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+    from pysec2pri.parsers.vgnc import ALL_SPECIES
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    parse_species = None if species in (None, ALL_SPECIES) else species
+    return parser.parse_primary_ids(Path(input_path), species=parse_species)
+
+
+def generate_vgnc_primary_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> Sec2PriMappingSet:
+    """Return a mapping set with the full list of current VGNC primary symbols for one species.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_labels`` store is
+    populated with every current approved symbol for ``species``.
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_primary_labels(Path(input_path), species=species)
+
+
+def generate_vgnc_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+    statuses: list[str] | None = None,
+) -> Sec2PriMappingSet:
+    """Return VGNC label to previous-label mappings for one species.
+
+    Downloads the gene-set file automatically when ``input_path`` is
+    omitted. Symbols are not unique across species (the same approved
+    symbol can legitimately name orthologous genes in different species),
+    so ``species`` scopes ambiguity detection and ``to_pri_labels()`` to one
+    species' own namespace (see :mod:`pysec2pri.parsers.vgnc`).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+        statuses: Entry statuses to include (e.g. ``["Approved"]``).
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_labels(Path(input_path), species=species, statuses=statuses)
+
+
 def generate_chebi_primary_ids(
     input_path: Path | str | None = None,
     version: str | None = None,
@@ -396,7 +556,7 @@ def generate_chebi_primary_labels(
 
 def generate_ncbi_primary_ids(
     input_path: Path | str | None = None,
-    species: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -408,7 +568,8 @@ def generate_ncbi_primary_ids(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -426,7 +587,7 @@ def generate_ncbi_primary_ids(
 
 def generate_ncbi_primary_labels(
     input_path: Path | str | None = None,
-    species: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -438,7 +599,8 @@ def generate_ncbi_primary_labels(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        species: NCBI taxon ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -526,7 +688,7 @@ def generate_uniprot_primary_ids(
 def generate_ncbi(
     input_path: Path | str | None = None,
     gene_info_path: Path | str | None = None,
-    species: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -544,7 +706,8 @@ def generate_ncbi(
         gene_info_path: Local gene_info file used to populate the full primary
             ID list. Auto-downloaded together with ``input_path`` when both
             are ``None``.
-        species: NCBI taxon ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -565,7 +728,7 @@ def generate_ncbi(
 
 def generate_ncbi_labels(
     input_path: Path | str | None = None,
-    species: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -575,7 +738,8 @@ def generate_ncbi_labels(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        species: NCBI taxon ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -620,11 +784,142 @@ def _auto_download_ensembl(
     return files, version, release_date
 
 
+def _process_one_ensembl_species(
+    kind: str,
+    version: str,
+    token: str,
+    assembly: str,
+    release_date: datetime | None,
+) -> Sec2PriMappingSet:
+    """Download and parse one Ensembl species, for the ``species="all"`` bulk path.
+
+    Builds download URLs directly from *token*/*assembly* (as discovered by
+    :func:`~pysec2pri.parsers.ensembl.discover_ensembl_species`), bypassing
+    the taxon-ID-based resolution :class:`EnsemblDownloader` normally does
+    -- the bulk path already knows the exact token to use for every species
+    in one shot, so re-resolving each one individually would be redundant.
+    """
+    import shutil
+    import tempfile
+
+    from pysec2pri.constants import ENSEMBL
+    from pysec2pri.download import _download_urls
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    keys = (
+        ["stable_id_event", "mapping_session", "gene"]
+        if kind == "ids"
+        else ["gene", "xref", "external_synonym"]
+    )
+    urls = {
+        key: ENSEMBL.download_urls[key].format(version=version, species=token, assembly=assembly)
+        for key in keys
+    }
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_ensembl_all_{token}_"))
+    try:
+        files = _download_urls(urls, tmpdir, decompress=True)
+        parser = EnsemblParser(version=version, show_progress=False, species=token)
+        parser.release_date = release_date
+        if kind == "ids":
+            return parser.parse(
+                files["stable_id_event"],
+                mapping_session_path=files.get("mapping_session"),
+                gene_path=files.get("gene"),
+            )
+        return parser.parse_labels(
+            files.get("gene"), files.get("xref"), files.get("external_synonym")
+        )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _generate_ensembl_all_species(
+    kind: str,
+    version: str | None,
+    show_progress: bool,
+) -> Sec2PriMappingSet:
+    """Process every Ensembl species at *version* and combine into one mapping set.
+
+    Network-heavy: downloads and parses each of Ensembl's ~276 species in
+    turn (one at a time, deleting each species' files before starting the
+    next, so disk usage never exceeds a single species). A per-species
+    failure is logged and skipped rather than aborting the whole run,
+    mirroring :mod:`pysec2pri.consolidate`'s per-release resilience.
+
+    Each individual mapping keeps the ``record_id`` it was parsed with
+    (scoped to its own species, as normal); only the *combined* mapping
+    set's own ``mapping_set_id`` is tagged with the ``"all"`` slug. Because
+    every species is now folded into one mapping set, a symbol shared by
+    two species' genes is correctly flagged ambiguous (there's no longer
+    separate per-species scoping to disambiguate it).
+
+    Args:
+        kind: ``"ids"`` or ``"labels"``.
+        version: Ensembl release number. Latest release is used when
+            ``None``.
+        show_progress: Whether to show a progress bar over species.
+
+    Returns:
+        Combined :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`.
+
+    Raises:
+        ValueError: If no species could be processed at all.
+    """
+    from pysec2pri.download import check_ensembl_release, resolve_release_date
+    from pysec2pri.logging import logger
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser, discover_ensembl_species
+
+    if version is None:
+        version = check_ensembl_release().version
+        if version is None:
+            raise ValueError("Could not determine the latest Ensembl release.")
+    release_date = resolve_release_date("ensembl", version)
+
+    species_list = discover_ensembl_species(version)
+    iterator: Any = species_list
+    if show_progress:
+        from tqdm import tqdm
+
+        iterator = tqdm(species_list, desc=f"Processing {len(species_list)} Ensembl species")
+
+    all_mappings: list[Any] = []
+    primary_ids: set[str] = set()
+    primary_labels: dict[str, set[str]] = {}
+    processed = 0
+    for token, assembly in iterator:
+        try:
+            ms = _process_one_ensembl_species(kind, version, token, assembly, release_date)
+        except Exception:
+            logger.warning(
+                "Skipping Ensembl species %s during all-species run", token, exc_info=True
+            )
+            continue
+        all_mappings.extend(ms.mappings or [])
+        primary_ids |= getattr(ms, "_primary_ids", None) or set()
+        for label, ids in (getattr(ms, "_primary_labels", None) or {}).items():
+            primary_labels.setdefault(label, set()).update(ids)
+        processed += 1
+
+    if processed == 0:
+        raise ValueError(f"No Ensembl species could be processed for release {version!r}.")
+
+    combined_parser = EnsemblParser(version=version, show_progress=False, species=ALL_SPECIES)
+    combined_parser.release_date = release_date
+    combined = combined_parser.create_mapping_set(
+        all_mappings, mapping_type="id" if kind == "ids" else "label"
+    )
+    if primary_ids:
+        object.__setattr__(combined, "_primary_ids", primary_ids)
+    if primary_labels:
+        object.__setattr__(combined, "_primary_labels", primary_labels)
+    return combined
+
+
 def generate_ensembl(
     input_path: Path | str | None = None,
     mapping_session_path: Path | str | None = None,
     gene_path: Path | str | None = None,
-    species: str | int = 9606,
+    species: str | int = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -639,17 +934,24 @@ def generate_ensembl(
     Args:
         input_path: Local ``stable_id_event`` file (the ``ids`` mapping
             set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
-            if ``None``.
+            if ``None``. Ignored when *species* is ``"all"``.
         mapping_session_path: Local ``mapping_session`` file, used to resolve
             each row's ``mapping_date``. Auto-downloaded together with
             ``input_path`` when both are ``None``.
         gene_path: Local ``gene`` file, used to populate the full primary ID
             list. Auto-downloaded together with the others when ``None``.
-        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        species: Canonical NCBI taxon ID, or ``"all"`` (default) to process
+            every species Ensembl publishes and combine them into one
+            mapping set -- see :func:`_generate_ensembl_all_species`. This
+            is a network-heavy operation (~276 species); pass an explicit
+            taxon ID for a fast, single-species run.
         version: Ensembl release number. Latest release is used when ``None``.
         show_progress: Whether to show progress bars.
     """
-    from pysec2pri.parsers.ensembl import EnsemblParser
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser
+
+    if species == ALL_SPECIES:
+        return _generate_ensembl_all_species("ids", version, show_progress)
 
     release_date = None
     if input_path is None or mapping_session_path is None or gene_path is None:
@@ -676,7 +978,7 @@ def generate_ensembl_labels(
     input_path: Path | str | None = None,
     gene_path: Path | str | None = None,
     xref_path: Path | str | None = None,
-    species: str | int = 9606,
+    species: str | int = "all",
     version: str | None = None,
     show_progress: bool = True,
 ) -> Sec2PriMappingSet:
@@ -688,14 +990,23 @@ def generate_ensembl_labels(
     Args:
         input_path: Local ``external_synonym`` file (the ``labels`` mapping
             set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
-            if ``None``.
+            if ``None``. Ignored when *species* is ``"all"``.
         gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
         xref_path: Local ``xref`` file. Auto-downloaded if ``None``.
-        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        species: Canonical NCBI taxon ID, or ``"all"`` (default) to process
+            every species Ensembl publishes and combine them into one
+            mapping set -- see :func:`_generate_ensembl_all_species`. A
+            symbol shared by two species becomes genuinely ambiguous in
+            that combined output (there's no longer a per-species scope to
+            disambiguate it). This is network-heavy (~276 species); pass
+            an explicit taxon ID for a fast, single-species run.
         version: Ensembl release number. Latest release is used when ``None``.
         show_progress: Whether to show progress bars.
     """
-    from pysec2pri.parsers.ensembl import EnsemblParser
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser
+
+    if species == ALL_SPECIES:
+        return _generate_ensembl_all_species("labels", version, show_progress)
 
     release_date = None
     if input_path is None or gene_path is None or xref_path is None:
@@ -1804,5 +2115,6 @@ generate_ncbi_labels = generate_ncbi_labels
 generate_hmdb_ids = generate_hmdb
 generate_hmdb_proteins_ids = generate_hmdb_proteins
 generate_uniprot_ids = generate_uniprot
+generate_vgnc_ids = generate_vgnc
 generate_wikidata_ids = generate_wikidata
 generate_wikidata_labels = generate_wikidata_labels
