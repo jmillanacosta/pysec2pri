@@ -6,6 +6,12 @@ parser_class: "HGNCParser"
 prefix: "HGNC"
 curie_base_url: "http://identifiers.org/hgnc/"
 entity_types: ["genes"]
+
+# Genome assembly/build for subject|object-source-version (issue #51). HGNC is
+# human-only, so a single datasource-wide build applies (the release itself is
+# already explicit in mapping_set_version).
+genome_build:
+  default: "GRCh38"
 mappingset:
   sssom_version: null
   curie_map:

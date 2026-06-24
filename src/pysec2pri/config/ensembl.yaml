@@ -147,7 +147,7 @@ species:
     307959: { token: 'sinocyclocheilus_rhinocerous',  label: 'Horned golden-line barbel'}
     9796: { token: 'equus_caballus',  label: 'Horse'}
     62062: { token: 'hucho_hucho',  label: 'Huchen'}
-    9606: { token: 'homo_sapiens',  label: 'Human'}
+    9606: { token: 'homo_sapiens',  label: 'Human', build: 'GRCh38'}
     30522: { token: 'bos_indicus_x_bos_taurus',  label: 'Hybrid - Bos Taurus'}
     9813: { token: 'procavia_capensis',  label: 'Hyrax'}
     35670: { token: 'naja_naja',  label: 'Indian cobra'}
@@ -188,7 +188,7 @@ species:
     61819: { token: 'amphilophus_citrinellus',  label: 'Midas cichlid'}
     10047: { token: 'meriones_unguiculatus',  label: 'Mongolian gerbil'}
     32473: { token: 'xiphophorus_couchianus',  label: 'Monterrey platyfish'}
-    10090: { token: 'mus_musculus',  label: 'Mouse NZO/HlLtJ'}
+    10090: { token: 'mus_musculus',  label: 'Mouse NZO/HlLtJ', build: 'GRCm39'}
     10091: { token: 'mus_musculus_castaneus',  label: 'Mouse CAST/EiJ'}
     57486: { token: 'mus_musculus_molossinus',  label: 'Mouse JF1/MsJ'}
     30608: { token: 'microcebus_murinus',  label: 'Mouse Lemur'}
@@ -291,8 +291,19 @@ species:
     1841481: { token: 'seriola_lalandi_dorsalis',  label: 'Yellowtail amberjack'}
     59729: { token: 'taeniopygia_guttata',  label: 'Zebra finch'}
     106582: { token: 'maylandia_zebra',  label: 'Zebra mbuna'}
-    7955: { token: 'danio_rerio',  label: 'Zebrafish'}
+    7955: { token: 'danio_rerio',  label: 'Zebrafish', build: 'GRCz11'}
     205130: { token: 'mastacembelus_armatus',  label: 'Zig-zag eel'}
+
+# Genome assembly/build for subject|object-source-version (issue #51). The
+# release is already explicit in mapping_set_version (e.g. Ensembl 115), so
+# these fields carry the build instead. For ID mappings the *true* per-side
+# build is read straight from mapping_session (old_assembly -> subject,
+# new_assembly -> object), so only the current-build defaults for the
+# label/primary sets need listing here, per species under
+# `species.available[<taxon>].build`. `source_url` documents how to fetch the
+# exact assembly for any species/release not curated above.
+genome_build:
+  source_url: "https://rest.ensembl.org/info/assembly/{species}?content-type=application/json"
 
 mappingset:
   sssom_version: null

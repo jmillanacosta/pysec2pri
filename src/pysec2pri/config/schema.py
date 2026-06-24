@@ -99,6 +99,7 @@ class DatasourceConfigSchema(BaseModel):
     distribution_eras: list[DistributionEraSchema] = Field(default_factory=list)
     xref_sources: list[XrefSourceSchema] = Field(default_factory=list)
     species: dict[str, Any] = Field(default_factory=dict)
+    genome_build: dict[str, Any] = Field(default_factory=dict)
     subset: dict[str, Any] = Field(default_factory=dict)
     mappingset: dict[str, Any] = Field(default_factory=dict)
     mapping: dict[str, Any] = Field(default_factory=dict)
