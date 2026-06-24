@@ -13,16 +13,18 @@ entity_types: ["genes"]
 # (one download URL per species), VGNC publishes a single global TSV per
 # file with a `taxon_id` column, filtered the same way NCBI's
 # gene_info/gene_history are filtered by `#tax_id` -- see VGNCParser.
-# `default` is chimpanzee: VGNC's most prominent/most-cited species (first
-# in the live dataset), not a biological "primary" species the way human is
-# for Ensembl/NCBI. VGNCParser never calls species_token(), so `available`
+# `default: "all"` processes every species together (see
+# VGNCParser.ALL_SPECIES) -- cheap for ids (the global withdrawn set is
+# always parsed in full regardless), heavier for labels (a symbol shared
+# by two species becomes genuinely ambiguous with no per-species scope to
+# disambiguate it). VGNCParser never calls species_token(), so `available`
 # exists only to drive CLI help/choices and never restricts which taxon IDs
 # are accepted. Taxon IDs below were verified against the live data (each
 # species' own vgnc/tsv/<species>/*_vgnc_gene_set_All.tsv, cross-referenced
 # by VGNC ID against vgnc/tsv/all/all_vgnc_gene_set_All.tsv's taxon_id
 # column).
 species:
-  default: 9598
+  default: "all"
   available:
     9913:
       token: '9913'

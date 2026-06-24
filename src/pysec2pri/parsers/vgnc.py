@@ -9,17 +9,25 @@ species at once, with a ``taxon_id`` column -- closer to how NCBI's
 one-URL-per-species layout.
 
 This parser extracts:
-1. ID-to-ID mappings: withdrawn/merged VGNC IDs -> current VGNC IDs. VGNC
-   IDs are unique across all species (like HGNC IDs), and the withdrawn
-   file's ``taxon_id`` column is not populated upstream, so this is never
-   filtered by species.
+1. ID-to-ID mappings: withdrawn/merged VGNC IDs -> current VGNC IDs. The
+   withdrawn file's own ``taxon_id`` column is not populated upstream, so
+   :meth:`VGNCParser.parse` always parses the *full*, unfiltered withdrawn
+   file first; an optional ``species`` then *subsets the output* by
+   resolving each mapping's primary (replacement) VGNC ID against the
+   gene-set file's ``taxon_id`` column. Withdrawn entries with no
+   resolvable replacement can't be attributed to a species and are
+   dropped when subsetting (they could belong to any one).
 2. Label-to-label mappings: previous/alias gene symbols -> current symbols,
    from the gene-set file. Symbols are *not* unique across species (the same
    approved symbol can legitimately name orthologous genes in different
    species), so every label-mapping method requires an explicit ``species``
    (NCBI taxon ID) filter -- this is what lets cardinality/ambiguity
    detection and ``to_pri_labels()`` stay scoped to one species' namespace
-   instead of flagging cross-species homonyms as ambiguous.
+   instead of flagging cross-species homonyms as ambiguous. Passing
+   :data:`ALL_SPECIES` processes every species together instead, in which
+   case a shared symbol *is* genuinely ambiguous (there's no other context
+   to tell the species apart) and gets flagged accordingly -- that's
+   ``_annotate_ambiguous_mappings`` doing its job, not a bug.
 
 Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
@@ -48,6 +56,10 @@ PREV_SYMBOL = "prev_symbol"
 DATE_SYMBOL_CHANGED = "date_symbol_changed"
 STATUS = "status"
 TAXON_ID = "taxon_id"
+
+#: Sentinel accepted by every species-aware method: skip taxon filtering/
+#: subsetting entirely and process every species together.
+ALL_SPECIES = "all"
 
 
 class VGNCParser(BaseParser):
@@ -101,50 +113,80 @@ class VGNCParser(BaseParser):
         self,
         input_path: Path | str | None,
         complete_set_path: Path | str | None = None,
+        species: str | None = None,
     ) -> Sec2PriMappingSet:
         """Parse the VGNC withdrawn TSV file into an IdMappingSet.
 
-        Never filtered by species: VGNC IDs are globally unique and the
-        withdrawn file's ``taxon_id`` column is not populated upstream.
+        Always parses the *full*, unfiltered withdrawn file first (see
+        module docstring); when *species* is given (and isn't
+        :data:`ALL_SPECIES`), the result is then subset by resolving each
+        mapping's primary VGNC ID against the gene-set file's ``taxon_id``
+        column -- this requires *complete_set_path*.
 
         Args:
             input_path: Path to the VGNC withdrawn TSV file.
-            complete_set_path: Optional path to the VGNC gene-set file. When
+            complete_set_path: Path to the VGNC gene-set file. Required
+                when *species* is given (used to resolve taxon IDs). When
                 supplied, ``_primary_ids`` on the returned mapping set is
-                populated with every current VGNC ID across all species, not
-                just those that appear as ``object_id`` in a withdrawn to
-                primary mapping.
+                populated with every current VGNC ID for *species* (or
+                across all species, when *species* is ``None``/``"all"``).
+            species: NCBI taxon ID to subset the output to, or
+                :data:`ALL_SPECIES`. ``None`` (default) returns the full,
+                unfiltered set across every species.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
+
+        Raises:
+            ValueError: If *species* is given without *complete_set_path*
+                (there is no other way to resolve taxon IDs).
         """
         if input_path is None:
             raise ValueError("input_path must not be None")
+        if species not in (None, ALL_SPECIES) and complete_set_path is None:
+            raise ValueError("species subsetting requires complete_set_path to resolve taxon IDs.")
         input_path = Path(input_path)
         self._resolve_version(input_path)
+        if species not in (None, ALL_SPECIES):
+            self.species = species
 
         mappings = self._parse_withdrawn(input_path)
+
+        taxon_by_id: dict[str, str] | None = None
+        if complete_set_path is not None:
+            taxon_by_id = self._taxon_by_vgnc_id(Path(complete_set_path))
+
+        if species not in (None, ALL_SPECIES) and taxon_by_id is not None:
+            mappings = [
+                m
+                for m in mappings
+                if taxon_by_id.get(str(getattr(m, "object_id", "") or "")) == str(species)
+            ]
+
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
 
         if complete_set_path is not None:
-            object.__setattr__(
-                mapping_set,
-                "_primary_ids",
-                self._extract_primary_ids(Path(complete_set_path)),
-            )
+            primary_ids = self._extract_primary_ids(Path(complete_set_path))
+            if species not in (None, ALL_SPECIES) and taxon_by_id is not None:
+                primary_ids = {vid for vid in primary_ids if taxon_by_id.get(vid) == str(species)}
+            object.__setattr__(mapping_set, "_primary_ids", primary_ids)
         return mapping_set
 
     def parse_primary_ids(
         self,
         complete_set_path: Path | str | None,
+        species: str | None = None,
     ) -> Sec2PriMappingSet:
         """Return a mapping set whose only content is the full primary ID list.
 
-        Reads the VGNC gene-set file to extract every current VGNC ID
-        across all species (not filtered: see :meth:`parse`).
+        Reads the VGNC gene-set file to extract every current VGNC ID,
+        optionally subset to *species*.
 
         Args:
             complete_set_path: Path to the VGNC gene-set TSV file.
+            species: NCBI taxon ID to subset the result to, or
+                :data:`ALL_SPECIES`. ``None`` (default) returns the full,
+                unfiltered set across every species.
 
         Returns:
             :class:`~pysec2pri.parsers.base.IdMappingSet` with no mappings
@@ -154,13 +196,16 @@ class VGNCParser(BaseParser):
             raise ValueError("complete_set_path must not be None")
         complete_set_path = Path(complete_set_path)
         self._resolve_version(complete_set_path)
+        if species not in (None, ALL_SPECIES):
+            self.species = species
+
+        primary_ids = self._extract_primary_ids(complete_set_path)
+        if species not in (None, ALL_SPECIES):
+            taxon_by_id = self._taxon_by_vgnc_id(complete_set_path)
+            primary_ids = {vid for vid in primary_ids if taxon_by_id.get(vid) == str(species)}
 
         mapping_set = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(
-            mapping_set,
-            "_primary_ids",
-            self._extract_primary_ids(complete_set_path),
-        )
+        object.__setattr__(mapping_set, "_primary_ids", primary_ids)
         return mapping_set
 
     def parse_labels(
@@ -173,10 +218,13 @@ class VGNCParser(BaseParser):
 
         Args:
             complete_set_path: Path to the VGNC gene-set TSV file.
-            species: NCBI taxon ID to filter by. Required at this layer --
-                callers needing config's ``species.default`` fallback (see
-                ``config/vgnc.yaml``) should resolve it themselves, as
-                :mod:`pysec2pri.api`'s ``generate_vgnc_labels`` does.
+            species: NCBI taxon ID to filter by, or :data:`ALL_SPECIES` to
+                process every species together (see module docstring for
+                why that changes ambiguity detection). Required at this
+                layer -- callers needing config's ``species.default``
+                fallback (see ``config/vgnc.yaml``) should resolve it
+                themselves, as :mod:`pysec2pri.api`'s
+                ``generate_vgnc_labels`` does.
             statuses: Entry statuses to include (e.g. ``["Approved"]``).
                 If ``None`` (default), all entries are included.
 
@@ -212,7 +260,7 @@ class VGNCParser(BaseParser):
 
         Args:
             complete_set_path: Path to the VGNC gene-set TSV file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or :data:`ALL_SPECIES`.
 
         Returns:
             :class:`~pysec2pri.parsers.base.LabelMappingSet` with no
@@ -272,6 +320,34 @@ class VGNCParser(BaseParser):
             raise ValueError(f"Could not find vgnc_id column in {file_path}")
         return {str(val) for val in df[vgnc_id_col].drop_nulls().to_list()}
 
+    def _taxon_by_vgnc_id(self, file_path: Path) -> dict[str, str]:
+        """Return ``{vgnc_id: taxon_id}`` for every current gene in the gene-set file.
+
+        Used to resolve which species a withdrawn entry's *replacement*
+        gene belongs to, since the withdrawn file's own ``taxon_id``
+        column is not populated upstream (see module docstring).
+
+        Args:
+            file_path: Path to the VGNC gene-set TSV file.
+
+        Returns:
+            ``dict[vgnc_id, taxon_id]``.
+        """
+        df = pl.read_csv(
+            file_path,
+            separator="\t",
+            infer_schema_length=10000,
+            null_values=[""],
+        )
+        vgnc_id_col = self._find_column(df.columns, VGNC_ID)
+        taxon_col = self._find_column(df.columns, TAXON_ID)
+        if vgnc_id_col is None or taxon_col is None:
+            raise ValueError(f"Could not find vgnc_id/taxon_id columns in {file_path}")
+        return {
+            str(vid): str(taxon)
+            for vid, taxon in df.select([vgnc_id_col, taxon_col]).drop_nulls().rows()
+        }
+
     def _extract_primary_labels(self, file_path: Path, species: str) -> dict[str, set[str]]:
         """Extract all current approved VGNC symbols for *species*.
 
@@ -280,7 +356,8 @@ class VGNCParser(BaseParser):
 
         Args:
             file_path: Path to the VGNC gene-set TSV file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or :data:`ALL_SPECIES` to
+                process every species together.
 
         Returns:
             ``dict[label, set[vgnc_id]]``
@@ -298,7 +375,11 @@ class VGNCParser(BaseParser):
         if symbol_col is None or vgnc_id_col is None or taxon_col is None:
             raise ValueError(f"Could not find required columns in {file_path}")
 
-        filtered = df.filter(pl.col(taxon_col).cast(pl.Utf8) == str(species))
+        filtered = (
+            df
+            if species == ALL_SPECIES
+            else df.filter(pl.col(taxon_col).cast(pl.Utf8) == str(species))
+        )
         if status_col:
             filtered = filtered.filter(pl.col(status_col) == "Approved")
 
@@ -407,7 +488,8 @@ class VGNCParser(BaseParser):
 
         Args:
             file_path: Path to the VGNC gene-set TSV file.
-            species: NCBI taxon ID to filter by.
+            species: NCBI taxon ID to filter by, or :data:`ALL_SPECIES` to
+                process every species together.
             statuses: Entry statuses to include (e.g. ``["Approved"]``).
                 If ``None`` (default), all entries are included.
 
@@ -435,7 +517,11 @@ class VGNCParser(BaseParser):
         assert label_col is not None
         assert taxon_col is not None
 
-        df_species = df.filter(pl.col(taxon_col).cast(pl.Utf8) == str(species))
+        df_species = (
+            df
+            if species == ALL_SPECIES
+            else df.filter(pl.col(taxon_col).cast(pl.Utf8) == str(species))
+        )
         if statuses is not None and status_col:
             df_species = df_species.filter(pl.col(status_col).is_in(statuses))
 

@@ -162,6 +162,80 @@ def _lookup_ensembl_species_token(taxon_id: str | int) -> str | None:
     return min(matches, key=len) if matches else None
 
 
+#: Sentinel accepted by ``species=``: process every species Ensembl
+#: publishes for the release, instead of one.
+ALL_SPECIES = "all"
+
+
+def _ensembl_taxon_by_token() -> dict[str, str]:
+    """Return ``{species_token: taxon_id}`` from Ensembl's REST species list.
+
+    Returns ``{}`` if the REST API is unreachable.
+    """
+    try:
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(_ENSEMBL_REST_SPECIES_URL)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError:
+        return {}
+    return {
+        str(entry["name"]): str(entry["taxon_id"])
+        for entry in data.get("species", [])
+        if entry.get("name") and entry.get("taxon_id")
+    }
+
+
+def discover_ensembl_species(version: str) -> list[tuple[str, str]]:
+    """Return ``(species_token, assembly)`` for every species published at *version*.
+
+    Scrapes the release's ``mysql/`` directory listing exactly once -- a
+    single HTTP request covers every species at once, unlike per-species
+    assembly auto-discovery (:meth:`EnsemblDownloader._resolve_core_dir`),
+    which would otherwise need one request per species to do the same.
+    Used by the ``species="all"`` bulk path (see
+    :func:`pysec2pri.api._generate_ensembl_all_species`).
+
+    The raw directory listing includes one entry per *assembly*, not per
+    species -- several breed/strain assemblies can share one species (e.g.
+    half a dozen dog breeds). Those are deduped to a single canonical
+    (shortest-named) token per taxon ID, cross-referenced via Ensembl's
+    REST species list, so the bulk run produces one mapping set per
+    species rather than one per assembly.
+
+    Args:
+        version: Ensembl release number.
+
+    Returns:
+        Sorted list of ``(species_token, assembly)`` tuples, e.g.
+        ``("homo_sapiens", "38")``.
+
+    Raises:
+        httpx.HTTPError: If the release's directory listing can't be
+            fetched at all (unlike per-species discovery, there is no
+            sensible fallback when the *entire* species list is needed).
+    """
+    index_url = f"https://ftp.ensembl.org/pub/release-{version}/mysql/"
+    with httpx.Client(follow_redirects=True, timeout=60.0) as client:
+        response = client.get(index_url)
+        response.raise_for_status()
+
+    pattern = re.compile(rf'href="([a-z0-9_]+)_core_{re.escape(str(version))}_(\d+)/"')
+    published = dict(sorted(set(pattern.findall(response.text))))
+
+    taxon_by_token = _ensembl_taxon_by_token()
+    if not taxon_by_token:
+        return sorted(published.items())
+
+    tokens_by_taxon: dict[str, list[str]] = {}
+    for token in published:
+        key = taxon_by_token.get(token, f"_untagged:{token}")
+        tokens_by_taxon.setdefault(key, []).append(token)
+
+    canonical_tokens = {min(tokens, key=len) for tokens in tokens_by_taxon.values()}
+    return sorted((tok, published[tok]) for tok in canonical_tokens)
+
+
 def _ensembl_date_to_iso(value: object) -> str | None:
     """Convert a ``mapping_session.created`` timestamp to ISO ``YYYY-MM-DD``.
 

@@ -9,8 +9,13 @@ entity_types: ["genes"]
 
 # Canonical key = NCBI taxon ID. `token` is Ensembl's own species directory
 # component (e.g. https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/).
+# `default: "all"` processes every species Ensembl publishes for the
+# release and combines them into one mapping set (see
+# pysec2pri.api._generate_ensembl_all_species) -- network-heavy (~276
+# species, one download each); pass an explicit taxon ID for a fast,
+# single-species run.
 species:
-  default: 9606
+  default: "all"
   available:
     106734: { token: 'chelonoidis_abingdonii',  label: 'Abingdon island giant tortoise'}
     441894: { token: 'struthio_camelus_australis',  label: 'African ostrich'}

@@ -326,8 +326,49 @@ class TestVGNCParser:
             vgnc_gene_set_path, species="9615"
         )
         assert chimp.mapping_set_id != dog.mapping_set_id
-        assert "9598" in chimp.mapping_set_id
-        assert "9615" in dog.mapping_set_id
+
+    def test_all_species_labels_combines_and_flags_shared_symbol_ambiguous(
+        self, vgnc_gene_set_path: Path
+    ) -> None:
+        """species="all" processes every species together; a shared symbol becomes ambiguous.
+
+        Unlike per-species scoping (see
+        test_species_scoping_avoids_cross_species_symbol_collision), combining
+        every species means "SHAREDSYM" genuinely has two distinct primary IDs
+        with no other context to disambiguate them.
+        """
+        result = VGNCParser(show_progress=False).parse_labels(vgnc_gene_set_path, species="all")
+        mappings = result.mappings or []
+        by_label = {m.subject_label: m for m in mappings}
+        # Both chimp and dog rows are present together now.
+        assert {"ALTC1", "OLDCHIMP", "ALTD1", "OLDDOG"} <= set(by_label)
+        assert result._primary_labels["SHAREDSYM"] == {"VGNC:9503", "VGNC:9504"}
+
+    def test_ids_subset_by_species_drops_unresolvable_withdrawn_entries(
+        self, vgnc_withdrawn_path: Path, vgnc_gene_set_path: Path
+    ) -> None:
+        """species= subsets withdrawn mappings by resolving the replacement gene's taxon.
+
+        mock_vgnc_withdrawn.tsv: VGNC:9001 has no replacement (unresolvable,
+        dropped under subsetting); VGNC:9002 merges into chimp's VGNC:9501.
+        """
+        full = VGNCParser(show_progress=False).parse(
+            vgnc_withdrawn_path, complete_set_path=vgnc_gene_set_path
+        )
+        chimp = VGNCParser(show_progress=False).parse(
+            vgnc_withdrawn_path, complete_set_path=vgnc_gene_set_path, species="9598"
+        )
+        dog = VGNCParser(show_progress=False).parse(
+            vgnc_withdrawn_path, complete_set_path=vgnc_gene_set_path, species="9615"
+        )
+        assert {m.subject_id for m in full.mappings} == {"VGNC:9001", "VGNC:9002"}
+        assert {m.subject_id for m in chimp.mappings} == {"VGNC:9002"}
+        assert dog.mappings == []
+
+    def test_ids_species_requires_complete_set_path(self, vgnc_withdrawn_path: Path) -> None:
+        """species= without complete_set_path raises -- there's no way to resolve taxon IDs."""
+        with pytest.raises(ValueError, match="complete_set_path"):
+            VGNCParser(show_progress=False).parse(vgnc_withdrawn_path, species="9598")
 
 
 class TestNCBIParser:
@@ -338,6 +379,17 @@ class TestNCBIParser:
         result = NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606")
         assert isinstance(result, Sec2PriMappingSet)
         assert len(result.mappings) > 0
+
+    def test_parse_all_species_includes_every_organism(self, ncbi_history_path: Path) -> None:
+        """species="all" skips the taxon filter, including non-human rows.
+
+        mock_gene_history.tsv has 4 human (9606) rows and 1 mouse (10090) row.
+        """
+        human_only = NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606")
+        all_species = NCBIParser(show_progress=False).parse(ncbi_history_path, species="all")
+        assert len(all_species.mappings) > len(human_only.mappings)
+        subjects = {m.subject_id for m in all_species.mappings}
+        assert "NCBIGene:999999" in subjects  # the mouse row's Discontinued_GeneID
 
     def test_parse_with_gene_info_populates_primary_ids(
         self, ncbi_history_path: Path, ncbi_info_path: Path

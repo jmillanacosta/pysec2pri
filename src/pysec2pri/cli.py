@@ -90,11 +90,14 @@ def _opt_species_for(cfg_id: str) -> Callable[..., Any]:
     """
     default = str(get_datasource_config(cfg_id).default_species())
     choices = _species_choices_text(cfg_id)
-    help_text = "Species as NCBI taxon ID."
+    help_text = "Species as NCBI taxon ID, or 'all' to process every species."
     if choices:
         help_text += f" Known: {choices}."
     if cfg_id == "ensembl":
-        help_text += " Other taxon IDs are resolved via Ensembl's own live species list."
+        help_text += (
+            " Other taxon IDs are resolved via Ensembl's own live species list; "
+            "'all' downloads and combines all ~276 species (slow, network-heavy)."
+        )
     return _opt("--species", default=default, show_default=True, help=help_text)
 
 
@@ -388,7 +391,7 @@ def _build_registry() -> dict[tuple[str, str], tuple[Callable[..., Any], list[Ca
         ("hmdb_metabolites", "ids"): (api.generate_hmdb_ids, []),
         ("hmdb_proteins", "ids"): (api.generate_hmdb_proteins_ids, []),
         ("uniprot", "ids"): (api.generate_uniprot_ids, [_opt_delac_file]),
-        ("vgnc", "ids"): (api.generate_vgnc_ids, []),
+        ("vgnc", "ids"): (api.generate_vgnc_ids, [_opt_species_for("vgnc")]),
         ("vgnc", "labels"): (api.generate_vgnc_labels, [_opt_species_for("vgnc")]),
         ("wikidata", "ids"): (api.generate_wikidata_ids, [_opt_entity_type, _opt_test_subset]),
         ("wikidata", "labels"): (

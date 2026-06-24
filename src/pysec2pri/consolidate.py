@@ -645,6 +645,16 @@ def consolidate_mapping_dates(
             f"{datasource!r} does not support mapping_sets={mapping_sets!r}. "
             f"Supported: {_SUPPORTED_MAPPING_SETS[datasource]}"
         )
+    if datasource == "ensembl":
+        config = ALL_DATASOURCES["ensembl"]
+        species = kwargs.get("species") or config.default_species()
+        if species == "all":
+            raise ValueError(
+                "ensembl consolidation requires an explicit single species= taxon ID. "
+                "Its config default is species='all', which the per-version "
+                "download/parse step used here (unlike pysec2pri.api's bulk "
+                "generate_ensembl) has no support for."
+            )
 
     cache_dir = cache_dir or default_cache_dir()
     cache_path = _cache_path(cache_dir, datasource, mapping_sets, **kwargs)
