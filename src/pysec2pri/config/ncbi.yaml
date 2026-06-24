@@ -20,10 +20,18 @@ entity_types: ["genes"]
 species:
   default: "all"
   available:
-    9606: { token: "9606", label: Human }
-    10090: { token: "10090", label: Mouse }
+    9606: { token: "9606", label: Human, build: "GRCh38" }
+    10090: { token: "10090", label: Mouse, build: "GRCm39" }
     10116: { token: "10116", label: Rat }
-    7955: { token: "7955", label: Zebrafish }
+    7955: { token: "7955", label: Zebrafish, build: "GRCz11" }
+
+# Genome assembly/build for subject|object-source-version (issue #51). gene_info
+# carries no assembly column, so the current build per species is listed above
+# under `species.available[<taxon>].build`. Under species="all" the build is
+# heterogeneous, so source-version falls back to the release. `source_url`
+# points at NCBI's per-assembly reports for builds not curated here.
+genome_build:
+  source_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/"
 mappingset:
   sssom_version: null
   curie_map:

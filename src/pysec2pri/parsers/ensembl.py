@@ -253,6 +253,51 @@ def _ensembl_date_to_iso(value: object) -> str | None:
     return text.split(" ", 1)[0]
 
 
+def _clean_assembly(value: object) -> str | None:
+    r"""Return a ``mapping_session`` assembly cell stripped, or ``None`` if empty.
+
+    Args:
+        value: Raw ``old_assembly``/``new_assembly`` cell, e.g. ``"GRCh38"``
+            (``\N`` nulls already arrive as ``None`` from the scan).
+
+    Returns:
+        The assembly name, or ``None`` when missing/blank.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _load_session_meta(
+    mapping_session_path: Path | str | None,
+) -> tuple[dict[str, str | None], dict[str, tuple[str | None, str | None]]]:
+    """Load per-session mapping dates and genome builds from ``mapping_session``.
+
+    Args:
+        mapping_session_path: Optional path to ``mapping_session.txt``.
+
+    Returns:
+        ``(date_by_session, assembly_by_session)``. Each assembly value is an
+        ``(old_assembly, new_assembly)`` pair -- the true builds the secondary
+        (old) and primary (current) IDs of that session's mappings belonged to
+        (issue #51). Both dicts are empty when no path is given.
+    """
+    date_by_session: dict[str, str | None] = {}
+    assembly_by_session: dict[str, tuple[str | None, str | None]] = {}
+    if mapping_session_path is None:
+        return date_by_session, assembly_by_session
+    sessions = _scan_ensembl_tsv(Path(mapping_session_path), _MAPPING_SESSION_COLUMNS).collect()
+    for row in sessions.iter_rows(named=True):
+        session_id = str(row["mapping_session_id"])
+        date_by_session[session_id] = _ensembl_date_to_iso(row["created"])
+        assembly_by_session[session_id] = (
+            _clean_assembly(row.get("old_assembly")),
+            _clean_assembly(row.get("new_assembly")),
+        )
+    return date_by_session, assembly_by_session
+
+
 class EnsemblParser(BaseParser):
     """Parser for Ensembl core flat-file dumps using Polars.
 
@@ -467,15 +512,7 @@ class EnsemblParser(BaseParser):
         if df.is_empty():
             return []
 
-        date_by_session: dict[str, str | None] = {}
-        if mapping_session_path is not None:
-            sessions = _scan_ensembl_tsv(
-                Path(mapping_session_path), _MAPPING_SESSION_COLUMNS
-            ).collect()
-            date_by_session = {
-                str(row["mapping_session_id"]): _ensembl_date_to_iso(row["created"])
-                for row in sessions.iter_rows(named=True)
-            }
+        date_by_session, assembly_by_session = _load_session_meta(mapping_session_path)
 
         m_meta = self.get_mapping_metadata()
         fixed_base = {
@@ -498,36 +535,79 @@ class EnsemblParser(BaseParser):
                 continue
 
             session_id = str(row.get("mapping_session_id") or "")
-            mapping_date = date_by_session.get(session_id)
-            score = row.get("score")
-
-            if not new_id:
-                rows_data.append(
-                    {
-                        "subject_id": f"ENSEMBL:{old_id}",
-                        "object_id": WITHDRAWN_ENTRY,
-                        "object_label": WITHDRAWN_ENTRY_LABEL,
-                        "predicate_id": "oboInOwl:consider",
-                        "mapping_date": mapping_date,
-                        "record_id": self._record_id(record_ns, WITHDRAWN_ENTRY, old_id),
-                    }
+            old_assembly, new_assembly = assembly_by_session.get(session_id, (None, None))
+            rows_data.append(
+                self._stable_id_event_row(
+                    old_id=old_id,
+                    new_id=new_id,
+                    score=row.get("score"),
+                    mapping_date=date_by_session.get(session_id),
+                    old_assembly=old_assembly,
+                    new_assembly=new_assembly,
+                    record_ns=record_ns,
+                    m_meta=m_meta,
                 )
-            else:
-                row_fields: dict[str, Any] = {
-                    "subject_id": f"ENSEMBL:{old_id}",
-                    "object_id": f"ENSEMBL:{new_id}",
-                    "predicate_id": m_meta["predicate_id"],
-                    "predicate_label": m_meta.get("predicate_label"),
-                    "mapping_date": mapping_date,
-                    "record_id": self._record_id(record_ns, new_id, old_id),
-                }
-                if score and float(score) > 0:
-                    row_fields["confidence"] = float(score)
-                rows_data.append(row_fields)
+            )
 
         return self._build_mappings(
             rows_data, fixed_base, desc="Processing stable_id_event", total=len(rows_data)
         )
+
+    def _stable_id_event_row(
+        self,
+        *,
+        old_id: str,
+        new_id: str | None,
+        score: object,
+        mapping_date: str | None,
+        old_assembly: str | None,
+        new_assembly: str | None,
+        record_ns: str,
+        m_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build one ``stable_id_event`` mapping row (a retirement or a rename).
+
+        The old assembly for the secondary ID, the new assembly for the
+        primary ID.
+
+        Args:
+            old_id: Bare old stable ID (the secondary).
+            new_id: Bare new stable ID, or falsy for a retirement.
+            score: ``stable_id_event.score`` cell (used as confidence).
+            mapping_date: Resolved per-row mapping date, if any.
+            old_assembly: Build the old ID belonged to, if known.
+            new_assembly: Build the new ID belongs to, if known.
+            record_ns: This run's ``record_id`` namespace.
+            m_meta: Mapping-level config metadata.
+
+        Returns:
+            A row dict for :meth:`_build_mappings`.
+        """
+        if not new_id:
+            fields: dict[str, Any] = {
+                "subject_id": f"ENSEMBL:{old_id}",
+                "object_id": WITHDRAWN_ENTRY,
+                "object_label": WITHDRAWN_ENTRY_LABEL,
+                "predicate_id": "oboInOwl:consider",
+                "mapping_date": mapping_date,
+                "record_id": self._record_id(record_ns, WITHDRAWN_ENTRY, old_id),
+            }
+        else:
+            fields = {
+                "subject_id": f"ENSEMBL:{old_id}",
+                "object_id": f"ENSEMBL:{new_id}",
+                "predicate_id": m_meta["predicate_id"],
+                "predicate_label": m_meta.get("predicate_label"),
+                "mapping_date": mapping_date,
+                "record_id": self._record_id(record_ns, new_id, old_id),
+            }
+            if score and float(score) > 0:  # type: ignore
+                fields["confidence"] = float(score)  # type: ignore
+            if new_assembly:
+                fields["object_source_version"] = new_assembly
+        if old_assembly:
+            fields["subject_source_version"] = old_assembly
+        return fields
 
     def _parse_external_synonyms(
         self,

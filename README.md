@@ -264,12 +264,6 @@ crosswalk("TP53", frm="symbol", to="hgnc_id")          # {'TP53': 'HGNC:11998'}
 crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own crosswalk
 ```
 
-`frm="symbol"` resolves through the same temporal-aware, ambiguity-safe label
-resolver as `update_labels` (a _previous_ symbol still resolves to its current
-identity); `frm` in `ensembl`/`entrez`/`refseq`/`uniprot` resolves through
-HGNC's custom-download crosswalk table. Genuinely ambiguous input is left blank
-and reported, never guessed.
-
 ## Documentation
 
 Full documentation: <https://pysec2pri.readthedocs.io/>

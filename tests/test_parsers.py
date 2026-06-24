@@ -473,6 +473,56 @@ class TestEnsemblParser:
         assert scored[0].confidence == pytest.approx(0.973291)
         assert scored[0].mapping_date == "2006-03-10"
 
+    def test_parse_sets_true_per_side_genome_build_from_mapping_session(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """subject/object_source_version carry the true old/new assembly (issue #51)."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        by_subject = {m.subject_id: m for m in result.mappings}
+        # session 361: NCBI35 (old) -> NCBI36 (new)
+        scored = by_subject["ENSEMBL:ENSG00000007565"]
+        assert scored.subject_source_version == "NCBI35"
+        assert scored.object_source_version == "NCBI36"
+        # session 388: GRCh37 -> GRCh37 (assembly-patch rename within one build)
+        patched = by_subject["ENSEMBL:ASMPATCHG00000000170"]
+        assert patched.subject_source_version == "GRCh37"
+        assert patched.object_source_version == "GRCh37"
+        # session 347: a withdrawal keeps the old assembly on the secondary side
+        withdrawn = by_subject["ENSEMBL:ENSG00000000893"]
+        assert withdrawn.subject_source_version == "NCBI28"
+
+    def test_set_level_source_version_uses_configured_build(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """The set-level source-version is the configured current build, not the release."""
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        # default species is 9606 (human) -> ensembl.yaml build: GRCh38
+        assert result.subject_source_version == "GRCh38"
+        assert result.object_source_version == "GRCh38"
+
+    def test_source_version_falls_back_to_release_without_configured_build(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """A species with no configured build leaves source-version as the release."""
+        result = EnsemblParser(version="115", show_progress=False, species=99999).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        assert result.subject_source_version == "115"
+        assert result.object_source_version == "115"
+
     def test_parse_without_mapping_session_has_no_per_row_date(
         self, ensembl_stable_id_event_path: Path
     ) -> None:
