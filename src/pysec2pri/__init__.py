@@ -10,6 +10,8 @@ from pysec2pri.api import (
     find_ambiguous,
     generate_chebi,
     generate_chebi_synonyms,
+    generate_ensembl,
+    generate_ensembl_labels,
     generate_hgnc,
     generate_hgnc_labels,
     generate_hgnc_primary_ids,
@@ -81,6 +83,8 @@ __all__ = [
     # generate_* (download + parse in one call)
     "generate_chebi",
     "generate_chebi_synonyms",
+    "generate_ensembl",
+    "generate_ensembl_labels",
     "generate_hgnc",
     "generate_hgnc_labels",
     "generate_hgnc_primary_ids",
