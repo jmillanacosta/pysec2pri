@@ -46,23 +46,22 @@ uv pip install git+https://github.com/jmillanacosta/pysec2pri.git
 To obtain the secondary to primary identifier SSSOM mapping set for ChEBI:
 
 ```bash
-pysec2pri chebi
+pysec2pri chebi ids
 ```
 
 This will automatically download the latest ChEBI release and generate an SSSOM
 mapping file in your current directory.
 
-To process locally and specify the output:
+To process local files and specify the output:
 
 ```bash
-pysec2pri chebi ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
+pysec2pri chebi ids ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
 ```
 
 For more options and help on any command:
 
 ```bash
 pysec2pri --help
-pysec2pri chebi --help
 ```
 
 The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
