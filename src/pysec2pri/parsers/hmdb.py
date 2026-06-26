@@ -26,8 +26,8 @@ from sssom_schema import Mapping
 
 from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
+    BaseMappingSet,
     BaseParser,
-    Sec2PriMappingSet,
 )
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class HMDBParser(BaseParser):
         prefix: str,
         desc: str,
         secondary_normaliser: Callable[[str], str] | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse an HMDB XML file and return a mapping set.
 
         Args:
@@ -99,7 +99,7 @@ class HMDBParser(BaseParser):
                 applied to each raw secondary accession before prefixing.
 
         Returns:
-            :class:`Sec2PriMappingSet` with computed cardinalities and
+            :class:`BaseMappingSet` with computed cardinalities and
             ``_primary_ids`` populated.
         """
         xml_content = self._read_xml_content(file_path)
@@ -246,7 +246,7 @@ class HMDBParser(BaseParser):
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Delegate to the base-class factory."""
         return self.create_mapping_set(mappings, mapping_type)
 
@@ -254,7 +254,7 @@ class HMDBParser(BaseParser):
         self,
         metabolites_path: Path | str | None = None,
         proteins_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current HMDB primary IDs.
 
         Reads one or both of ``hmdb_metabolites.xml`` and ``hmdb_proteins.xml``
@@ -305,14 +305,14 @@ class HMDBMetaboliteParser(HMDBParser):
         """Metabolites download URL from ``hmdb_metabolites.yaml``."""
         return self.get_download_url("metabolites") or ""
 
-    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+    def parse(self, input_path: Path | str | None) -> BaseMappingSet:
         """Parse ``hmdb_metabolites.xml`` (or ``.zip`` / ``.gz``).
 
         Args:
             input_path: Path to the metabolites XML file.
 
         Returns:
-            :class:`Sec2PriMappingSet` for metabolite accessions.
+            :class:`BaseMappingSet` for metabolite accessions.
         """
         if input_path is None:
             raise ValueError("input_path must not be None")
@@ -361,14 +361,14 @@ class HMDBProteinParser(HMDBParser):
             return f"HMDBP{int(raw):05d}"
         return raw
 
-    def parse(self, input_path: Path | str | None) -> Sec2PriMappingSet:
+    def parse(self, input_path: Path | str | None) -> BaseMappingSet:
         """Parse ``hmdb_proteins.xml`` (or ``.zip`` / ``.gz``).
 
         Args:
             input_path: Path to the proteins XML file.
 
         Returns:
-            :class:`Sec2PriMappingSet` for protein accessions.
+            :class:`BaseMappingSet` for protein accessions.
         """
         if input_path is None:
             raise ValueError("input_path must not be None")

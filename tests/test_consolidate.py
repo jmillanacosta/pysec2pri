@@ -59,6 +59,17 @@ class TestLoadMappingDates:
         result = load_mapping_dates("chebi", tmp_path, subset="3star", mapping_sets="ids")
         assert result == {"sec2pri:chebi/aaa": "2013-02-15"}
 
+    def test_excludes_records_with_no_resolved_date(self, tmp_path: Path) -> None:
+        """A record walked but never assigned a real date is omitted, not '' or 'None'."""
+        consolidate_module._write_cache(
+            consolidate_module._cache_path(tmp_path, "chebi", "ids"),
+            {
+                "dated": {"first_seen_version": "245", "first_seen_date": "2020-01-01"},
+                "undated": {"first_seen_version": "183", "first_seen_date": ""},
+            },
+        )
+        assert load_mapping_dates("chebi", tmp_path, mapping_sets="ids") == {"dated": "2020-01-01"}
+
     def test_datasource_subset_and_mapping_sets_select_distinct_caches(
         self, tmp_path: Path
     ) -> None:
@@ -81,7 +92,7 @@ class TestLoadMappingDates:
 
 
 class _FakeMappingSet:
-    """Stand-in for a Sec2PriMappingSet exposing just what consolidate needs."""
+    """Stand-in for a BaseMappingSet exposing just what consolidate needs."""
 
     def __init__(
         self,
@@ -152,7 +163,7 @@ class TestConsolidateByRelease:
         records_by_version = {"1": ["a", "b"], "2": ["b", "c"], "3": ["c"]}
 
         _FakeDownloader.versions = ["1", "2", "3"]
-        monkeypatch.setattr("pysec2pri.parsers.chebi.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
         monkeypatch.setattr(
             consolidate_module,
@@ -182,7 +193,7 @@ class TestConsolidateByRelease:
         seen_versions: list[str] = []
 
         _FakeDownloader.versions = ["1", "2"]
-        monkeypatch.setattr("pysec2pri.parsers.chebi.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
 
         def _run(
@@ -209,7 +220,7 @@ class TestConsolidateByRelease:
     ) -> None:
         """A per-version exception is logged and skipped; later versions still merge."""
         _FakeDownloader.versions = ["1", "2", "3"]
-        monkeypatch.setattr("pysec2pri.parsers.chebi.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
 
         def _run(
@@ -231,12 +242,32 @@ class TestConsolidateByRelease:
         meta_path = consolidate_module._meta_path(tmp_path, "chebi", "ids")
         assert json.loads(meta_path.read_text())["last_version"] == "3"
 
+    def test_unresolvable_release_date_stores_empty_not_the_version_label(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When no real release date is found, the version number is not stored as a date."""
+        _FakeDownloader.versions = ["183"]
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.download.resolve_release_date", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            consolidate_module,
+            "_run_one_version",
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
+        )
+
+        cache_path = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
+        records = consolidate_module._read_cache(cache_path)
+
+        assert records["a"]["first_seen_version"] == "183"
+        assert records["a"]["first_seen_date"] == ""
+        assert records["a"]["last_seen_date"] == ""
+
     def test_works_for_any_versioned_datasource_not_just_chebi(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """HGNC (a second versioned datasource) walks the same generic code path."""
         _FakeDownloader.versions = ["2024-01-01", "2024-04-01"]
-        monkeypatch.setattr("pysec2pri.parsers.hgnc.HGNCDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.downloads.HGNCDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
         monkeypatch.setattr(
             consolidate_module,
@@ -248,6 +279,36 @@ class TestConsolidateByRelease:
         records = consolidate_module._read_cache(cache_path)
         assert records["x"]["first_seen_version"] == "2024-01-01"
         assert records["x"]["last_seen_version"] == "2024-04-01"
+
+
+class TestBuildConsolidatedMappingSet:
+    """Materializing the cached field snapshots back into a real SSSOM mapping set."""
+
+    def test_empty_first_seen_date_leaves_mapping_date_unset(self) -> None:
+        """An empty (unresolvable) first_seen_date must not reach Mapping(mapping_date=...)."""
+        fields_json = json.dumps(
+            {
+                "subject_id": "CHEBI:10001",
+                "object_id": "CHEBI:99901",
+                "predicate_id": "IAO:0100001",
+                "mapping_justification": "semapv:BackgroundKnowledgeBasedMatching",
+            }
+        )
+        records = {
+            "a" * 16: {
+                "first_seen_version": "183",
+                "first_seen_date": "",
+                "last_seen_version": "183",
+                "last_seen_date": "",
+                "fields_json": fields_json,
+            }
+        }
+
+        mapping_set = consolidate_module._build_consolidated_mapping_set(
+            "chebi", "ids", records, "183"
+        )
+
+        assert mapping_set.mappings[0].mapping_date is None
 
 
 class TestConsolidateByDate:
@@ -277,7 +338,7 @@ class TestConsolidateByDate:
     ) -> None:
         """ChEBI never produces real per-row dates: 'date' mode must warn and use 'release'."""
         _FakeDownloader.versions = ["1"]
-        monkeypatch.setattr("pysec2pri.parsers.chebi.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
         monkeypatch.setattr(
             consolidate_module,
@@ -327,6 +388,11 @@ class TestLabelTransitions:
 
 class TestBuildLabelHistory:
     """Cross-release Ensembl label-history walk, fully monkeypatched (no network)."""
+
+    def test_rejects_all_species(self, tmp_path: Path) -> None:
+        """species='all' (the config default) is rejected with a clear message."""
+        with pytest.raises(ValueError, match="requires an explicit single species"):
+            build_label_history(species="all", cache_dir=tmp_path, show_progress=False)
 
     def _patch_walk(
         self,

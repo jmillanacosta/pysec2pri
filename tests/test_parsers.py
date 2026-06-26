@@ -15,7 +15,7 @@ from pysec2pri.parsers import (
     UniProtParser,
     VGNCParser,
 )
-from pysec2pri.parsers.base import Sec2PriMappingSet
+from pysec2pri.parsers.base import BaseMappingSet
 
 TEST_DATA_DIR = Path(__file__).parent / "data"
 
@@ -128,7 +128,7 @@ class TestChEBIParser:
     def test_parse(self, chebi_sdf_path: Path) -> None:
         """parse() returns a populated mapping set."""
         result = ChEBIParser(show_progress=False).parse(chebi_sdf_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         assert len(result.mappings) > 0
 
     def test_parse_synonyms_direction(self, chebi_sdf_path: Path) -> None:
@@ -167,7 +167,7 @@ class TestChEBIDistributionEras:
 
     def test_legacy_version_resolves_sdf_url(self) -> None:
         """A pre-245 release resolves to the legacy SDF era for both subsets."""
-        from pysec2pri.parsers.chebi import ChEBIDownloader
+        from pysec2pri.downloads.chebi import ChEBIDownloader
 
         urls = ChEBIDownloader(subset="3star").get_download_urls("100")
         assert urls.keys() == {"sdf"}
@@ -181,7 +181,7 @@ class TestChEBIDistributionEras:
 
     def test_new_version_resolves_tsv_urls(self) -> None:
         """A >=245 release resolves to the TSV flat-file URLs."""
-        from pysec2pri.parsers.chebi import ChEBIDownloader
+        from pysec2pri.downloads.chebi import ChEBIDownloader
 
         downloader = ChEBIDownloader(subset="3star")
         urls = downloader.get_download_urls("245")
@@ -193,7 +193,7 @@ class TestChEBIDistributionEras:
         """244 is the last SDF release, 245 the first TSV release; no version means no era."""
         from pysec2pri.parsers.base import get_datasource_config
 
-        config = get_datasource_config("chebi")
+        config = get_datasource_config("chebi", config_package="pysec2pri.config")
         sdf_era = config.era_for("244")
         tsv_era = config.era_for("245")
         assert sdf_era is not None and sdf_era.id == "sdf"
@@ -207,7 +207,7 @@ class TestHMDBParsers:
     def test_metabolites_parse(self, hmdb_xml_path: Path) -> None:
         """parse() extracts sec->pri mappings; records with no secondary are skipped."""
         result = HMDBMetaboliteParser(show_progress=False).parse(hmdb_xml_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         mappings = result.mappings or []
         assert len(mappings) == 3
         subjects = {m.subject_id for m in mappings}
@@ -221,7 +221,7 @@ class TestHMDBParsers:
     def test_proteins_parse(self, hmdb_proteins_xml_path: Path) -> None:
         """parse() normalises bare numeric accessions and skips no-secondary records."""
         result = HMDBProteinParser(show_progress=False).parse(hmdb_proteins_xml_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         mappings = result.mappings or []
         assert len(mappings) == 3
         subjects = {m.subject_id for m in mappings}
@@ -237,7 +237,7 @@ class TestHGNCParser:
     def test_parse(self, hgnc_withdrawn_path: Path) -> None:
         """parse() returns a populated mapping set for withdrawn IDs."""
         result = HGNCParser(show_progress=False).parse(hgnc_withdrawn_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         assert len(result.mappings) > 0
 
     def test_label_routing_separates_synonyms_from_previous_labels(
@@ -266,7 +266,7 @@ class TestVGNCParser:
         VGNC:9002 merged into VGNC:9501/CHIMPGENE1.
         """
         result = VGNCParser(show_progress=False).parse(vgnc_withdrawn_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         by_subject = {m.subject_id: m for m in result.mappings}
         assert by_subject["VGNC:9001"].object_id == "sssom:NoTermFound"
         assert by_subject["VGNC:9001"].predicate_id == "oboInOwl:consider"
@@ -377,7 +377,7 @@ class TestNCBIParser:
     def test_parse(self, ncbi_history_path: Path) -> None:
         """parse() returns a populated mapping set for gene_history."""
         result = NCBIParser(show_progress=False).parse(ncbi_history_path, species="9606")
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         assert len(result.mappings) > 0
 
     def test_parse_all_species_includes_every_organism(self, ncbi_history_path: Path) -> None:
@@ -473,49 +473,50 @@ class TestEnsemblParser:
         assert scored[0].confidence == pytest.approx(0.973291)
         assert scored[0].mapping_date == "2006-03-10"
 
-    def test_parse_sets_true_per_side_genome_build_from_mapping_session(
+    def test_parse_notes_an_assembly_change_as_a_comment(
         self,
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """subject/object_source_version carry the true old/new assembly (issue #51)."""
+        """A rename spanning an assembly change is noted in comment, not source_version."""
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
         by_subject = {m.subject_id: m for m in result.mappings}
-        # session 361: NCBI35 (old) -> NCBI36 (new)
+        # session 361: NCBI35 (old) -> NCBI36 (new): a real assembly change.
         scored = by_subject["ENSEMBL:ENSG00000007565"]
-        assert scored.subject_source_version == "NCBI35"
-        assert scored.object_source_version == "NCBI36"
-        # session 388: GRCh37 -> GRCh37 (assembly-patch rename within one build)
+        assert scored.comment == "Assembly changed from NCBI35 to NCBI36."
+        assert scored.subject_source_version is None
+        assert scored.object_source_version is None
+        # session 388: GRCh37 -> GRCh37 (assembly-patch rename within one build): no comment.
         patched = by_subject["ENSEMBL:ASMPATCHG00000000170"]
-        assert patched.subject_source_version == "GRCh37"
-        assert patched.object_source_version == "GRCh37"
-        # session 347: a withdrawal keeps the old assembly on the secondary side
+        assert patched.comment is None
+        # session 347: a withdrawal has no object side to diff against.
         withdrawn = by_subject["ENSEMBL:ENSG00000000893"]
-        assert withdrawn.subject_source_version == "NCBI28"
+        assert withdrawn.comment is None
 
-    def test_set_level_source_version_uses_configured_build(
+    def test_set_level_source_version_is_always_the_release(
         self,
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """The set-level source-version is the configured current build, not the release."""
+        """The set-level source-version is the analyzed release, same as every datasource."""
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        # default species is 9606 (human) -> ensembl.yaml build: GRCh38
-        assert result.subject_source_version == "GRCh38"
-        assert result.object_source_version == "GRCh38"
+        # default species is 9606 (human), which has a configured GRCh38 build,
+        # but the set-level field is still the release, not the build.
+        assert result.subject_source_version == "115"
+        assert result.object_source_version == "115"
 
-    def test_source_version_falls_back_to_release_without_configured_build(
+    def test_set_level_source_version_is_the_release_for_uncurated_species_too(
         self,
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """A species with no configured build leaves source-version as the release."""
+        """A species with no configured build still gets the release as source-version."""
         result = EnsemblParser(version="115", show_progress=False, species=99999).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
@@ -628,7 +629,7 @@ class TestUniProtParser:
     def test_parse(self, uniprot_sec_ac_path: Path) -> None:
         """parse() returns a populated mapping set."""
         result = UniProtParser(show_progress=False).parse(uniprot_sec_ac_path)
-        assert isinstance(result, Sec2PriMappingSet)
+        assert isinstance(result, BaseMappingSet)
         assert len(result.mappings) >= 4
 
 
@@ -657,7 +658,7 @@ class TestParserIntegration:
             ),
         ]
         for result in results:
-            assert isinstance(result, Sec2PriMappingSet)
+            assert isinstance(result, BaseMappingSet)
             for m in result.mappings:
                 assert isinstance(m, Mapping)
                 assert m.subject_id is not None

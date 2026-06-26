@@ -1382,6 +1382,34 @@ wheels = [
 ]
 
 [[package]]
+name = "mapkgsutils"
+version = "0.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "curies" },
+    { name = "httpx" },
+    { name = "more-click" },
+    { name = "more-itertools" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "polars" },
+    { name = "polars-runtime-32" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "sssom" },
+    { name = "sssom-schema" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/39/0a409dc24fcd41c9838f1f3dd57adda755893de4b8823da00e7851aa9e4b/mapkgsutils-0.0.2.tar.gz", hash = "sha256:0aeea4d62eb0bee0340ba54a7cf6d26af3bda3119c1513aa7ba9ea2b7537a822", size = 40456 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/d1/70a7a643687fd2c23ec4d93a4712ef9a0f9377884c4c7bbc29733da26748/mapkgsutils-0.0.2-py3-none-any.whl", hash = "sha256:1f7e7b1d8dcc4cc02c31364bd0af063b78ca42016dcc0a1993f13f8ecbd464e7", size = 43495 },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2255,6 +2283,7 @@ dependencies = [
     { name = "httpx" },
     { name = "linkml" },
     { name = "lxml" },
+    { name = "mapkgsutils" },
     { name = "more-click" },
     { name = "more-itertools" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -2343,6 +2372,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "linkml", specifier = ">=1.10.0" },
     { name = "lxml" },
+    { name = "mapkgsutils" },
     { name = "more-click" },
     { name = "more-itertools" },
     { name = "numpy" },

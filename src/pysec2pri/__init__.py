@@ -5,6 +5,14 @@ identifiers to primary (current) identifiers across various biological
 databases including ChEBI, HMDB, HGNC, NCBI Gene, and UniProt.
 """
 
+from mapkgsutils.context import (
+    ContextSpec,
+    DecisionRecord,
+    XrefMapping,
+    XrefRecord,
+    load_xref_mapping,
+)
+
 from pysec2pri.api import (
     crosswalk,
     find_ambiguous,
@@ -36,20 +44,13 @@ from pysec2pri.api import (
     write_sec2pri,
     write_sssom,
 )
-from pysec2pri.context import (
-    ContextSpec,
-    DecisionRecord,
-    XrefMapping,
-    XrefRecord,
-    load_xref_mapping,
-)
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
     AmbiguousMappingSet,
+    BaseMappingSet,
     IdMappingSet,
     LabelMappingSet,
-    Sec2PriMappingSet,
 )
 from pysec2pri.update_ids import (
     build_alias_index,
@@ -67,12 +68,12 @@ __all__ = [
     "WITHDRAWN_ENTRY_LABEL",
     # Mapping Set classes
     "AmbiguousMappingSet",
+    "BaseMappingSet",
     # Disambiguation context (symbol/id/xref)
     "ContextSpec",
     "DecisionRecord",
     "IdMappingSet",
     "LabelMappingSet",
-    "Sec2PriMappingSet",
     "XrefMapping",
     "XrefRecord",
     # ID resolution

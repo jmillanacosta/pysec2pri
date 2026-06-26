@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
-from pysec2pri.context import (
+from mapkgsutils.context import (
     ContextSpec,
     DecisionRecord,
     XrefMapping,
@@ -59,8 +59,9 @@ from pysec2pri.context import (
     resolve_ambiguous_with_xref,
     write_decision_log,
 )
+
 from pysec2pri.logging import logger
-from pysec2pri.parsers.base import Sec2PriMappingSet
+from pysec2pri.parsers.base import BaseMappingSet
 
 _IAO_DEPRECATION = "IAO:0100001"
 
@@ -77,7 +78,7 @@ _AMBIGUOUS = object()
 # Helpers
 
 
-def _build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+def _build_lookup(mapping_set: BaseMappingSet) -> dict[str, str]:
     """Return a ``{subject_id: object_id}`` dict from *mapping_set*.
 
     Only mappings with a non-empty ``subject_id`` are included.  If a
@@ -96,7 +97,7 @@ def _build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
 # Synonym-hint helpers (public)
 
 
-def build_alias_index(mapping_set: Sec2PriMappingSet) -> dict[str, list[str]]:
+def build_alias_index(mapping_set: BaseMappingSet) -> dict[str, list[str]]:
     """Return ``{object_id: [subject_labels linked via non-IAO predicates]}``.
 
     Builds an index of all *non-deprecation* alias mappings in a
@@ -130,7 +131,7 @@ def build_alias_index(mapping_set: Sec2PriMappingSet) -> dict[str, list[str]]:
     return index
 
 
-def build_primary_token_to_id(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+def build_primary_token_to_id(mapping_set: BaseMappingSet) -> dict[str, str]:
     """Return ``{primary_label: primary_id}`` from a label mapping set.
 
     Collects every ``(object_label, object_id)`` pair seen in the mappings
@@ -242,7 +243,7 @@ def resolve_ambiguous_with_hints(
     return ("", None)
 
 
-def build_ambiguous_set(mapping_set: Sec2PriMappingSet) -> set[str]:
+def build_ambiguous_set(mapping_set: BaseMappingSet) -> set[str]:
     """Return the set of *ambiguous* subject IDs in *mapping_set*.
 
     An identifier is ambiguous when it appears both as a ``subject_id``
@@ -255,7 +256,7 @@ def build_ambiguous_set(mapping_set: Sec2PriMappingSet) -> set[str]:
     intentionally leaves those cells blank.
 
     Args:
-        mapping_set: Any :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`.
+        mapping_set: Any :class:`~pysec2pri.parsers.base.BaseMappingSet`.
 
     Returns:
         Set of ID strings that are both secondary and primary.  Empty set
@@ -275,7 +276,7 @@ def build_ambiguous_set(mapping_set: Sec2PriMappingSet) -> set[str]:
     return subject_ids & primary_ids
 
 
-def build_ambiguous_labels_set(mapping_set: Sec2PriMappingSet) -> set[str]:
+def build_ambiguous_labels_set(mapping_set: BaseMappingSet) -> set[str]:
     """Return the set of *ambiguous* subject labels in *mapping_set*.
 
     Analogous to :func:`build_ambiguous_set` but operates on
@@ -373,14 +374,14 @@ def _resolve_string(
 # Public API
 
 
-def build_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+def build_lookup(mapping_set: BaseMappingSet) -> dict[str, str]:
     """Return a ``{secondary_id: primary_id}`` dictionary.
 
     Useful when you want to apply the look-up yourself or cache it for
     repeated calls.
 
     Args:
-        mapping_set: A :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`
+        mapping_set: A :class:`~pysec2pri.parsers.base.BaseMappingSet`
             (e.g. the object returned by ``generate_hgnc()``).
 
     Returns:
@@ -494,8 +495,8 @@ def _hint_decision(
     """Resolve via :func:`resolve_ambiguous_with_hints`, with a decision record.
 
     Thin wrapper so the ``label``/``id`` context kinds produce the same
-    :class:`~pysec2pri.context.DecisionRecord` shape as
-    :func:`~pysec2pri.context.resolve_ambiguous_with_xref`, for a unified
+    :class:`~mapkgsutils.context.DecisionRecord` shape as
+    :func:`~mapkgsutils.context.resolve_ambiguous_with_xref`, for a unified
     decision log.
     """
     token = "|".join(user_aliases)
@@ -529,7 +530,7 @@ def _resolve_cell_with_context(
 ) -> tuple[str, str | None]:
     """Resolve one cell, trying each of *specs* in order on ambiguous tokens.
 
-    The first :class:`~pysec2pri.context.ContextSpec` that resolves a given
+    The first :class:`~mapkgsutils.context.ContextSpec` that resolves a given
     ambiguous token wins; every attempt (successful or not) is appended to
     *decisions* for an auditable log.
 
@@ -596,7 +597,7 @@ def _update_dataframe_with_context(
 ) -> pd.DataFrame:
     """Like :func:`_update_dataframe` but resolves ambiguous cells using *specs*.
 
-    Each :class:`~pysec2pri.context.ContextSpec` names a column carrying
+    Each :class:`~mapkgsutils.context.ContextSpec` names a column carrying
     per-row evidence (an alias string for ``"label"``/``"id"``, or a
     cross-reference token for ``"xref"``). When *report_path* is given, every
     disambiguation attempt is written there as a TSV decision log.
@@ -716,7 +717,7 @@ def _build_context_specs(
 @overload
 def update_ids(
     ids: str,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: None = ...,
     suffix: str = ...,
@@ -730,7 +731,7 @@ def update_ids(
 @overload
 def update_ids(
     ids: list[str],
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: None = ...,
     suffix: str = ...,
@@ -744,14 +745,14 @@ def update_ids(
 @overload
 def update_ids(
     ids: pd.DataFrame,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: str | list[str],
     suffix: str = ...,
     lookup: dict[str, str] | None = ...,
     ambiguous: set[str] | None = ...,
     synonyms: str | list[str] | None = ...,
-    label_mapping_set: Sec2PriMappingSet | None = ...,
+    label_mapping_set: BaseMappingSet | None = ...,
     xref: str | None = ...,
     xref_mapping: XrefMapping | None = ...,
     xref_predicates: set[str] | None = ...,
@@ -764,14 +765,14 @@ def update_ids(
 
 def update_ids(
     ids: IdsInput,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: str | list[str] | None = None,
     suffix: str = "_primary",
     lookup: dict[str, str] | None = None,
     ambiguous: set[str] | None = None,
     synonyms: str | list[str] | None = None,
-    label_mapping_set: Sec2PriMappingSet | None = None,
+    label_mapping_set: BaseMappingSet | None = None,
     xref: str | None = None,
     xref_mapping: XrefMapping | None = None,
     xref_predicates: set[str] | None = None,
@@ -792,7 +793,7 @@ def update_ids(
         * **pandas.DataFrame**: a DataFrame; you must also supply *at*.
 
     mapping_set:
-        The :class:`~pysec2pri.parsers.base.Sec2PriMappingSet` to look up
+        The :class:`~pysec2pri.parsers.base.BaseMappingSet` to look up
         against (e.g. the result of ``generate_hgnc()``).
 
     at:
@@ -831,28 +832,28 @@ def update_ids(
     xref:
         *DataFrame mode only.* Name of a column in the DataFrame that
         contains a per-row cross-reference token (e.g. an Ensembl ID).
-        When provided (with *xref_mapping*), :func:`pysec2pri.context.
+        When provided (with *xref_mapping*), :func:`mapkgsutils.context.
         resolve_ambiguous_with_xref` is called for every ambiguous cell,
         looking the token up in *xref_mapping* to confirm whether the row
         is using the secondary or the primary identity.
 
     xref_mapping:
-        The :class:`~pysec2pri.context.XrefMapping` crosswalk table to
+        The :class:`~mapkgsutils.context.XrefMapping` crosswalk table to
         resolve *xref* tokens against.  Required when *xref* is given.
 
     xref_predicates:
         Equivalence predicates accepted from *xref_mapping* records.
         ``None`` (default) accepts any predicate (and unannotated records,
-        see :data:`pysec2pri.context.DEFAULT_TRUST_UNANNOTATED`).
+        see :data:`mapkgsutils.context.DEFAULT_TRUST_UNANNOTATED`).
 
     report_path:
         *DataFrame mode only.* When given, every disambiguation attempt
         (from *synonyms*, *xref*, and/or *context*) is written to this path
-        as a TSV decision log (see :func:`pysec2pri.context.write_decision_log`).
+        as a TSV decision log (see :func:`mapkgsutils.context.write_decision_log`).
 
     context:
         *DataFrame mode only.* One or more explicit
-        :class:`~pysec2pri.context.ContextSpec` entries, for cases not
+        :class:`~mapkgsutils.context.ContextSpec` entries, for cases not
         covered by the *synonyms*/*xref* convenience kwargs (e.g. multiple
         cross-reference columns). Specs are tried in order per ambiguous
         cell; combined with any spec implied by *synonyms*/*xref*.
@@ -910,7 +911,7 @@ def update_ids(
     return _update_dataframe(ids, at, suffix, lkp, amb, kind="ID", col_label="ids")
 
 
-def build_label_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
+def build_label_lookup(mapping_set: BaseMappingSet) -> dict[str, str]:
     """Return a ``{secondary_label: primary_label}`` dictionary.
 
     Useful when you want to apply the look-up yourself or cache it for
@@ -935,7 +936,7 @@ def build_label_lookup(mapping_set: Sec2PriMappingSet) -> dict[str, str]:
 @overload
 def update_labels(
     labels: str,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: None = ...,
     suffix: str = ...,
@@ -950,7 +951,7 @@ def update_labels(
 @overload
 def update_labels(
     labels: list[str],
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: None = ...,
     suffix: str = ...,
@@ -965,7 +966,7 @@ def update_labels(
 @overload
 def update_labels(
     labels: pd.DataFrame,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: str | list[str],
     suffix: str = ...,
@@ -984,7 +985,7 @@ def update_labels(
 
 def update_labels(
     labels: IdsInput,
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     *,
     at: str | list[str] | None = None,
     suffix: str = "_current",
@@ -1046,28 +1047,28 @@ def update_labels(
     xref:
         *DataFrame mode only.* Name of a column in the DataFrame that
         contains a per-row cross-reference token (e.g. an Ensembl ID).
-        When provided (with *xref_mapping*), :func:`pysec2pri.context.
+        When provided (with *xref_mapping*), :func:`mapkgsutils.context.
         resolve_ambiguous_with_xref` is called for every ambiguous cell,
         looking the token up in *xref_mapping* to confirm whether the row
         is using the secondary or the primary identity.
 
     xref_mapping:
-        The :class:`~pysec2pri.context.XrefMapping` crosswalk table to
+        The :class:`~mapkgsutils.context.XrefMapping` crosswalk table to
         resolve *xref* tokens against.  Required when *xref* is given.
 
     xref_predicates:
         Equivalence predicates accepted from *xref_mapping* records.
         ``None`` (default) accepts any predicate (and unannotated records,
-        see :data:`pysec2pri.context.DEFAULT_TRUST_UNANNOTATED`).
+        see :data:`mapkgsutils.context.DEFAULT_TRUST_UNANNOTATED`).
 
     report_path:
         *DataFrame mode only.* When given, every disambiguation attempt
         (from *synonyms*, *xref*, and/or *context*) is written to this path
-        as a TSV decision log (see :func:`pysec2pri.context.write_decision_log`).
+        as a TSV decision log (see :func:`mapkgsutils.context.write_decision_log`).
 
     context:
         *DataFrame mode only.* One or more explicit
-        :class:`~pysec2pri.context.ContextSpec` entries, for cases not
+        :class:`~mapkgsutils.context.ContextSpec` entries, for cases not
         covered by the *synonyms*/*xref* convenience kwargs (e.g. multiple
         cross-reference columns). Specs are tried in order per ambiguous
         cell; combined with any spec implied by *synonyms*/*xref*.

@@ -19,9 +19,11 @@ import click
 from pysec2pri.parsers.base import get_datasource_config
 
 if TYPE_CHECKING:
-    from pysec2pri.parsers.base import Sec2PriMappingSet
+    from pysec2pri.parsers.base import BaseMappingSet
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="sssom")
+
+_CONFIG_PACKAGE = "pysec2pri.config"
 
 PathType = click.Path(path_type=Path)  # type: ignore[type-var]
 ExistingPathType = click.Path(exists=True, path_type=Path)  # type: ignore[type-var]
@@ -68,7 +70,7 @@ def _species_choices_text(cfg_id: str, limit: int = _MAX_INLINE_SPECIES) -> str:
     summarized with a pointer to the full config file instead of dumped
     inline.
     """
-    cfg = get_datasource_config(cfg_id)
+    cfg = get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE)
     available = (cfg.species or {}).get("available") or {}
     pairs = sorted(available.items(), key=lambda kv: str(kv[0]))
     shown = pairs[:limit]
@@ -88,7 +90,7 @@ def _opt_species_for(cfg_id: str) -> Callable[..., Any]:
     hardcoding a single literal for every datasource. The help text lists
     every species curated in that datasource's ``species.available``.
     """
-    default = str(get_datasource_config(cfg_id).default_species())
+    default = str(get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE).default_species())
     choices = _species_choices_text(cfg_id)
     help_text = "Species as NCBI taxon ID, or 'all' to process every species."
     if choices:
@@ -179,7 +181,7 @@ def _resolve_xref_mapping(
     Returns ``None`` when neither is given (caller decides whether that's an
     error, e.g. when --xref columns were supplied without a table).
     """
-    from pysec2pri.context import load_xref_mapping
+    from mapkgsutils.context import load_xref_mapping
 
     if xref_file is not None:
         return load_xref_mapping(xref_file)
@@ -187,7 +189,7 @@ def _resolve_xref_mapping(
     if xref_source is not None:
         if xref_on is None:
             raise click.ClickException("--xref-on is required together with --xref-source.")
-        cfg = get_datasource_config(datasource)
+        cfg = get_datasource_config(datasource, config_package=_CONFIG_PACKAGE)
         src = cfg.xref_source(xref_source)
         if src is None:
             known = ", ".join(s.id for s in cfg.xref_sources) or "(none configured)"
@@ -204,7 +206,7 @@ def _resolve_xref_mapping(
         if src.note:
             click.echo(f"Note: {src.note}")
         click.echo(f"Downloading xref source {src.id!r}...")
-        from pysec2pri.context import download_xref_source
+        from mapkgsutils.context import download_xref_source
 
         return download_xref_source(src, subject_col, show_progress=False)
 
@@ -251,12 +253,12 @@ def _report_path_for(base: Path | None, col: str, multi: bool) -> Path | None:
 
 def _resolve_and_print(
     input_file: Path,
-    ms: Sec2PriMappingSet,
+    ms: BaseMappingSet,
     col_specs: list[tuple[str, str | None, str | None]],
     output_path: Path | None,
     suffix: str,
     sep: str | None,
-    label_ms: Sec2PriMappingSet | None = None,
+    label_ms: BaseMappingSet | None = None,
     *,
     mode: str = "ids",
     xref_mapping: object | None = None,
@@ -320,7 +322,7 @@ def _make_generate_cmd(
     extra_opts: list[Callable[..., Any]],
 ) -> Callable[..., Any]:
     """Return a decorated (but not yet click.command-wrapped) callable."""
-    formats = get_datasource_config(config_id).formats_for(kind)
+    formats = get_datasource_config(config_id, config_package=_CONFIG_PACKAGE).formats_for(kind)
 
     def _cmd(
         input_file: Path | None,
@@ -410,7 +412,7 @@ def _register_datasources(parent: click.Group) -> None:
         by_config.setdefault(cfg_id, {})[kind] = (fn, opts)
 
     for cfg_id, kinds in by_config.items():
-        cfg = get_datasource_config(cfg_id)
+        cfg = get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE)
         group_help = f"{cfg.name} mappings."
         if cfg.species:
             choices = _species_choices_text(cfg_id)
@@ -499,8 +501,9 @@ cast(click.Group, main.commands["ensembl"]).add_command(ensembl_label_history_cm
 @click.option("--datasource", default="unknown", help="Datasource name for diff summary.")
 def diff(file1: Path, file2: Path, output: Path | None, show_all: bool, datasource: str) -> None:
     """Compare two SSSOM mapping files and show differences."""
+    from mapkgsutils.diff import diff_sssom_files, summarize_diff
+
     from pysec2pri.api import write_diff_output
-    from pysec2pri.diff import diff_sssom_files, summarize_diff
 
     click.echo(f"Comparing {file1.name} vs {file2.name}...")
     result = diff_sssom_files(file1, file2, datasource=datasource)
@@ -559,7 +562,7 @@ def list_versions_cmd(datasource: str) -> None:
 
     click.echo(f"\n{len(versions)} version(s) for {datasource.upper()}:\n")
     if datasource.lower() == "chebi":  # hacky patch for chebi
-        from pysec2pri.parsers.chebi import ChEBIDownloader
+        from pysec2pri.downloads import ChEBIDownloader
 
         threshold = ChEBIDownloader().new_format_version or 245
         for v in versions:
@@ -583,7 +586,8 @@ def validate_config_cmd(datasource: str | None) -> None:
         pysec2pri validate-config
         pysec2pri validate-config hgnc
     """
-    from pysec2pri.config.schema import ConfigValidationError, validate_config_file
+    from mapkgsutils.config.schema import ConfigValidationError, validate_config_file
+
     from pysec2pri.parsers.base import CONFIG_DIR
 
     if datasource:
@@ -621,7 +625,7 @@ def _consolidate_extra_opts(cfg_id: str) -> list[Callable[..., Any]]:
     ``config/<cfg_id>.yaml``) rather than a hardcoded per-datasource list, so
     e.g. HGNC never shows an irrelevant ``--subset`` flag.
     """
-    cfg = get_datasource_config(cfg_id)
+    cfg = get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE)
     opts: list[Callable[..., Any]] = []
     if cfg.subset:
         opts.append(_opt_subset)
@@ -1057,7 +1061,7 @@ def update_labels_cmd(
     )
 
     if species is None:
-        ds_cfg = get_datasource_config(datasource)
+        ds_cfg = get_datasource_config(datasource, config_package=_CONFIG_PACKAGE)
         species = str(ds_cfg.default_species()) if ds_cfg.species else "9606"
 
     if mapping_file is not None:
@@ -1129,7 +1133,7 @@ def update_labels_cmd(
 
 def _crosswalk_vocab() -> list[str]:
     """``--from`` vocabulary: ``symbol`` plus every key declared in HGNC's xref-source."""
-    cfg = get_datasource_config("hgnc")
+    cfg = get_datasource_config("hgnc", config_package=_CONFIG_PACKAGE)
     src = cfg.xref_source("hgnc_custom")
     keys = sorted(src.subject_id_cols) if src else []
     return ["symbol", *keys]
@@ -1191,8 +1195,9 @@ def crosswalk_cmd(
         pysec2pri crosswalk --value TP53 --from symbol --to hgnc_id
         pysec2pri crosswalk genes.tsv --from ensembl --to hgnc_id --at ensembl_id -o out.tsv
     """
+    from mapkgsutils.context import load_xref_mapping
+
     from pysec2pri.api import crosswalk as _crosswalk
-    from pysec2pri.context import load_xref_mapping
 
     xref_mapping = load_xref_mapping(xref_file) if xref_file is not None else None
 

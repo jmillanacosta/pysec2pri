@@ -59,7 +59,6 @@ Quick Start
 
    download
    exports
-   diff
 
 .. toctree::
    :maxdepth: 1

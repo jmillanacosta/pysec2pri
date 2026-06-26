@@ -15,15 +15,14 @@ from __future__ import annotations
 
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import polars as pl
 from sssom_schema import Mapping
 
 from pysec2pri.parsers.base import (
-    BaseDownloader,
+    BaseMappingSet,
     BaseParser,
-    Sec2PriMappingSet,
 )
 
 if TYPE_CHECKING:
@@ -84,7 +83,7 @@ class ChEBIParser(BaseParser):
         *,
         secondary_ids_path: Path | str | None = None,
         compounds_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse ChEBI data into an IdMappingSet.
 
         Accepts three calling conventions:
@@ -134,7 +133,7 @@ class ChEBIParser(BaseParser):
         *,
         names_path: Path | str | None = None,
         compounds_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse ChEBI data into a LabelMappingSet for synonyms.
 
         Accepts three calling conventions:
@@ -185,7 +184,7 @@ class ChEBIParser(BaseParser):
         input_path: Path | str | None = None,
         *,
         compounds_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current ChEBI primary IDs.
 
         Reads ``compounds.tsv`` (TSV releases >= 245) to extract every current
@@ -220,7 +219,7 @@ class ChEBIParser(BaseParser):
         input_path: Path | str | None = None,
         *,
         compounds_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current ChEBI compound names.
 
         Reads ``compounds.tsv`` to extract every current compound's canonical
@@ -341,7 +340,7 @@ class ChEBIParser(BaseParser):
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Create an IdMappingSet or LabelMappingSet with metadata from config.
 
         Delegates to BaseParser.create_mapping_set().
@@ -739,156 +738,4 @@ def _parse_chebi_sdf_fast(
     return raw_id_mappings, raw_name_mappings
 
 
-class ChEBIDownloader(BaseDownloader):
-    """Downloader for ChEBI data files.
-
-    Supports both TSV flat files (>= release 245) and legacy SDF files.
-    """
-
-    datasource_name = "chebi"
-
-    def __init__(
-        self,
-        version: str | None = None,
-        show_progress: bool = True,
-        subset: str = "3star",
-        use_sdf: bool = False,
-    ) -> None:
-        """Initialize the ChEBI downloader.
-
-        Args:
-            version: Version/release identifier.
-            show_progress: Whether to show progress bars.
-            subset: "3star" or "complete" - which compound subset to use.
-            use_sdf: Force SDF format even for releases >= 245.
-        """
-        super().__init__(version=version, show_progress=show_progress)
-        self.subset = subset
-        self.use_sdf = use_sdf
-
-    def get_download_urls(
-        self,
-        version: str | None = None,
-        **kwargs: Any,
-    ) -> dict[str, str]:
-        """Get ChEBI download URLs based on version.
-
-        Resolves the distribution era for *version* via
-        :meth:`~pysec2pri.parsers.base.DatasourceConfig.era_for` (see
-        ``chebi.yaml``'s ``distribution_eras``): the ``sdf`` era (releases
-        <= 244) returns a single SDF URL, the ``tsv`` era (releases >= 245)
-        returns the three flat-file URLs. When no era matches (e.g.
-        ``version`` is ``None`` for "latest"), falls back to the top-level
-        ``download_urls`` (TSV).
-
-        Args:
-            version: Specific release version.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary with file URLs keyed by type.
-        """
-        v = version or self.version
-        subset = kwargs.get("subset", self.subset)
-        use_sdf = kwargs.get("use_sdf", self.use_sdf)
-
-        if not self._config:
-            raise ValueError("ChEBI config not loaded")
-
-        era = self._config.era_for(v)
-        if use_sdf and (era is None or era.format != "sdf"):
-            era = next((e for e in self._config.distribution_eras if e.format == "sdf"), era)
-
-        if era is not None and era.format == "sdf":
-            sdf_key = "sdf_3star" if subset == "3star" else "sdf_complete"
-            url = era.download_urls[sdf_key].format(version=v)
-            return {"sdf": url}
-
-        download_urls = era.download_urls if era is not None else self._config.download_urls
-        return {
-            "secondary_ids": download_urls["secondary_ids"].format(version=v),
-            "names": download_urls["names"].format(version=v),
-            "compounds": download_urls["compounds"].format(version=v),
-        }
-
-    def download(
-        self,
-        output_dir: Path,
-        version: str | None = None,
-        decompress: bool = True,
-        **kwargs: Any,
-    ) -> dict[str, Path]:
-        """Download ChEBI files.
-
-        Args:
-            output_dir: Directory to save files.
-            version: Specific version to download.
-            decompress: Whether to decompress .gz files.
-            **kwargs: Optional 'subset' and 'use_sdf' overrides.
-
-        Returns:
-            Dictionary mapping file keys to downloaded paths.
-        """
-        v = version or self.version
-        urls = self.get_download_urls(v, **kwargs)
-
-        return self._download_urls(urls, output_dir, decompress)
-
-    def get_format(self, version: str | None = None) -> str:
-        """Get the format that will be used for a given version.
-
-        Args:
-            version: Version to check. If None, uses self.version.
-
-        Returns:
-            "tsv" or "sdf"
-        """
-        v = version or self.version
-        if self.use_sdf:
-            return "sdf"
-        if self._config:
-            era = self._config.era_for(v)
-            if era is not None and era.format:
-                return era.format
-        return "tsv" if self.is_new_format(v) else "sdf"
-
-    def list_versions(self) -> list[str]:
-        """List all available ChEBI archive release numbers.
-
-        Queries the base archive URL plus every distribution era's
-        ``archive_url`` (e.g. the legacy SDF-only archive for releases <=
-        244, see ``chebi.yaml``'s ``distribution_eras``) and unions all
-        discovered release numbers.
-
-        Returns:
-            Sorted list of version strings (e.g. ``["100", "101", ..., "251"]``).
-
-        Raises:
-            ValueError: If the archive URL is not configured.
-        """
-        import re
-
-        import httpx
-
-        if not self._config or not self._config.archive_url:
-            raise ValueError("ChEBI archive URL not configured")
-
-        archive_urls = {self._config.archive_url}
-        archive_urls.update(
-            era.archive_url for era in self._config.distribution_eras if era.archive_url
-        )
-
-        versions: set[str] = set()
-        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-            for url in archive_urls:
-                try:
-                    response = client.get(url)
-                    response.raise_for_status()
-                    versions.update(re.findall(r"rel(\d+)", response.text))
-                except httpx.HTTPError:
-                    pass  # That archive location unavailable, still return what we have
-
-        return sorted(versions, key=int)
-
-
-__all__ = ["ChEBIDownloader", "ChEBIParser"]
+__all__ = ["ChEBIParser"]

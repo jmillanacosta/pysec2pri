@@ -1,393 +1,60 @@
-"""Download and release detection for biological database sources."""
+"""Download and release detection for biological database sources.
+
+The datasource-agnostic dispatch logic lives in :mod:`mapkgsutils.download`;
+this module just binds it to pysec2pri's own datasource registries (see
+:mod:`pysec2pri.downloads`).
+"""
 
 from __future__ import annotations
 
-import gzip
-import re
-from collections.abc import Generator, Iterable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
-from tqdm import tqdm
+from mapkgsutils.download import (
+    CloudflareBlockedError,
+    ReleaseInfo,
+    download_file,
+    get_file_last_modified,
+)
+from mapkgsutils.download import check_release as _check_release
+from mapkgsutils.download import download_datasource as _download_datasource
+from mapkgsutils.download import (
+    download_datasource_with_release as _download_datasource_with_release,
+)
+from mapkgsutils.download import get_download_urls as _get_download_urls
+from mapkgsutils.download import get_latest_release_info as _get_latest_release_info
+from mapkgsutils.download import list_versions as _list_versions
+from mapkgsutils.download import resolve_release_date as _resolve_release_date
 
 from pysec2pri.constants import ALL_DATASOURCES
-from pysec2pri.logging import logger
-from pysec2pri.parsers.base import DatasourceConfig
+from pysec2pri.downloads import CHECK_RELEASE, DOWNLOADERS, TAR_EXTRACTORS, URLS_AND_DATE
+from pysec2pri.downloads.chebi import check_chebi_release
+from pysec2pri.downloads.ensembl import check_ensembl_release
+from pysec2pri.downloads.hgnc import check_hgnc_release
+from pysec2pri.downloads.hmdb import check_hmdb_release
+from pysec2pri.downloads.ncbi import check_ncbi_release
+from pysec2pri.downloads.uniprot import check_uniprot_release
 
 __all__ = [
     "CloudflareBlockedError",
     "ReleaseInfo",
+    "check_chebi_release",
+    "check_ensembl_release",
+    "check_hgnc_release",
+    "check_hmdb_release",
+    "check_ncbi_release",
     "check_release",
+    "check_uniprot_release",
     "download_datasource",
     "download_datasource_with_release",
     "download_file",
     "get_download_urls",
+    "get_file_last_modified",
     "get_latest_release_info",
     "list_versions",
     "resolve_release_date",
 ]
-
-_CLOUDFLARE_HINTS = (
-    "cf-ray",
-    "cloudflare",
-    "cf-mitigated",
-    "__cf_bm",
-    "cf-request-id",
-)
-
-
-class CloudflareBlockedError(Exception):
-    """Raised when a download is blocked by Cloudflare bot protection.
-
-    Args:
-        url: The URL that was blocked.
-    """
-
-    def __init__(self, url: str) -> None:
-        """
-        Docstring for __init__.
-
-        :param url: URL requested
-        :type url: str
-        """
-        self.url = url
-        super().__init__(
-            f"Download of '{url}' was blocked by Cloudflare bot protection.\n"
-            "Please download the file manually in a web browser and pass the "
-            "local path as an argument "
-            "(e.g. pysec2pri hmdb --metabolites-file /path/to/hmdb_metabolites.zip).\n"
-        )
-
-
-def _is_cloudflare_blocked(response: httpx.Response) -> bool:
-    """Return True if *response* looks like a Cloudflare block page."""
-    if response.status_code in (403, 503):
-        headers_lower = {k.lower() for k in response.headers}
-        if any(hint in headers_lower for hint in _CLOUDFLARE_HINTS):
-            return True
-        # Cloudflare sometimes returns 403 with an HTML page even without the
-        # header being present, check the body.
-        content_type = response.headers.get("content-type", "")
-        if "text/html" in content_type:
-            text = response.text
-            if "cloudflare" in text.lower() or "cf-ray" in text.lower():
-                return True
-    return False
-
-
-@dataclass
-class ReleaseInfo:
-    """Information about a datasource release."""
-
-    datasource: str
-    version: str | None
-    release_date: datetime | None
-    is_new: bool
-    files: dict[str, str]  # key -> URL mapping
-
-
-def download_file(
-    url: str,
-    output_path: Path,
-    decompress_gz: bool = True,
-    timeout: float | None = None,
-    show_progress: bool = True,
-    description: str | None = None,
-) -> Path:
-    """Download a file from URL to the specified path.
-
-    Args:
-        url: URL to download from.
-        output_path: Where to save the file.
-        decompress_gz: Whether to decompress .gz files automatically.
-        timeout: Request timeout in seconds.
-        show_progress: Whether to show a progress bar.
-        description: Description for the progress bar.
-
-    Returns:
-        Path to the downloaded (and optionally decompressed) file.
-    """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Get filename for progress bar description
-    if description is None:
-        description = output_path.name
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        with client.stream("GET", url) as response:
-            if _is_cloudflare_blocked(response):
-                raise CloudflareBlockedError(url)
-            response.raise_for_status()
-
-            # Get total size if available
-            total_size = int(response.headers.get("content-length", 0))
-
-            # Determine if we need to decompress
-            is_gzip = url.endswith(".gz") and decompress_gz
-            final_path = output_path
-
-            if is_gzip:
-                _download_gzip(
-                    output_path,
-                    show_progress,
-                    response,
-                    total_size,
-                    final_path,
-                    description,
-                )
-            else:
-                _download_nogzip(
-                    output_path,
-                    total_size,
-                    response,
-                    show_progress,
-                    description,
-                )
-    return final_path
-
-
-def get_file_last_modified(url: str, timeout: float = 30.0) -> datetime | None:
-    """Get the Last-Modified date from a URL via HEAD request.
-
-    Args:
-        url: URL to check.
-        timeout: Request timeout in seconds.
-
-    Returns:
-        The Last-Modified datetime or None if unavailable.
-    """
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.head(url)
-            if _is_cloudflare_blocked(response):
-                raise CloudflareBlockedError(url)
-            if "last-modified" in response.headers:
-                from email.utils import parsedate_to_datetime
-
-                return parsedate_to_datetime(response.headers["last-modified"])
-    except (httpx.HTTPError, ValueError):
-        pass
-    return None
-
-
-def check_chebi_release() -> ReleaseInfo:
-    """Check for the latest ChEBI release.
-
-    Returns:
-        ReleaseInfo with the latest ChEBI release details.
-    """
-    archive_url = ALL_DATASOURCES["chebi"].archive_url
-    with httpx.Client(follow_redirects=True) as client:
-        response = client.get(archive_url)
-        response.raise_for_status()
-
-    # Parse the archive index to find the latest release number
-    matches = re.findall(r'href="rel(\d+)/"', response.text)
-    if not matches:
-        raise ValueError("Could not find ChEBI releases in archive")
-
-    latest_release = max(int(m) for m in matches)
-    version = str(latest_release)
-
-    # Return URLs based on release version
-    urls = _get_chebi_urls_for_version(version, subset="3star")
-    # Get release date from secondary_ids (new) or sdf (legacy)
-    check_url = urls.get("secondary_ids") or urls.get("sdf")
-    release_date = get_file_last_modified(check_url) if check_url else None
-
-    return ReleaseInfo(
-        datasource="chebi",
-        version=version,
-        release_date=release_date,
-        is_new=True,  # Caller determines if it's new
-        files=urls,
-    )
-
-
-def check_ncbi_release() -> ReleaseInfo:
-    """Check for the latest NCBI Gene release.
-
-    Returns:
-        ReleaseInfo with the latest NCBI release details.
-    """
-    history_url = ALL_DATASOURCES["ncbi"].download_urls["gene_history"]
-    last_modified = get_file_last_modified(history_url)
-    version = last_modified.strftime("%Y-%m-%d") if last_modified else None
-
-    return ReleaseInfo(
-        datasource="ncbi",
-        version=version,
-        release_date=last_modified,
-        is_new=True,
-        files=dict(ALL_DATASOURCES["ncbi"].download_urls),
-    )
-
-
-def check_ensembl_release() -> ReleaseInfo:
-    """Check for the latest Ensembl release.
-
-    The release number is global across every species (Ensembl cuts all
-    species' core databases under the same release number), so this always
-    checks against the default species (human).
-
-    Returns:
-        ReleaseInfo with the latest Ensembl release details.
-    """
-    from pysec2pri.parsers.ensembl import EnsemblDownloader
-
-    versions = EnsemblDownloader(show_progress=False).list_versions()
-    if not versions:
-        raise ValueError("Could not find Ensembl releases on the FTP server")
-    version = versions[-1]
-
-    urls = _get_ensembl_urls_for_version(version)
-    check_url = urls.get("stable_id_event")
-    release_date = get_file_last_modified(check_url) if check_url else None
-
-    return ReleaseInfo(
-        datasource="ensembl",
-        version=version,
-        release_date=release_date,
-        is_new=True,
-        files=urls,
-    )
-
-
-METALINK_URL = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/RELEASE.metalink"
-NS = {"m": "http://www.metalinker.org/"}
-
-
-def _fetch_uniprot_metalink(url: str = METALINK_URL) -> str:
-    import requests
-
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    return r.text
-
-
-def _parse_uniprot_release_xml(xml_text: str) -> tuple[str, datetime | None]:
-    from defusedxml.ElementTree import fromstring
-
-    root = fromstring(xml_text)
-
-    version_node = root.find("m:version", NS)
-    if version_node is None or not version_node.text:
-        raise ValueError("Missing UniProt version in metalink")
-
-    version = version_node.text.strip()
-    return version, None
-
-
-def check_uniprot_release() -> ReleaseInfo:
-    """Check for the latest UniProt release.
-
-    Returns:
-        ReleaseInfo with the latest UniProt release details.
-    """
-    xml_text = _fetch_uniprot_metalink()
-    version, release_date = _parse_uniprot_release_xml(xml_text)
-
-    return ReleaseInfo(
-        datasource="uniprot",
-        version=version,  # e.g. "2026_01"
-        release_date=release_date,  # likely None unless you derive it elsewhere
-        is_new=True,
-        files=dict(ALL_DATASOURCES["uniprot"].download_urls),
-    )
-
-
-def check_hmdb_release() -> ReleaseInfo:
-    """Check for the latest HMDB release by downloading and checking XML.
-
-    Returns:
-        ReleaseInfo with the latest HMDB release details.
-    """
-    # HMDB requires downloading to check the version in XML
-    metabolites_url = ALL_DATASOURCES["hmdb_metabolites"].download_urls["metabolites"]
-    last_modified = get_file_last_modified(metabolites_url)
-    version = last_modified.strftime("%Y-%m-%d") if last_modified else None
-
-    return ReleaseInfo(
-        datasource="hmdb",
-        version=version,
-        release_date=last_modified,
-        is_new=True,
-        files=dict(ALL_DATASOURCES["hmdb"].download_urls),
-    )
-
-
-def check_hgnc_release() -> ReleaseInfo:
-    """Check for the latest HGNC release from the quarterly archive.
-
-    Queries the Google Cloud Storage API to list files in the HGNC
-    quarterly archive bucket and finds the latest release.
-
-    Returns:
-        ReleaseInfo with the latest HGNC release details.
-    """
-    gcs_api_url = (
-        "https://storage.googleapis.com/storage/v1/b/public-download-files/o"
-        "?prefix=hgnc/archive/archive/quarterly/tsv/"
-    )
-    logger.info(f"Querying HGNC files from GCS API: {gcs_api_url}")
-
-    with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-        response = client.get(gcs_api_url)
-        response.raise_for_status()
-        data = response.json()
-
-    # Extract file names from the response
-    items = data.get("items", [])
-    file_names = [item.get("name", "") for item in items]
-
-    # Find all complete set files: hgnc_complete_set_YYYY-MM-DD.txt
-    complete_dates = []
-    for name in file_names:
-        match = re.search(r"hgnc_complete_set_(\d{4}-\d{2}-\d{2})\.txt$", name)
-        if match:
-            complete_dates.append(match.group(1))
-
-    if not complete_dates:
-        logger.warning("Could not find HGNC complete set files in GCS bucket")
-        # Fall back to current release URLs
-        last_modified = get_file_last_modified(ALL_DATASOURCES["hgnc"].download_urls["complete"])
-        version = last_modified.strftime("%Y-%m-%d") if last_modified else None
-        return ReleaseInfo(
-            datasource="hgnc",
-            version=version,
-            release_date=last_modified,
-            is_new=True,
-            files=dict(ALL_DATASOURCES["hgnc"].download_urls),
-        )
-
-    # Get the latest date
-    latest_date = max(complete_dates)
-    logger.info(f"Latest HGNC release date: {latest_date}")
-
-    # Build URLs for the quarterly archive files
-    # Files are hosted on Google Cloud Storage
-    base_url = (
-        "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv"
-    )
-    complete_url = f"{base_url}/hgnc_complete_set_{latest_date}.txt"
-    withdrawn_url = f"{base_url}/withdrawn_{latest_date}.txt"
-
-    # Parse the date
-    release_date = datetime.strptime(latest_date, "%Y-%m-%d")
-
-    return ReleaseInfo(
-        datasource="hgnc",
-        version=latest_date,
-        release_date=release_date,
-        is_new=True,
-        files={
-            "complete": complete_url,
-            "withdrawn": withdrawn_url,
-        },
-    )
 
 
 def get_latest_release_info(datasource: str) -> ReleaseInfo:
@@ -402,112 +69,32 @@ def get_latest_release_info(datasource: str) -> ReleaseInfo:
     Raises:
         ValueError: If the datasource is not supported.
     """
-    checkers = {
-        "chebi": check_chebi_release,
-        "ensembl": check_ensembl_release,
-        "hmdb": check_hmdb_release,
-        "hgnc": check_hgnc_release,
-        "ncbi": check_ncbi_release,
-        "uniprot": check_uniprot_release,
-    }
-
-    if datasource.lower() not in checkers:
-        raise ValueError(f"Unknown datasource: {datasource}. Supported: {list(checkers.keys())}")
-
-    return checkers[datasource.lower()]()
+    return _get_latest_release_info(datasource, checkers=CHECK_RELEASE)
 
 
-def _get_hgnc_urls_for_version(version: str) -> dict[str, str]:
-    """Build HGNC URLs for a specific version date.
+def check_release(
+    datasource: str,
+    current_version: str | None = None,
+    current_date: datetime | None = None,
+) -> ReleaseInfo:
+    """Check if a new release is available for a datasource.
 
     Args:
-        version: Version string in YYYY-MM-DD format.
+        datasource: Name of the datasource.
+        current_version: Current version string to compare against.
+        current_date: Current release date to compare against.
 
     Returns:
-        Dictionary with 'withdrawn' and 'complete' URLs.
+        ReleaseInfo with is_new indicating if update is available.
     """
-    base_url = (
-        "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv"
-    )
-    return {
-        "withdrawn": f"{base_url}/withdrawn_{version}.txt",
-        "complete": f"{base_url}/hgnc_complete_set_{version}.txt",
-    }
-
-
-def _get_chebi_urls_for_version(
-    version: str,
-    subset: str = "3star",
-) -> dict[str, str]:
-    """Build ChEBI URLs for a specific release version.
-
-    Delegates to :meth:`~pysec2pri.parsers.chebi.ChEBIDownloader.get_download_urls`,
-    which resolves the distribution era (TSV >= 245, legacy SDF <= 244) from
-    ``chebi.yaml``'s ``distribution_eras``.
-
-    Args:
-        version: Release number (e.g., "232", "245").
-        subset: Either "3star" or "complete". For new releases (>=245),
-            this determines which compounds are included via the compounds.tsv
-            filter. For legacy releases (<245), this determines the SDF file.
-
-    Returns:
-        Dictionary with file URLs keyed by type (sdf, secondary_ids, etc.).
-    """
-    from pysec2pri.parsers.chebi import ChEBIDownloader
-
-    return ChEBIDownloader(version=version, subset=subset).get_download_urls(version)
-
-
-def _get_ensembl_urls_for_version(
-    version: str,
-    species: str | int = 9606,
-    assembly: str | None = None,
-) -> dict[str, str]:
-    """Build Ensembl URLs for a specific release/species.
-
-    Delegates to :meth:`~pysec2pri.parsers.ensembl.EnsemblDownloader.get_download_urls`,
-    which resolves *species* to Ensembl's own species token and
-    auto-discovers the assembly suffix when *assembly* is not given.
-
-    Args:
-        version: Ensembl release number (e.g. ``"115"``).
-        species: Canonical NCBI taxon ID.
-        assembly: Force a specific assembly suffix, skipping auto-discovery.
-
-    Returns:
-        Dictionary with file URLs keyed by table name.
-    """
-    from pysec2pri.parsers.ensembl import EnsemblDownloader
-
-    return EnsemblDownloader(version=version, species=species, assembly=assembly).get_download_urls(
-        version
-    )
-
-
-def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
-    """Build UniProt URLs for a specific release version.
-
-    Args:
-        version: Release version (e.g., "2024_01").
-
-    Returns:
-        Dictionary with 'knowledgebase_docs' URL (tar.gz containing sec_ac.txt).
-    """
-    base = "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases"
-    return {
-        "knowledgebase_docs": (
-            f"{base}/release-{version}/knowledgebase/knowledgebase-docs-only{version}.tar.gz"
-        ),
-    }
+    return _check_release(datasource, current_version, current_date, checkers=CHECK_RELEASE)
 
 
 def list_versions(datasource: str) -> Any:
     """List all available archive versions for a datasource.
 
-    Delegates to the datasource's :class:`~pysec2pri.parsers.base.BaseDownloader`
-    subclass ``list_versions()`` method, which contains all source-specific
-    retrieval logic.
+    Delegates to the datasource's downloader class ``list_versions()``
+    method, which contains all source-specific retrieval logic.
 
     For datasources that publish versioned archives (ChEBI, HGNC, UniProt),
     returns all available version strings sorted in ascending order.
@@ -529,33 +116,7 @@ def list_versions(datasource: str) -> Any:
     Raises:
         ValueError: If the datasource is unknown or has no versioned archive.
     """
-    lower = datasource.lower()
-
-    if lower not in ALL_DATASOURCES:
-        raise ValueError(
-            f"Unknown datasource: {datasource!r}. Supported: {sorted(ALL_DATASOURCES.keys())}"
-        )
-
-    from pysec2pri.parsers.chebi import ChEBIDownloader
-    from pysec2pri.parsers.ensembl import EnsemblDownloader
-    from pysec2pri.parsers.hgnc import HGNCDownloader
-    from pysec2pri.parsers.uniprot import UniProtDownloader
-
-    _downloader_map = {
-        "chebi": ChEBIDownloader,
-        "ensembl": EnsemblDownloader,
-        "hgnc": HGNCDownloader,
-        "uniprot": UniProtDownloader,
-    }
-
-    cls = _downloader_map.get(lower)
-    if cls is None:
-        # Datasource exists but has no versioned archive
-        raise ValueError(
-            f"{datasource.upper()} does not maintain a versioned archive. "
-            "Only the latest release is available for download."
-        )
-    return cls().list_versions()
+    return _list_versions(datasource, known_datasources=ALL_DATASOURCES, downloaders=DOWNLOADERS)
 
 
 def get_download_urls(
@@ -576,12 +137,9 @@ def get_download_urls(
     Returns:
         Dictionary mapping file keys to URLs.
     """
-    datasource_lower = datasource.lower()
-    config = ALL_DATASOURCES.get(datasource_lower)
-    if not config:
-        raise ValueError(f"Unknown datasource: {datasource}")
-    urls, _ = _get_datasource_urls(datasource_lower, config, version, **kwargs)
-    return urls
+    return _get_download_urls(
+        datasource, version, all_datasources=ALL_DATASOURCES, urls_and_date=URLS_AND_DATE, **kwargs
+    )
 
 
 def resolve_release_date(
@@ -606,160 +164,9 @@ def resolve_release_date(
     Returns:
         The release date, or None when it cannot be determined.
     """
-    datasource_lower = datasource.lower()
-    config = ALL_DATASOURCES.get(datasource_lower)
-    if not config:
-        raise ValueError(f"Unknown datasource: {datasource}")
-    _, release_date = _get_datasource_urls(datasource_lower, config, version, **kwargs)
-    return release_date
-
-
-def _iso_to_datetime(value: str | None) -> datetime | None:
-    """Parse an ``YYYY-MM-DD`` string into a datetime, or return None."""
-    try:
-        return datetime.strptime(str(value), "%Y-%m-%d")
-    except (ValueError, TypeError):
-        return None
-
-
-def _warn_if_unversioned(datasource_lower: str, version: str | None) -> None:
-    """Log a warning when a *version* was requested for an unversioned source."""
-    if version:
-        logger.warning(
-            f"{datasource_lower} does not have versioned archives. "
-            f"Downloading latest version instead."
-        )
-
-
-# HMDB's live site sits behind Cloudflare bot protection, which blocks even
-# the lightweight HEAD request the generic Last-Modified fallback relies on.
-# HMDB also has not published a new release since Version 5.0, so a static
-# lookup is both necessary and safe to keep current. Dates are the "Released
-# on" values published on HMDB's own Downloads page
-# (https://hmdb.ca/downloads, Version 5.0 / "Current Version" tab).
-_HMDB_RELEASE_DATES: dict[str, datetime] = {
-    "hmdb_metabolites": datetime(2021, 11, 17),
-    "hmdb_proteins": datetime(2021, 11, 9),
-}
-
-
-def _hgnc_urls_and_date(version: str | None) -> tuple[dict[str, str], datetime | None]:
-    if version:
-        urls = _get_hgnc_urls_for_version(version)
-        # The HGNC archive version is itself the release date (YYYY-MM-DD).
-        release_date = _iso_to_datetime(version)
-        logger.info(f"HGNC version {version}: {urls}")
-    else:
-        release_info = check_hgnc_release()
-        urls = release_info.files
-        release_date = release_info.release_date
-        logger.info(f"HGNC release {release_info.version}: {urls}")
-    return urls, release_date
-
-
-def _chebi_urls_and_date(
-    version: str | None, config: DatasourceConfig, **kwargs: Any
-) -> tuple[dict[str, str], datetime | None]:
-    subset = kwargs.get("subset") or config.default_subset() or "3star"
-    release_date: datetime | None = None
-    if version:
-        urls = _get_chebi_urls_for_version(version, subset=subset)
-        logger.info(f"ChEBI version {version}: {urls}")
-    else:
-        release_info = check_chebi_release()
-        urls = release_info.files
-        release_date = release_info.release_date
-        logger.info(f"ChEBI release {release_info.version}: {urls}")
-    return urls, release_date
-
-
-def _ensembl_urls_and_date(
-    version: str | None, config: DatasourceConfig, **kwargs: Any
-) -> tuple[dict[str, str], datetime | None]:
-    species = kwargs.get("species", config.default_species())
-    release_date: datetime | None = None
-    if version:
-        urls = _get_ensembl_urls_for_version(version, species=species)
-        logger.info(f"Ensembl version {version} (species {species}): {urls}")
-    else:
-        release_info = check_ensembl_release()
-        urls = release_info.files
-        release_date = release_info.release_date
-        logger.info(f"Ensembl release {release_info.version}: {urls}")
-    return urls, release_date
-
-
-def _uniprot_urls_and_date(
-    version: str | None, config: DatasourceConfig
-) -> tuple[dict[str, str], datetime | None]:
-    if version:
-        urls = _get_uniprot_urls_for_version(version)
-        logger.info(f"UniProt version {version}: {urls}")
-    else:
-        urls = dict(config.download_urls)
-    return urls, None
-
-
-def _get_datasource_urls(
-    datasource_lower: str,
-    config: DatasourceConfig,
-    version: str | None = None,
-    **kwargs: Any,
-) -> tuple[dict[str, str], datetime | None]:
-    """Get download URLs and the source release date for a datasource.
-
-    The release date drives the SSSOM ``mapping_date`` of generated mapping
-    sets, so it should reflect when the upstream data was released rather than
-    when it was downloaded. Each datasource resolves it from the most specific
-    signal available; a generic HTTP ``Last-Modified`` lookup is used as a
-    fallback.
-
-    Args:
-        datasource_lower: Lowercase datasource name.
-        config: Datasource configuration.
-        version: Specific version to get URLs for.
-        **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
-            for Ensembl) -- each per-datasource helper below picks out the
-            one it needs (falling back to the config's own default) and
-            ignores the rest.
-
-    Returns:
-        Tuple of (file-key -> URL mapping, release date or None).
-    """
-    urls: dict[str, str]
-    release_date: datetime | None
-
-    if datasource_lower == "hgnc":
-        urls, release_date = _hgnc_urls_and_date(version)
-    elif datasource_lower == "chebi":
-        urls, release_date = _chebi_urls_and_date(version, config, **kwargs)
-    elif datasource_lower == "ensembl":
-        urls, release_date = _ensembl_urls_and_date(version, config, **kwargs)
-    elif datasource_lower == "uniprot":
-        urls, release_date = _uniprot_urls_and_date(version, config)
-    elif datasource_lower in _HMDB_RELEASE_DATES:
-        _warn_if_unversioned(datasource_lower, version)
-        urls = dict(config.download_urls)
-        release_date = _HMDB_RELEASE_DATES[datasource_lower]
-    else:
-        # NCBI - no versioned archives available
-        _warn_if_unversioned(datasource_lower, version)
-        urls = dict(config.download_urls)
-        release_date = None
-
-    # Generic fallback: derive the release date from the file's Last-Modified
-    # header when a more specific signal was not available above. Must never
-    # raise: some sources (e.g. HMDB) sit behind Cloudflare and block even
-    # this lightweight HEAD request, and a date-resolution failure must not
-    # break the actual file download.
-    if release_date is None and urls:
-        first_url = next(iter(urls.values()))
-        try:
-            release_date = get_file_last_modified(first_url)
-        except CloudflareBlockedError:
-            logger.debug(f"Could not resolve release date for {first_url}: Cloudflare-blocked.")
-
-    return urls, release_date
+    return _resolve_release_date(
+        datasource, version, all_datasources=ALL_DATASOURCES, urls_and_date=URLS_AND_DATE, **kwargs
+    )
 
 
 def download_datasource(
@@ -789,20 +196,17 @@ def download_datasource(
     Returns:
         Dictionary mapping file keys to downloaded paths.
     """
-    datasource_lower = datasource.lower()
-    config = ALL_DATASOURCES.get(datasource_lower)
-    if not config:
-        raise ValueError(f"Unknown datasource: {datasource}")
-
-    files, _ = download_datasource_with_release(
+    return _download_datasource(
         datasource,
         output_dir,
+        all_datasources=ALL_DATASOURCES,
+        urls_and_date=URLS_AND_DATE,
         decompress=decompress,
         version=version,
         keys=keys,
+        tar_extractors=TAR_EXTRACTORS,
         **kwargs,
     )
-    return files
 
 
 def download_datasource_with_release(
@@ -816,8 +220,7 @@ def download_datasource_with_release(
     """Download all files for a datasource and report its release date.
 
     Same as :func:`download_datasource`, but also returns the resolved source
-    release date (used for the SSSOM ``mapping_date``). See
-    :func:`_get_datasource_urls` for how the date is determined per datasource.
+    release date (used for the SSSOM ``mapping_date``).
 
     Args:
         datasource: Name of the datasource.
@@ -831,231 +234,14 @@ def download_datasource_with_release(
     Returns:
         Tuple of (file-key -> downloaded path mapping, release date or None).
     """
-    datasource_lower = datasource.lower()
-    config = ALL_DATASOURCES.get(datasource_lower)
-    if not config:
-        raise ValueError(f"Unknown datasource: {datasource}")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    urls, release_date = _get_datasource_urls(datasource_lower, config, version, **kwargs)
-    if keys is not None:
-        urls = {k: v for k, v in urls.items() if k in keys}
-
-    return _download_urls(urls, output_dir, decompress), release_date
-
-
-def _download_urls(
-    urls: dict[str, str],
-    output_dir: Path,
-    decompress: bool = True,
-) -> dict[str, Path]:
-    """Download files from URLs to output directory.
-
-    Args:
-        urls: Dictionary mapping file keys to URLs.
-        output_dir: Directory to save files.
-        decompress: Whether to decompress .gz files.
-
-    Returns:
-        Dictionary mapping file keys to downloaded paths.
-    """
-    downloaded = {}
-
-    for key, url in urls.items():
-        filename = url.split("/")[-1]
-
-        # Handle tar.gz files (UniProt archive)
-        if filename.endswith(".tar.gz"):
-            output_path = output_dir / filename
-            logger.info(f"Downloading {key}: {url}")
-            download_file(url, output_path, decompress_gz=False)
-            extracted = _extract_uniprot_tar(output_path, output_dir)
-            downloaded.update(extracted)
-            logger.info(f"Extracted: {list(extracted.keys())}")
-            continue
-
-        if decompress and filename.endswith(".gz"):
-            filename = filename[:-3]
-
-        output_path = output_dir / filename
-        logger.info(f"Downloading {key}: {url}")
-        download_file(url, output_path, decompress_gz=decompress)
-        downloaded[key] = output_path
-        logger.info(f"Saved to: {output_path}")
-
-    return downloaded
-
-
-def _extract_uniprot_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
-    """Extract UniProt tar.gz and return paths to sec_ac.txt and delac_sp.txt.
-
-    Args:
-        tar_path: Path to the downloaded tar.gz file.
-        output_dir: Directory to extract to.
-
-    Returns:
-        Dictionary mapping file keys to extracted paths.
-    """
-    import tarfile
-
-    extracted = {}
-    with tarfile.open(tar_path, "r:gz") as tar:
-        for member in tar.getmembers():
-            if member.name.endswith("sec_ac.txt"):
-                tar.extract(member, output_dir)
-                extracted["sec_ac"] = output_dir / member.name
-            elif member.name.endswith("delac_sp.txt"):
-                tar.extract(member, output_dir)
-                extracted["delac_sp"] = output_dir / member.name
-    return extracted
-
-
-def check_release(
-    datasource: str,
-    current_version: str | None = None,
-    current_date: datetime | None = None,
-) -> ReleaseInfo:
-    """Check if a new release is available for a datasource.
-
-    Args:
-        datasource: Name of the datasource.
-        current_version: Current version string to compare against.
-        current_date: Current release date to compare against.
-
-    Returns:
-        ReleaseInfo with is_new indicating if update is available.
-    """
-    info = get_latest_release_info(datasource)
-
-    # Determine if this is a new release
-    if current_version and info.version:
-        info = ReleaseInfo(
-            datasource=info.datasource,
-            version=info.version,
-            release_date=info.release_date,
-            is_new=info.version != current_version,
-            files=info.files,
-        )
-    elif current_date and info.release_date:
-        info = ReleaseInfo(
-            datasource=info.datasource,
-            version=info.version,
-            release_date=info.release_date,
-            is_new=info.release_date > current_date,
-            files=info.files,
-        )
-
-    return info
-
-
-@contextmanager
-def iter_with_progress(
-    iterator: Iterable[bytes],
-    *,
-    enabled: bool,
-    total: int | None,
-    description: str,
-) -> Iterator[Iterable[bytes]]:
-    """Wrap an iterator with optional progress bar.
-
-    Args:
-        iterator: The byte iterator to wrap.
-        enabled: Whether to show progress.
-        total: Total size in bytes.
-        description: Description for progress bar.
-
-    Yields:
-        The wrapped iterator.
-    """
-    if enabled and total and total > 0:
-        with tqdm(
-            total=total,
-            unit="B",
-            unit_scale=True,
-            desc=description,
-        ) as pbar:
-
-            def gen() -> Generator[bytes, None, None]:
-                """Yield chunks."""
-                for chunk in iterator:
-                    pbar.update(len(chunk))
-                    yield chunk
-
-            yield gen()
-    else:
-        yield iterator
-
-
-def _download_gzip(
-    output_path: Path,
-    show_progress: bool,
-    response: httpx.Response,
-    total_size: int,
-    final_path: Path,
-    description: str | None = None,
-) -> None:
-    """Help download gzipped files.
-
-    Args:
-        output_path: Path for the output file.
-        show_progress: Whether to show progress bar.
-        response: HTTP response object.
-        total_size: Total size in bytes.
-        final_path: Final destination path.
-        description: Description for progress bar.
-    """
-    temp_path = output_path.with_suffix(output_path.suffix + ".gz")
-
-    with temp_path.open("wb") as f:
-        with iter_with_progress(
-            response.iter_bytes(chunk_size=8192),
-            enabled=show_progress,
-            total=total_size,
-            description=f"Downloading {description}",
-        ) as chunks:
-            for chunk in chunks:
-                f.write(chunk)
-
-    if show_progress:
-        compressed_size = temp_path.stat().st_size
-    else:
-        compressed_size = None
-
-    with gzip.open(temp_path, "rb") as f_in, final_path.open("wb") as f_out:
-        with iter_with_progress(
-            iter(lambda: f_in.read(8192), b""),
-            enabled=show_progress,
-            total=compressed_size,
-            description=f"Decompressing {description}",
-        ) as chunks:
-            for chunk in chunks:
-                f_out.write(chunk)
-
-    temp_path.unlink()
-
-
-def _download_nogzip(
-    output_path: Path,
-    total_size: int,
-    response: httpx.Response,
-    show_progress: bool,
-    description: str | None,
-) -> None:
-    """Help download non-gzipped files.
-
-    Args:
-        output_path: Path for the output file.
-        total_size: Total size in bytes.
-        response: HTTP response object.
-        show_progress: Whether to show progress bar.
-        description: Description for progress bar.
-    """
-    with output_path.open("wb") as f:
-        with iter_with_progress(
-            response.iter_bytes(chunk_size=8192),
-            enabled=show_progress,
-            total=total_size,
-            description=f"Downloading {description}",
-        ) as chunks:
-            for chunk in chunks:
-                f.write(chunk)
+    return _download_datasource_with_release(
+        datasource,
+        output_dir,
+        all_datasources=ALL_DATASOURCES,
+        urls_and_date=URLS_AND_DATE,
+        decompress=decompress,
+        version=version,
+        keys=keys,
+        tar_extractors=TAR_EXTRACTORS,
+        **kwargs,
+    )

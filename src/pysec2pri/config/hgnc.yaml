@@ -7,11 +7,6 @@ prefix: "HGNC"
 curie_base_url: "http://identifiers.org/hgnc/"
 entity_types: ["genes"]
 
-# Genome assembly/build for subject|object-source-version (issue #51). HGNC is
-# human-only, so a single datasource-wide build applies (the release itself is
-# already explicit in mapping_set_version).
-genome_build:
-  default: "GRCh38"
 mappingset:
   sssom_version: null
   curie_map:
@@ -133,7 +128,7 @@ id_pattern: "^HGNC:\\d+$"
 default_output_filename: "hgnc_sec2pri.sssom.tsv"
 
 # Suggested cross-reference crosswalk source(s) for disambiguation context
-# (see pysec2pri.context.ContextSpec, kind="xref")
+# (see mapkgsutils.context.ContextSpec, kind="xref")
 xref_sources:
   - id: hgnc_custom
     name: "HGNC custom download - Ensembl/Entrez/RefSeq/UniProt/etc. mappings"

@@ -7,13 +7,6 @@ prefix: "VGNC"
 curie_base_url: "http://identifiers.org/vgnc/"
 entity_types: ["genes"]
 
-# Genome assembly/build for subject|object-source-version (issue #51). VGNC is
-# multi-species; add the per-species reference assembly under
-# `species.available[<taxon>].build` to fill these fields (otherwise they fall
-# back to the release, which is already explicit in mapping_set_version).
-genome_build:
-  source_url: "https://rest.ensembl.org/info/assembly/{species}?content-type=application/json"
-
 # VGNC (Vertebrate Gene Nomenclature Committee) names genes for vertebrate
 # species that lack their own nomenclature committee (human/mouse/rat are
 # deliberately out of scope -- HGNC/MGI/RGD cover those). Unlike Ensembl

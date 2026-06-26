@@ -136,7 +136,7 @@ homepage: "https://www.uniprot.org/"
 data_license: "https://www.uniprot.org/help/license"
 
 # Suggested cross-reference crosswalk source(s) for disambiguation context
-# (see pysec2pri.context.ContextSpec, kind="xref")
+# (see mapkgsutils.context.ContextSpec, kind="xref")
 xref_sources:
   - id: hgnc_custom
     name: "HGNC custom download -- Ensembl/Entrez/RefSeq/UniProt/etc. crosswalk"

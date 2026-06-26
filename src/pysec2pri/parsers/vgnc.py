@@ -42,9 +42,9 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
+    BaseMappingSet,
     BaseParser,
     LabelMappingSet,
-    Sec2PriMappingSet,
 )
 
 # VGNC column names (case-insensitive matching used)
@@ -114,7 +114,7 @@ class VGNCParser(BaseParser):
         input_path: Path | str | None,
         complete_set_path: Path | str | None = None,
         species: str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse the VGNC withdrawn TSV file into an IdMappingSet.
 
         Always parses the *full*, unfiltered withdrawn file first (see
@@ -176,7 +176,7 @@ class VGNCParser(BaseParser):
         self,
         complete_set_path: Path | str | None,
         species: str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set whose only content is the full primary ID list.
 
         Reads the VGNC gene-set file to extract every current VGNC ID,
@@ -250,7 +250,7 @@ class VGNCParser(BaseParser):
         self,
         complete_set_path: Path | str | None,
         species: str,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set whose only content is the full primary Symbol list.
 
         Reads the VGNC gene-set file to extract every current approved
@@ -285,7 +285,7 @@ class VGNCParser(BaseParser):
         withdrawn_path: Path | str | None,
         complete_set_path: Path | str | None,
         species: str,
-    ) -> tuple[Sec2PriMappingSet, Sec2PriMappingSet]:
+    ) -> tuple[BaseMappingSet, BaseMappingSet]:
         """Parse both the withdrawn and gene-set files.
 
         Args:
@@ -592,7 +592,7 @@ class VGNCParser(BaseParser):
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Create an IdMappingSet or LabelMappingSet with config metadata.
 
         Delegates to BaseParser.create_mapping_set().

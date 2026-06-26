@@ -12,7 +12,7 @@ from pysec2pri.cli import _make_generate_cmd
 
 
 class _FakeMappingSet:
-    """Minimal stand-in for a Sec2PriMappingSet, just enough for save()/_emit()."""
+    """Minimal stand-in for a BaseMappingSet, just enough for save()/_emit()."""
 
     def __init__(self, version: str | None) -> None:
         """Store the version and an empty mappings list."""

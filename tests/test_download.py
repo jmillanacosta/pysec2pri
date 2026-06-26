@@ -10,7 +10,7 @@ import pytest
 from sssom_schema import Mapping
 
 from pysec2pri import api as api_module
-from pysec2pri.download import CloudflareBlockedError, _get_datasource_urls, resolve_release_date
+from pysec2pri.download import CloudflareBlockedError, resolve_release_date
 
 
 class TestHmdbStaticReleaseDates:
@@ -35,14 +35,18 @@ class TestGenericFallbackResilience:
 
     def test_cloudflare_block_degrades_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A Cloudflare-blocked Last-Modified lookup yields ``None``, not a raise."""
-        from pysec2pri import download as download_module
+        from mapkgsutils import download as mapkgsutils_download
+
         from pysec2pri.constants import ALL_DATASOURCES
+        from pysec2pri.downloads import URLS_AND_DATE
 
         def _raise_blocked(url: str, timeout: float = 30.0) -> datetime | None:
             raise CloudflareBlockedError(f"blocked: {url}")
 
-        monkeypatch.setattr(download_module, "get_file_last_modified", _raise_blocked)
-        urls, release_date = _get_datasource_urls("ncbi", ALL_DATASOURCES["ncbi"])
+        monkeypatch.setattr(mapkgsutils_download, "get_file_last_modified", _raise_blocked)
+        urls, release_date = mapkgsutils_download.resolve_datasource_urls(
+            "ncbi", ALL_DATASOURCES["ncbi"], urls_and_date=URLS_AND_DATE
+        )
         assert release_date is None
         assert urls
 
@@ -94,7 +98,7 @@ class TestEnsemblDownloader:
 
     def test_get_download_urls_templates_version_species_assembly(self) -> None:
         """Explicit assembly skips discovery and fills the URL template directly."""
-        from pysec2pri.parsers.ensembl import EnsemblDownloader
+        from pysec2pri.downloads.ensembl import EnsemblDownloader
 
         downloader = EnsemblDownloader(
             version="115", species=9606, assembly="38", show_progress=False
@@ -108,7 +112,7 @@ class TestEnsemblDownloader:
 
     def test_get_download_urls_resolves_mouse_species_token(self) -> None:
         """A different taxon ID resolves to its own Ensembl species token."""
-        from pysec2pri.parsers.ensembl import EnsemblDownloader
+        from pysec2pri.downloads.ensembl import EnsemblDownloader
 
         downloader = EnsemblDownloader(
             version="115", species=10090, assembly="39", show_progress=False
@@ -120,9 +124,9 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A taxon ID unknown both statically and via the live fallback raises."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FailingHttpClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FailingHttpClient)
         downloader = ensembl_module.EnsemblDownloader(
             version="115", species=99999, assembly="1", show_progress=False
         )
@@ -133,7 +137,7 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A taxon ID absent from config/ensembl.yaml resolves via the live REST fallback."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
         class _FakeSpeciesResponse(_FakeHttpResponse):
             def json(self) -> dict[str, object]:
@@ -152,7 +156,7 @@ class TestEnsemblDownloader:
                     return _FakeSpeciesResponse()
                 return super().get(url)
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeSpeciesClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FakeSpeciesClient)
         downloader = ensembl_module.EnsemblDownloader(
             version="115", species=9615, assembly="1", show_progress=False
         )
@@ -165,9 +169,9 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Omitting assembly triggers _resolve_core_dir (monkeypatched HTTP)."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FakeHttpClient)
         downloader = ensembl_module.EnsemblDownloader(
             version="115", species=9606, show_progress=False
         )
@@ -178,9 +182,9 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """_resolve_core_dir parses the assembly suffix out of the directory listing."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FakeHttpClient)
         downloader = ensembl_module.EnsemblDownloader(show_progress=False)
         assert downloader._resolve_core_dir("115", "homo_sapiens") == "38"
 
@@ -188,9 +192,9 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A failed listing request falls back to parse_options.default_assembly."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FailingHttpClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FailingHttpClient)
         downloader = ensembl_module.EnsemblDownloader(show_progress=False)
         assert downloader._resolve_core_dir("115", "homo_sapiens") == "38"
 
@@ -198,9 +202,9 @@ class TestEnsemblDownloader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A listing that doesn't mention the requested token falls back to the default."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _FakeHttpClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _FakeHttpClient)
         downloader = ensembl_module.EnsemblDownloader(show_progress=False)
         assert downloader._resolve_core_dir("115", "mus_musculus") == "38"
 
@@ -226,7 +230,7 @@ class TestDiscoverEnsemblSpecies:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A breed-specific assembly sharing its species' taxon ID is deduped away."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
         class _RestSpeciesResponse(_FakeHttpResponse):
             def json(self) -> dict[str, list[dict[str, str]]] | dict[str, object]:
@@ -240,7 +244,7 @@ class TestDiscoverEnsemblSpecies:
                     return _RestSpeciesResponse()
                 return _FakeHttpResponse(_DOG_LISTING)
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _RestClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _RestClient)
 
         species = ensembl_module.discover_ensembl_species("115")
 
@@ -250,7 +254,7 @@ class TestDiscoverEnsemblSpecies:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """If the REST species list can't be fetched, every FTP entry is kept (no dedup)."""
-        from pysec2pri.parsers import ensembl as ensembl_module
+        from pysec2pri.downloads import ensembl as ensembl_module
 
         class _NoRestClient(_FailingHttpClient):
             def get(self, url: str) -> _FakeHttpResponse:
@@ -259,7 +263,7 @@ class TestDiscoverEnsemblSpecies:
                     return super().get(url)
                 return _FakeHttpResponse(_DOG_LISTING)
 
-        monkeypatch.setattr("pysec2pri.parsers.ensembl.httpx.Client", _NoRestClient)
+        monkeypatch.setattr("pysec2pri.downloads.ensembl.httpx.Client", _NoRestClient)
 
         species = ensembl_module.discover_ensembl_species("115")
 
@@ -274,7 +278,7 @@ class TestDiscoverEnsemblSpecies:
 
 
 class _FakeMappingSet:
-    """Stand-in for a Sec2PriMappingSet exposing just what the orchestration needs."""
+    """Stand-in for a BaseMappingSet exposing just what the orchestration needs."""
 
     def __init__(
         self,
@@ -310,7 +314,7 @@ def _patch_species_discovery(monkeypatch: pytest.MonkeyPatch, tokens: list[str])
         "pysec2pri.download.check_ensembl_release", lambda: SimpleNamespace(version="999-test")
     )
     monkeypatch.setattr(
-        "pysec2pri.parsers.ensembl.discover_ensembl_species",
+        "pysec2pri.downloads.ensembl.discover_ensembl_species",
         lambda version: [(t, "1") for t in tokens],
     )
     monkeypatch.setattr("pysec2pri.download.resolve_release_date", lambda *a, **kw: None)

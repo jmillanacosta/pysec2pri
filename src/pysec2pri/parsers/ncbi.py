@@ -17,8 +17,8 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
+    BaseMappingSet,
     BaseParser,
-    Sec2PriMappingSet,
 )
 
 #: Sentinel accepted by every species-filtered method: skip the taxon
@@ -92,7 +92,7 @@ class NCBIParser(BaseParser):
         input_path: Path | str | None = None,
         species: str = "9606",
         gene_info_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse NCBI gene_history file into an IdMappingSet.
 
         Args:
@@ -134,7 +134,7 @@ class NCBIParser(BaseParser):
         self,
         gene_info_path: Path | str | None,
         species: str = "9606",
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse NCBI gene_info file for label (label) mappings.
 
         Args:
@@ -169,7 +169,7 @@ class NCBIParser(BaseParser):
         self,
         gene_info_path: Path | str | None,
         species: str = "9606",
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current NCBI Gene primary IDs.
 
         Reads ``gene_info`` to extract every current Gene ID for the given
@@ -198,7 +198,7 @@ class NCBIParser(BaseParser):
         self,
         gene_info_path: Path | str | None,
         species: str = "9606",
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current NCBI Gene labels.
 
         Reads ``gene_info`` to extract every current gene label for the given
@@ -230,7 +230,7 @@ class NCBIParser(BaseParser):
         gene_history_path: Path | str | None,
         gene_info_path: Path | str | None,
         species: str = "9606",
-    ) -> tuple[Sec2PriMappingSet, Sec2PriMappingSet]:
+    ) -> tuple[BaseMappingSet, BaseMappingSet]:
         """Parse both gene_history and gene_info files.
 
         Args:
@@ -410,7 +410,7 @@ class NCBIParser(BaseParser):
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Create an IdMappingSet or LabelMappingSet with config metadata.
 
         Delegates to BaseParser.create_mapping_set().
