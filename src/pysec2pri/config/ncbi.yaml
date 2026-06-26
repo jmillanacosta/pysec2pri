@@ -8,6 +8,23 @@ parse_options:
 prefix: "NCBIGene"
 curie_base_url: "http://identifiers.org/ncbigene/"
 entity_types: ["genes"]
+
+# NCBI's own token IS the canonical taxon ID (no translation needed, unlike
+# Ensembl) -- gene_history/gene_info are filtered directly on #tax_id, which
+# accepts ANY taxon ID, not just the ones listed here. `available` exists
+# only to drive CLI help/choices for common species; NCBIParser never calls
+# species_token(), so it never restricts which taxon IDs are accepted.
+# `default: "all"` processes every organism in the file instead of
+# filtering to one (see NCBIParser.ALL_SPECIES) -- cheap here since
+# gene_info/gene_history are single global files already being downloaded.
+species:
+  default: "all"
+  available:
+    9606: { token: "9606", label: Human }
+    10090: { token: "10090", label: Mouse }
+    10116: { token: "10116", label: Rat }
+    7955: { token: "7955", label: Zebrafish }
+
 mappingset:
   sssom_version: null
   curie_map:
@@ -18,13 +35,14 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/ncbigene"
   mapping_set_version: null
   mapping_set_title: "NCBI Gene Secondary to Primary Mapping"
-  mapping_set_description: "Mappings from discontinued to current NCBI Gene IDs."
+  mapping_set_description:
+    "Mappings from discontinued to current NCBI Gene IDs."
   mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
@@ -61,7 +79,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:ncbigene/" # TODO set namespace, better schema logic to assign namespace
+  record_id: "sec2pri:ncbigene/" # TODO set namespace, better schema logic to assign namespace
   subject_id: null
   subject_label: null
   subject_category: null
@@ -129,7 +147,8 @@ mapping_sets:
     method: parse_symbols
     primary_input: gene_info
     required_inputs: [gene_info]
-    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+    formats:
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 
 input_file_types:
   - gene_info.gz
@@ -138,3 +157,21 @@ input_file_types:
 source: "NCBI Gene"
 homepage: "https://www.ncbi.nlm.nih.gov/gene"
 data_license: "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+
+# Suggested cross-reference crosswalk source(s) for disambiguation context
+# (see mapkgsutils.context.ContextSpec, kind="xref")
+xref_sources:
+  - id: hgnc_custom
+    name: "HGNC custom download - Ensembl/Entrez/RefSeq/UniProt/etc. mappings"
+    url: "https://www.genenames.org/cgi-bin/download/custom?col=gd_hgnc_id&col=gd_app_sym&col=gd_app_name&col=gd_status&col=gd_prev_sym&col=gd_pub_refseq_ids&col=md_eg_id&col=md_ensembl_id&col=md_mim_id&col=md_vega_id&col=md_refseq_id&col=md_ucsc_id&col=md_prot_id&status=Approved&status=Entry%20Withdrawn&hgnc_dbtag=on&order_by=gd_app_sym_sort&format=text&submit=submit"
+    format: tsv
+    object_id_col: "HGNC ID"
+    object_label_col: "Approved symbol"
+    subject_id_cols:
+      ensembl: "Ensembl ID(supplied by Ensembl)"
+      entrez: "NCBI Gene ID(supplied by NCBI)"
+      refseq: "RefSeq IDs"
+      uniprot: "UniProt ID(supplied by UniProt)"
+    note:
+      "Source of truth for cross-references varies; this is a suggested default,
+      not authoritative."

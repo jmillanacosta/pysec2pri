@@ -1,0 +1,5 @@
+taxon_id	vgnc_id	symbol	status	alias_symbol	prev_symbol	date_symbol_changed
+9598	VGNC:9501	CHIMPGENE1	Approved	ALTC1	OLDCHIMP	2015-06-01
+9615	VGNC:9502	DOGGENE1	Approved	ALTD1	OLDDOG	2012-03-15
+9598	VGNC:9503	SHAREDSYM	Approved			
+9615	VGNC:9504	SHAREDSYM	Approved			

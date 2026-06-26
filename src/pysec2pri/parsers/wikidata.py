@@ -18,10 +18,10 @@ from sssom_schema import Mapping
 
 from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
+    BaseMappingSet,
     BaseParser,
     IdMappingSet,
     LabelMappingSet,
-    Sec2PriMappingSet,
 )
 from pysec2pri.queries import (
     WIKIDATA_QUERIES,
@@ -138,7 +138,7 @@ class WikidataParser(BaseParser):
         else:
             self.endpoint = DEFAULT_QLEVER_ENDPOINT
 
-    def parse(self, input_path: Path | str | None = None) -> Sec2PriMappingSet:
+    def parse(self, input_path: Path | str | None = None) -> BaseMappingSet:
         """Query Wikidata and return a MappingSet.
 
         Args:
@@ -176,7 +176,7 @@ class WikidataParser(BaseParser):
 
         return self._create_mapping_set(mappings, version)
 
-    def parse_all(self) -> Sec2PriMappingSet:
+    def parse_all(self) -> BaseMappingSet:
         """Query all entity types from config and return combined MappingSet.
 
         Runs all SPARQL queries defined in the config file's 'queries' section
@@ -251,7 +251,7 @@ class WikidataParser(BaseParser):
         version = self._resolve_version()
         return self._create_mapping_set(all_mappings, version)
 
-    def parse_from_file(self, input_path: Path | str) -> Sec2PriMappingSet:
+    def parse_from_file(self, input_path: Path | str) -> BaseMappingSet:
         """Parse Wikidata redirects from a pre-downloaded TSV file.
 
         Args:
@@ -342,7 +342,7 @@ class WikidataParser(BaseParser):
         mapping_set.compute_cardinalities()
         return mapping_set
 
-    def _empty_mappingset(self) -> Sec2PriMappingSet:
+    def _empty_mappingset(self) -> BaseMappingSet:
         """Create an empty mapping set."""
         version = self._resolve_version()
         ms_meta = self.get_mappingset_metadata()
@@ -474,7 +474,7 @@ class WikidataParser(BaseParser):
                 "subject_label": row[subj_label_i] if subj_label_i is not None else None,
                 "object_label": row[obj_label_i] if obj_label_i is not None else None,
                 "record_id": self._record_id(
-                    str(self.get_mapping_metadata()["record_id"]),
+                    self._record_namespace(),
                     row[obj_i],
                     row[subj_i],
                 ),
@@ -493,7 +493,7 @@ class WikidataParser(BaseParser):
         self,
         mappings: list[Mapping],
         version: str,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Create the final MappingSet with metadata."""
         ms_meta = self.get_mappingset_metadata()
 

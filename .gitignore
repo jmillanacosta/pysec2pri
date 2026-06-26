@@ -303,7 +303,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-downloads/
+/downloads/
 eggs/
 .eggs/
 lib/
@@ -903,5 +903,5 @@ scratch/
 
 ## Mine
 test_data_generation/*
-
 wayback*
+notes/*

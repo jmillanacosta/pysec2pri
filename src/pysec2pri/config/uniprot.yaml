@@ -16,13 +16,14 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/uniprot"
   mapping_set_version: null
   mapping_set_title: "UniProt Secondary to Primary Mapping"
-  mapping_set_description: "Mappings from secondary to primary UniProt accessions."
+  mapping_set_description:
+    "Mappings from secondary to primary UniProt accessions."
   mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
@@ -59,7 +60,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:uniprot/" # TODO set namespace, better schema logic to assign namespace
+  record_id: "sec2pri:uniprot/" # TODO set namespace, better schema logic to assign namespace
   subject_id: null
   subject_label: null
   subject_category: null
@@ -80,7 +81,7 @@ mapping:
   subject_type: null
   subject_source: "uniprotweb:uniprotkb"
   subject_source_version: null
-  object_type: null 
+  object_type: null
   object_source: "uniprotweb:uniprotkb"
   object_source_version: null
   predicate_type: null
@@ -134,3 +135,21 @@ input_file_types:
 source: "UniProt"
 homepage: "https://www.uniprot.org/"
 data_license: "https://www.uniprot.org/help/license"
+
+# Suggested cross-reference crosswalk source(s) for disambiguation context
+# (see mapkgsutils.context.ContextSpec, kind="xref")
+xref_sources:
+  - id: hgnc_custom
+    name: "HGNC custom download -- Ensembl/Entrez/RefSeq/UniProt/etc. crosswalk"
+    url: "https://www.genenames.org/cgi-bin/download/custom?col=gd_hgnc_id&col=gd_app_sym&col=gd_app_name&col=gd_status&col=gd_prev_sym&col=gd_pub_refseq_ids&col=md_eg_id&col=md_ensembl_id&col=md_mim_id&col=md_vega_id&col=md_refseq_id&col=md_ucsc_id&col=md_prot_id&status=Approved&status=Entry%20Withdrawn&hgnc_dbtag=on&order_by=gd_app_sym_sort&format=text&submit=submit"
+    format: tsv
+    object_id_col: "HGNC ID"
+    object_label_col: "Approved symbol"
+    subject_id_cols:
+      ensembl: "Ensembl ID(supplied by Ensembl)"
+      entrez: "NCBI Gene ID(supplied by NCBI)"
+      refseq: "RefSeq IDs"
+      uniprot: "UniProt ID(supplied by UniProt)"
+    note:
+      "Source of truth for cross-references varies; for pure UniProt, supply
+      your own XrefMapping."

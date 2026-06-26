@@ -6,6 +6,7 @@ parser_class: "HGNCParser"
 prefix: "HGNC"
 curie_base_url: "http://identifiers.org/hgnc/"
 entity_types: ["genes"]
+
 mappingset:
   sssom_version: null
   curie_map:
@@ -16,7 +17,7 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/hgnc" #/version
@@ -59,7 +60,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:hgnc/"
+  record_id: "sec2pri:hgnc/"
   subject_id: null
   subject_label: null
   subject_category: null
@@ -112,10 +113,7 @@ download_urls:
   complete: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
   withdrawn: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/withdrawn.txt"
 
-# Historical distribution eras. HGNC has lived at several locations over time
-# (see wayback_hgnc/wayback_hgnc.sh); this is the most recently confirmed
-# pre-GCS one. Declarative only for now: no downloader resolves it yet, and
-# the URLs are no longer live (Wayback Machine fetching is a follow-up).
+# Historical distribution formats and URLs
 distribution_eras:
   - id: ebi_hgnc_ftp
     to_version: "2023-12-31"
@@ -129,6 +127,24 @@ archive_url: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/
 id_pattern: "^HGNC:\\d+$"
 default_output_filename: "hgnc_sec2pri.sssom.tsv"
 
+# Suggested cross-reference crosswalk source(s) for disambiguation context
+# (see mapkgsutils.context.ContextSpec, kind="xref")
+xref_sources:
+  - id: hgnc_custom
+    name: "HGNC custom download - Ensembl/Entrez/RefSeq/UniProt/etc. mappings"
+    url: "https://www.genenames.org/cgi-bin/download/custom?col=gd_hgnc_id&col=gd_app_sym&col=gd_app_name&col=gd_status&col=gd_prev_sym&col=gd_pub_refseq_ids&col=md_eg_id&col=md_ensembl_id&col=md_mim_id&col=md_vega_id&col=md_refseq_id&col=md_ucsc_id&col=md_prot_id&status=Approved&status=Entry%20Withdrawn&hgnc_dbtag=on&order_by=gd_app_sym_sort&format=text&submit=submit"
+    format: tsv
+    object_id_col: "HGNC ID"
+    object_label_col: "Approved symbol"
+    subject_id_cols:
+      ensembl: "Ensembl ID(supplied by Ensembl)"
+      entrez: "NCBI Gene ID(supplied by NCBI)"
+      refseq: "RefSeq IDs"
+      uniprot: "UniProt ID(supplied by UniProt)"
+    note:
+      "Source of truth for cross-references varies; this is a suggested default,
+      not authoritative."
+
 mapping_sets:
   ids:
     method: parse
@@ -139,7 +155,8 @@ mapping_sets:
     method: parse_symbols
     primary_input: complete
     required_inputs: [complete]
-    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+    formats:
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

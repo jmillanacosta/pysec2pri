@@ -16,13 +16,14 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/hmdb_metabolites" #/version
   mapping_set_version: null
   mapping_set_title: "HMDB Metabolite Secondary to Primary Mapping"
-  mapping_set_description: "Mappings from secondary to primary HMDB metabolite accessions."
+  mapping_set_description:
+    "Mappings from secondary to primary HMDB metabolite accessions."
   mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
@@ -57,7 +58,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:hmdb_metabolites/" # TODO set namespace, better schema logic to assign namespace
+  record_id: "sec2pri:hmdb_metabolites/" # TODO set namespace, better schema logic to assign namespace
   subject_id: null
   subject_label: null
   subject_category: null

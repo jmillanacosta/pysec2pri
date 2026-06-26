@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mapkgsutils.context import ContextSpec, load_xref_mapping
+
 from pysec2pri.exports import (
     write_json,
     write_name2synonym,
@@ -27,15 +29,18 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     import pandas as pd
+    from mapkgsutils.context import DecisionRecord, XrefMapping
+    from mapkgsutils.diff import MappingDiff
 
-    from pysec2pri.diff import MappingDiff
-    from pysec2pri.parsers.base import Sec2PriMappingSet
+    from pysec2pri.parsers.base import BaseMappingSet
 
 from pysec2pri.parsers.base import AmbiguousMappingSet, IdMappingSet, LabelMappingSet
 
 __all__ = [
     # Utilities
+    "ContextSpec",
     "combine_mapping_sets",
+    "crosswalk",
     "find_ambiguous",
     # Need to remove at some point the old functions
     # (see aliased functions at the bottom)
@@ -46,6 +51,12 @@ __all__ = [
     "generate_chebi_primary_ids",
     "generate_chebi_primary_labels",
     "generate_chebi_synonyms",
+    "generate_ensembl",
+    "generate_ensembl_ids",
+    "generate_ensembl_label_history",
+    "generate_ensembl_labels",
+    "generate_ensembl_primary_ids",
+    "generate_ensembl_primary_labels",
     "generate_hgnc",
     "generate_hgnc_ids",
     "generate_hgnc_labels",
@@ -65,6 +76,11 @@ __all__ = [
     "generate_uniprot",
     "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
+    "generate_vgnc",
+    "generate_vgnc_ids",
+    "generate_vgnc_labels",
+    "generate_vgnc_primary_ids",
+    "generate_vgnc_primary_labels",
     "generate_wikidata",
     "generate_wikidata_ids",
     "generate_wikidata_labels",
@@ -72,6 +88,7 @@ __all__ = [
     "list_versions",
     "load_label_mapping",
     "load_mapping",
+    "load_xref_mapping",
     "resolve_ids",
     "resolve_labels",
     "save",
@@ -120,7 +137,7 @@ def generate_chebi(
     show_progress: bool = True,
     subset: str = "3star",
     mapping_sets: str = "ids",
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return ChEBI mappings (IDs, synonyms, or both).
 
     Downloads the latest release automatically when ``input_path`` is omitted.
@@ -137,8 +154,8 @@ def generate_chebi(
     import tempfile
 
     from pysec2pri.download import check_chebi_release, resolve_release_date
+    from pysec2pri.downloads import ChEBIDownloader
     from pysec2pri.parsers import ChEBIParser
-    from pysec2pri.parsers.chebi import ChEBIDownloader
 
     release_date = None
     if input_path is None:
@@ -169,7 +186,7 @@ def generate_chebi_synonyms(
     version: str | None = None,
     show_progress: bool = True,
     subset: str = "3star",
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return ChEBI synonym (name) mappings."""
     return generate_chebi(
         input_path=input_path,
@@ -185,13 +202,13 @@ def generate_hgnc(
     complete_set_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return HGNC secondary to primary ID mappings.
 
     Downloads the withdrawn and complete set files automatically when
     ``input_path`` / ``complete_set_path`` are omitted.  The complete set is
     used to populate the full list of current primary IDs so that
-    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids` returns the
+    :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids` returns the
     authoritative list (~45 k IDs) rather than just the ~5 k primaries that
     happen to have a secondary.
 
@@ -221,7 +238,7 @@ def generate_hgnc_primary_ids(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current HGNC primary IDs.
 
     Only the HGNC complete set file is downloaded/read.  The returned mapping
@@ -251,7 +268,7 @@ def generate_hgnc_primary_labels(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current HGNC primary Symbols.
 
     Only the HGNC complete set file is downloaded/read.  The returned mapping
@@ -282,7 +299,7 @@ def generate_hgnc_labels(
     version: str | None = None,
     show_progress: bool = True,
     statuses: list[str] | None = None,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return HGNC label to previous-label mappings.
 
     Downloads the complete set file automatically when ``input_path`` is omitted.
@@ -305,12 +322,167 @@ def generate_hgnc_labels(
     return parser.parse_labels(Path(input_path), statuses=statuses)
 
 
+def generate_vgnc(
+    input_path: Path | str | None = None,
+    complete_set_path: Path | str | None = None,
+    species: str | None = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return VGNC secondary to primary ID mappings.
+
+    Downloads the withdrawn and gene-set files automatically when
+    ``input_path`` / ``complete_set_path`` are omitted. The withdrawn
+    file's own ``taxon_id`` column is not populated upstream (see
+    :mod:`pysec2pri.parsers.vgnc`), so the *full* set is always parsed
+    first; *species* (when not ``"all"``) then subsets the output by
+    resolving each mapping's primary VGNC ID against the gene-set file.
+    The gene-set file is also used to populate the full list of current
+    primary IDs (for *species*, or across every species when *species* is
+    ``"all"``) so that
+    :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids` returns the
+    authoritative list rather than just the primaries that happen to have a
+    secondary.
+
+    Args:
+        input_path: Local VGNC withdrawn TSV. Auto-downloaded if ``None``.
+        complete_set_path: Local VGNC gene-set TSV. Auto-downloaded if
+            ``None``.
+        species: NCBI taxon ID to subset the output to, or ``"all"``
+            (default) for the full, unfiltered set across every species.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+    from pysec2pri.parsers.vgnc import ALL_SPECIES
+
+    release_date = None
+    if input_path is None or complete_set_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        if input_path is None:
+            input_path = files["withdrawn"]
+        if complete_set_path is None:
+            complete_set_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    parse_species = None if species in (None, ALL_SPECIES) else species
+    return parser.parse(
+        Path(input_path), complete_set_path=Path(complete_set_path), species=parse_species
+    )
+
+
+def generate_vgnc_primary_ids(
+    input_path: Path | str | None = None,
+    species: str | None = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return a mapping set containing the full list of current VGNC primary IDs.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_ids`` store is populated
+    with every current VGNC ID for *species*, or across all species when
+    *species* is ``"all"`` (default).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to subset the result to, or ``"all"``.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers import VGNCParser
+    from pysec2pri.parsers.vgnc import ALL_SPECIES
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    parse_species = None if species in (None, ALL_SPECIES) else species
+    return parser.parse_primary_ids(Path(input_path), species=parse_species)
+
+
+def generate_vgnc_primary_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return a mapping set with the full list of current VGNC primary symbols for one species.
+
+    Only the VGNC gene-set file is downloaded/read. The returned mapping set
+    has an empty ``mappings`` list; its ``_primary_labels`` store is
+    populated with every current approved symbol for ``species``.
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version, keys=["complete"])
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_primary_labels(Path(input_path), species=species)
+
+
+def generate_vgnc_labels(
+    input_path: Path | str | None = None,
+    species: str | None = None,
+    version: str | None = None,
+    show_progress: bool = True,
+    statuses: list[str] | None = None,
+) -> BaseMappingSet:
+    """Return VGNC label to previous-label mappings for one species.
+
+    Downloads the gene-set file automatically when ``input_path`` is
+    omitted. Symbols are not unique across species (the same approved
+    symbol can legitimately name orthologous genes in different species),
+    so ``species`` scopes ambiguity detection and ``to_pri_labels()`` to one
+    species' own namespace (see :mod:`pysec2pri.parsers.vgnc`).
+
+    Args:
+        input_path: Local VGNC gene-set TSV. Auto-downloaded if ``None``.
+        species: NCBI taxon ID to filter by. Defaults to ``config/vgnc.yaml``'s
+            ``species.default`` (chimpanzee) when omitted.
+        version: Version string for metadata.
+        show_progress: Whether to show progress bars.
+        statuses: Entry statuses to include (e.g. ``["Approved"]``).
+    """
+    from pysec2pri.constants import VGNC
+    from pysec2pri.parsers import VGNCParser
+
+    species = species if species is not None else str(VGNC.default_species())
+
+    release_date = None
+    if input_path is None:
+        files, release_date = _auto_download("vgnc", version)
+        input_path = files["complete"]
+
+    parser = VGNCParser(version=version, show_progress=show_progress)
+    parser.release_date = release_date
+    return parser.parse_labels(Path(input_path), species=species, statuses=statuses)
+
+
 def generate_chebi_primary_ids(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
     subset: str = "3star",
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current ChEBI primary IDs.
 
     Reads ``compounds.tsv`` to extract every current ChEBI compound ID.
@@ -327,7 +499,8 @@ def generate_chebi_primary_ids(
     import tempfile
 
     from pysec2pri.download import check_chebi_release, resolve_release_date
-    from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
+    from pysec2pri.downloads import ChEBIDownloader
+    from pysec2pri.parsers.chebi import ChEBIParser
 
     release_date = None
     if input_path is None:
@@ -349,7 +522,7 @@ def generate_chebi_primary_labels(
     version: str | None = None,
     show_progress: bool = True,
     subset: str = "3star",
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current ChEBI compound names.
 
     Reads ``compounds.tsv`` to extract every current compound's canonical name.
@@ -366,7 +539,8 @@ def generate_chebi_primary_labels(
     import tempfile
 
     from pysec2pri.download import check_chebi_release, resolve_release_date
-    from pysec2pri.parsers.chebi import ChEBIDownloader, ChEBIParser
+    from pysec2pri.downloads import ChEBIDownloader
+    from pysec2pri.parsers.chebi import ChEBIParser
 
     release_date = None
     if input_path is None:
@@ -385,10 +559,10 @@ def generate_chebi_primary_labels(
 
 def generate_ncbi_primary_ids(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current NCBI Gene primary IDs.
 
     Reads ``gene_info`` to extract every current Gene ID for the given taxonomy.
@@ -397,7 +571,8 @@ def generate_ncbi_primary_ids(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -410,15 +585,15 @@ def generate_ncbi_primary_ids(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_primary_ids(Path(input_path), tax_id=tax_id)
+    return parser.parse_primary_ids(Path(input_path), species=species)
 
 
 def generate_ncbi_primary_labels(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current NCBI Gene labels.
 
     Reads ``gene_info`` to extract every current gene label for the given
@@ -427,7 +602,8 @@ def generate_ncbi_primary_labels(
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: Taxonomy ID to filter by (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -440,7 +616,7 @@ def generate_ncbi_primary_labels(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_primary_labels(Path(input_path), tax_id=tax_id)
+    return parser.parse_primary_labels(Path(input_path), species=species)
 
 
 def generate_hmdb_primary_ids(
@@ -448,7 +624,7 @@ def generate_hmdb_primary_ids(
     proteins_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current HMDB primary IDs.
 
     Reads one or both of ``hmdb_metabolites.xml`` and ``hmdb_proteins.xml``
@@ -481,7 +657,7 @@ def generate_uniprot_primary_ids(
     acindex_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return a mapping set containing the full list of current UniProt primary ACs.
 
     Parses ``acindex.txt`` to extract every accession number that currently
@@ -515,16 +691,16 @@ def generate_uniprot_primary_ids(
 def generate_ncbi(
     input_path: Path | str | None = None,
     gene_info_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return NCBI Gene secondary to primary ID mappings.
 
     Downloads the gene_history file automatically when ``input_path`` is
     omitted.  When ``gene_info_path`` is supplied (or auto-downloaded), the
     full list of current primary IDs is read from ``gene_info`` and stored in
-    ``_primary_ids``, so that :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.to_pri_ids`
+    ``_primary_ids``, so that :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids`
     returns the authoritative complete set rather than only the subset of
     primaries that happen to appear in ``gene_history``.
 
@@ -533,7 +709,8 @@ def generate_ncbi(
         gene_info_path: Local gene_info file used to populate the full primary
             ID list. Auto-downloaded together with ``input_path`` when both
             are ``None``.
-        tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -549,22 +726,23 @@ def generate_ncbi(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse(Path(input_path), tax_id=tax_id, gene_info_path=Path(gene_info_path))
+    return parser.parse(Path(input_path), species=species, gene_info_path=Path(gene_info_path))
 
 
 def generate_ncbi_labels(
     input_path: Path | str | None = None,
-    tax_id: str = "9606",
+    species: str = "all",
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return NCBI Gene label to previous-label mappings.
 
     Downloads the gene_info file automatically when ``input_path`` is omitted.
 
     Args:
         input_path: Local gene_info file. Auto-downloaded if ``None``.
-        tax_id: NCBI taxonomy ID to filter (default: ``"9606"`` for human).
+        species: NCBI taxon ID to filter by, or ``"all"`` (default) to
+            process every organism in the file.
         version: Version string for metadata.
         show_progress: Whether to show progress bars.
     """
@@ -577,7 +755,389 @@ def generate_ncbi_labels(
 
     parser = NCBIParser(version=version, show_progress=show_progress)
     parser.release_date = release_date
-    return parser.parse_labels(Path(input_path), tax_id=tax_id)
+    return parser.parse_labels(Path(input_path), species=species)
+
+
+def _auto_download_ensembl(
+    version: str | None,
+    species: str | int,
+    keys: list[str],
+    show_progress: bool,
+) -> tuple[dict[str, Path], str, datetime | None]:
+    """Download Ensembl files into a temp dir; resolve version/release date.
+
+    Downloads are parameterized by species/assembly beyond just ``version``
+    (unlike most datasources), so this goes through
+    :class:`~pysec2pri.downloads.ensembl.EnsemblDownloader` directly rather
+    than the generic :func:`_auto_download` (mirrors the ChEBI pattern).
+    """
+    import tempfile
+
+    from pysec2pri.download import check_ensembl_release, resolve_release_date
+    from pysec2pri.downloads import EnsemblDownloader
+
+    if version is None:
+        version = check_ensembl_release().version
+        if version is None:
+            raise ValueError("Could not determine the latest Ensembl release.")
+    release_date = resolve_release_date("ensembl", version, species=species)
+    downloader = EnsemblDownloader(version=version, species=species, show_progress=show_progress)
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_ensembl_{version}_"))
+    files = downloader.download(tmpdir, version=version, keys=keys)
+    return files, version, release_date
+
+
+def _process_one_ensembl_species(
+    kind: str,
+    version: str,
+    token: str,
+    assembly: str,
+    release_date: datetime | None,
+) -> BaseMappingSet:
+    """Download and parse one Ensembl species, for the ``species="all"`` bulk path.
+
+    Builds download URLs directly from *token*/*assembly* (as discovered by
+    :func:`~pysec2pri.downloads.ensembl.discover_ensembl_species`), bypassing
+    the taxon-ID-based resolution :class:`EnsemblDownloader` normally does
+    -- the bulk path already knows the exact token to use for every species
+    in one shot, so re-resolving each one individually would be redundant.
+    """
+    import shutil
+    import tempfile
+
+    from mapkgsutils.download import download_urls
+
+    from pysec2pri.constants import ENSEMBL
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    keys = (
+        ["stable_id_event", "mapping_session", "gene"]
+        if kind == "ids"
+        else ["gene", "xref", "external_synonym"]
+    )
+    urls = {
+        key: ENSEMBL.download_urls[key].format(version=version, species=token, assembly=assembly)
+        for key in keys
+    }
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_ensembl_all_{token}_"))
+    try:
+        files = download_urls(urls, tmpdir, decompress=True)
+        parser = EnsemblParser(version=version, show_progress=False, species=token)
+        parser.release_date = release_date
+        if kind == "ids":
+            return parser.parse(
+                files["stable_id_event"],
+                mapping_session_path=files.get("mapping_session"),
+                gene_path=files.get("gene"),
+            )
+        return parser.parse_labels(
+            files.get("gene"), files.get("xref"), files.get("external_synonym")
+        )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _generate_ensembl_all_species(
+    kind: str,
+    version: str | None,
+    show_progress: bool,
+) -> BaseMappingSet:
+    """Process every Ensembl species at *version* and combine into one mapping set.
+
+    Network-heavy: downloads and parses each of Ensembl's ~276 species in
+    turn (one at a time, deleting each species' files before starting the
+    next, so disk usage never exceeds a single species). A per-species
+    failure is logged and skipped rather than aborting the whole run,
+    mirroring :mod:`pysec2pri.consolidate`'s per-release resilience.
+
+    Each individual mapping keeps the ``record_id`` it was parsed with
+    (scoped to its own species, as normal); only the *combined* mapping
+    set's own ``mapping_set_id`` is tagged with the ``"all"`` slug. Because
+    every species is now folded into one mapping set, a symbol shared by
+    two species' genes is correctly flagged ambiguous (there's no longer
+    separate per-species scoping to disambiguate it).
+
+    Args:
+        kind: ``"ids"`` or ``"labels"``.
+        version: Ensembl release number. Latest release is used when
+            ``None``.
+        show_progress: Whether to show a progress bar over species.
+
+    Returns:
+        Combined :class:`~pysec2pri.parsers.base.BaseMappingSet`.
+
+    Raises:
+        ValueError: If no species could be processed at all.
+    """
+    from pysec2pri.download import check_ensembl_release, resolve_release_date
+    from pysec2pri.downloads.ensembl import discover_ensembl_species
+    from pysec2pri.logging import logger
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser
+
+    if version is None:
+        version = check_ensembl_release().version
+        if version is None:
+            raise ValueError("Could not determine the latest Ensembl release.")
+    release_date = resolve_release_date("ensembl", version)
+
+    species_list = discover_ensembl_species(version)
+    iterator: Any = species_list
+    if show_progress:
+        from tqdm import tqdm
+
+        iterator = tqdm(species_list, desc=f"Processing {len(species_list)} Ensembl species")
+
+    all_mappings: list[Any] = []
+    primary_ids: set[str] = set()
+    primary_labels: dict[str, set[str]] = {}
+    processed = 0
+    for token, assembly in iterator:
+        try:
+            ms = _process_one_ensembl_species(kind, version, token, assembly, release_date)
+        except Exception:
+            logger.warning(
+                "Skipping Ensembl species %s during all-species run", token, exc_info=True
+            )
+            continue
+        all_mappings.extend(ms.mappings or [])
+        primary_ids |= getattr(ms, "_primary_ids", None) or set()
+        for label, ids in (getattr(ms, "_primary_labels", None) or {}).items():
+            primary_labels.setdefault(label, set()).update(ids)
+        processed += 1
+
+    if processed == 0:
+        raise ValueError(f"No Ensembl species could be processed for release {version!r}.")
+
+    combined_parser = EnsemblParser(version=version, show_progress=False, species=ALL_SPECIES)
+    combined_parser.release_date = release_date
+    combined = combined_parser.create_mapping_set(
+        all_mappings, mapping_type="id" if kind == "ids" else "label"
+    )
+    if primary_ids:
+        object.__setattr__(combined, "_primary_ids", primary_ids)
+    if primary_labels:
+        object.__setattr__(combined, "_primary_labels", primary_labels)
+    return combined
+
+
+def generate_ensembl(
+    input_path: Path | str | None = None,
+    mapping_session_path: Path | str | None = None,
+    gene_path: Path | str | None = None,
+    species: str | int = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return Ensembl secondary to primary gene ID mappings.
+
+    Downloads ``stable_id_event``/``mapping_session``/``gene`` automatically
+    when their paths are omitted. Each release's ``stable_id_event`` table is
+    cumulative, so this describes the whole state of Ensembl gene IDs at
+    ``version`` (no cross-release chain resolution; see
+    :mod:`pysec2pri.consolidate` for that).
+
+    Args:
+        input_path: Local ``stable_id_event`` file (the ``ids`` mapping
+            set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
+            if ``None``. Ignored when *species* is ``"all"``.
+        mapping_session_path: Local ``mapping_session`` file, used to resolve
+            each row's ``mapping_date``. Auto-downloaded together with
+            ``input_path`` when both are ``None``.
+        gene_path: Local ``gene`` file, used to populate the full primary ID
+            list. Auto-downloaded together with the others when ``None``.
+        species: Canonical NCBI taxon ID, or ``"all"`` (default) to process
+            every species Ensembl publishes and combine them into one
+            mapping set -- see :func:`_generate_ensembl_all_species`. This
+            is a network-heavy operation (~276 species); pass an explicit
+            taxon ID for a fast, single-species run.
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser
+
+    if species == ALL_SPECIES:
+        return _generate_ensembl_all_species("ids", version, show_progress)
+
+    release_date = None
+    if input_path is None or mapping_session_path is None or gene_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["stable_id_event", "mapping_session", "gene"], show_progress
+        )
+        if input_path is None:
+            input_path = files["stable_id_event"]
+        if mapping_session_path is None:
+            mapping_session_path = files["mapping_session"]
+        if gene_path is None:
+            gene_path = files["gene"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse(
+        Path(input_path),
+        mapping_session_path=Path(mapping_session_path),
+        gene_path=Path(gene_path),
+    )
+
+
+def generate_ensembl_labels(
+    input_path: Path | str | None = None,
+    gene_path: Path | str | None = None,
+    xref_path: Path | str | None = None,
+    species: str | int = "all",
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return Ensembl gene external-synonym to current-label mappings.
+
+    Downloads ``external_synonym``/``gene``/``xref`` automatically when
+    their paths are omitted.
+
+    Args:
+        input_path: Local ``external_synonym`` file (the ``labels`` mapping
+            set's ``primary_input``, see ``ensembl.yaml``). Auto-downloaded
+            if ``None``. Ignored when *species* is ``"all"``.
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        xref_path: Local ``xref`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID, or ``"all"`` (default) to process
+            every species Ensembl publishes and combine them into one
+            mapping set -- see :func:`_generate_ensembl_all_species`. A
+            symbol shared by two species becomes genuinely ambiguous in
+            that combined output (there's no longer a per-species scope to
+            disambiguate it). This is network-heavy (~276 species); pass
+            an explicit taxon ID for a fast, single-species run.
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import ALL_SPECIES, EnsemblParser
+
+    if species == ALL_SPECIES:
+        return _generate_ensembl_all_species("labels", version, show_progress)
+
+    release_date = None
+    if input_path is None or gene_path is None or xref_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene", "xref", "external_synonym"], show_progress
+        )
+        if input_path is None:
+            input_path = files["external_synonym"]
+        if gene_path is None:
+            gene_path = files["gene"]
+        if xref_path is None:
+            xref_path = files["xref"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_labels(Path(gene_path), Path(xref_path), Path(input_path))
+
+
+def generate_ensembl_primary_ids(
+    gene_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return a mapping set containing the full list of current Ensembl gene IDs.
+
+    Only the ``gene`` file is downloaded/read. The returned mapping set has
+    an empty ``mappings`` list; ``_primary_ids`` is populated.
+
+    Args:
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if gene_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene"], show_progress
+        )
+        gene_path = files["gene"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_primary_ids(Path(gene_path))
+
+
+def generate_ensembl_primary_labels(
+    gene_path: Path | str | None = None,
+    xref_path: Path | str | None = None,
+    species: str | int = 9606,
+    version: str | None = None,
+    show_progress: bool = True,
+) -> BaseMappingSet:
+    """Return a mapping set containing the full list of current Ensembl gene labels.
+
+    Only the ``gene``/``xref`` files are downloaded/read. The returned
+    mapping set has an empty ``mappings`` list; ``_primary_labels`` is
+    populated.
+
+    Args:
+        gene_path: Local ``gene`` file. Auto-downloaded if ``None``.
+        xref_path: Local ``xref`` file. Auto-downloaded if ``None``.
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        version: Ensembl release number. Latest release is used when ``None``.
+        show_progress: Whether to show progress bars.
+    """
+    from pysec2pri.parsers.ensembl import EnsemblParser
+
+    release_date = None
+    if gene_path is None or xref_path is None:
+        files, version, release_date = _auto_download_ensembl(
+            version, species, ["gene", "xref"], show_progress
+        )
+        if gene_path is None:
+            gene_path = files["gene"]
+        if xref_path is None:
+            xref_path = files["xref"]
+
+    parser = EnsemblParser(version=version, show_progress=show_progress, species=species)
+    parser.release_date = release_date
+    return parser.parse_primary_labels(Path(gene_path), Path(xref_path))
+
+
+def generate_ensembl_label_history(
+    species: str | int = 9606,
+    from_version: str | None = None,
+    to_version: str | None = None,
+    cache_dir: Path | str | None = None,
+    show_progress: bool = True,
+    force: bool = False,
+) -> BaseMappingSet:
+    """Return cross-release previous-symbol -> current-symbol Ensembl mappings.
+
+    Ensembl's core schema has no previous-gene-symbol table, so genuine
+    previous-symbol -> current-symbol transitions are derived by diffing
+    each release's primary-label snapshot per stable ID. Delegates to
+    :func:`pysec2pri.consolidate.build_label_history`, which walks every
+    historical release (or a bounded range) and resumes on re-run. This is
+    a network-heavy, run-on-demand operation, not part of normal
+    single-release generation.
+
+    Args:
+        species: Canonical NCBI taxon ID (default ``9606`` for human).
+        from_version: Optional lower bound (inclusive) on the release walk.
+        to_version: Optional upper bound (inclusive) on the release walk.
+        cache_dir: Directory for the resumable sidecar/cache. Defaults to
+            :func:`pysec2pri.consolidate.default_cache_dir`.
+        show_progress: Whether to show progress bars.
+        force: Re-walk every release, ignoring resume state.
+
+    Returns:
+        LabelMappingSet of previous -> current symbol transitions.
+    """
+    from pysec2pri.consolidate import build_label_history
+
+    return build_label_history(
+        species=species,
+        from_version=from_version,
+        to_version=to_version,
+        cache_dir=Path(cache_dir) if cache_dir else None,
+        show_progress=show_progress,
+        force=force,
+    )
 
 
 def generate_uniprot(
@@ -585,7 +1145,7 @@ def generate_uniprot(
     delac_file: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return UniProt secondary to primary accession mappings.
 
     Downloads sec_ac.txt and delac_sp.txt automatically when ``input_path``
@@ -618,7 +1178,7 @@ def generate_hmdb(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return HMDB metabolite secondary to primary accession mappings.
 
     Downloads hmdb_metabolites.xml automatically when ``input_path`` is omitted.
@@ -644,7 +1204,7 @@ def generate_hmdb_proteins(
     input_path: Path | str | None = None,
     version: str | None = None,
     show_progress: bool = True,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return HMDB protein secondary to primary accession mappings.
 
     Downloads hmdb_proteins.xml automatically when ``input_path`` is omitted.
@@ -673,7 +1233,7 @@ def generate_wikidata(
     endpoint: str | None = None,
     show_progress: bool = True,
     test_subset: bool = False,
-) -> Sec2PriMappingSet:
+) -> BaseMappingSet:
     """Return Wikidata redirect mappings via SPARQL (or a pre-downloaded TSV).
 
     Queries the QLever Wikidata endpoint when ``input_path`` is omitted.
@@ -761,9 +1321,9 @@ def generate_wikidata_labels(
 
 
 def combine_mapping_sets(
-    id_mappings: Sec2PriMappingSet | None,
-    synonym_mappings: Sec2PriMappingSet | None,
-) -> Sec2PriMappingSet:
+    id_mappings: BaseMappingSet | None,
+    synonym_mappings: BaseMappingSet | None,
+) -> BaseMappingSet:
     """Combine two mapping sets into one.
 
     Args:
@@ -807,7 +1367,7 @@ def _output_filename(base_name: str, fmt: str) -> Path:
 
 
 def save(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_format: str,
     output: Path | str | None = None,
     *,
@@ -815,7 +1375,7 @@ def save(
 ) -> Path:
     """Write *mapping_set* and return the path that was written.
 
-    Delegates to :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.save` for
+    Delegates to :meth:`~pysec2pri.parsers.base.BaseMappingSet.save` for
     single formats and :func:`write_all_formats` for ``"all"``.
 
     Args:
@@ -854,7 +1414,7 @@ def save(
 
 
 def write_all_formats(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_dir: Path,
     base_name: str,
     include_name2synonym: bool = True,
@@ -1039,14 +1599,17 @@ def load_label_mapping(path: Path | str) -> LabelMappingSet:
 
 def resolve_ids(
     input_path: Path | str | list[str],
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     at: str | list[str] | None = None,
     *,
     output_path: Path | str | None = None,
     suffix: str = "_primary",
     sep: str | None = None,
     synonyms: str | None = None,
-    label_mapping_set: Sec2PriMappingSet | None = None,
+    label_mapping_set: BaseMappingSet | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    report_path: Path | str | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve secondary IDs to primary IDs.
 
@@ -1067,7 +1630,7 @@ def resolve_ids(
     Args:
         input_path: An identifier string, a list of identifier strings, or
             the path to a TSV/CSV file.
-        mapping_set: A :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`
+        mapping_set: A :class:`~pysec2pri.parsers.base.BaseMappingSet`
             (e.g. the result of ``generate_hgnc()``).
         at: Column name(s) to resolve.  Required in DataFrame mode;
             ignored in direct-lookup mode.
@@ -1077,6 +1640,13 @@ def resolve_ids(
             (default ``"_primary"``).
         sep: Delimiter for reading the file.  Inferred from the extension
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
+        xref: *DataFrame mode only.* Column with a per-row cross-reference
+            token, passed through to :func:`~pysec2pri.update_ids.update_ids`.
+        xref_mapping: The :class:`~mapkgsutils.context.XrefMapping` crosswalk
+            table to resolve *xref* tokens against. Required when *xref* is
+            given.
+        report_path: When given, every disambiguation attempt (from
+            *synonyms* and/or *xref*) is logged to this TSV.
 
     Returns:
         A resolved identifier string, a list of resolved strings (direct-lookup
@@ -1115,6 +1685,9 @@ def resolve_ids(
         lookup=lkp,
         synonyms=synonyms,
         label_mapping_set=label_mapping_set,
+        xref=xref,
+        xref_mapping=xref_mapping,
+        report_path=report_path,
     )
 
     if output_path is not None:
@@ -1127,13 +1700,16 @@ def resolve_ids(
 
 def resolve_labels(
     input_path: Path | str | list[str],
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     at: str | list[str] | None = None,
     *,
     output_path: Path | str | None = None,
     suffix: str = "_current",
     sep: str | None = None,
     synonyms: str | None = None,
+    xref: str | None = None,
+    xref_mapping: XrefMapping | None = None,
+    report_path: Path | str | None = None,
 ) -> pd.DataFrame | str | list[str]:
     r"""Resolve previous/alias labels to current labels.
 
@@ -1163,6 +1739,14 @@ def resolve_labels(
             (default ``"_current"``).
         sep: Delimiter for reading the file.  Inferred from the extension
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
+        xref: *DataFrame mode only.* Column with a per-row cross-reference
+            token, passed through to
+            :func:`~pysec2pri.update_ids.update_labels`.
+        xref_mapping: The :class:`~mapkgsutils.context.XrefMapping` crosswalk
+            table to resolve *xref* tokens against. Required when *xref* is
+            given.
+        report_path: When given, every disambiguation attempt (from
+            *synonyms* and/or *xref*) is logged to this TSV.
 
     Returns:
         A resolved label string, a list of resolved strings (direct-lookup
@@ -1194,7 +1778,17 @@ def resolve_labels(
     df = pd.read_csv(input_path_obj, sep=sep, dtype=str)
     lkp = build_label_lookup(mapping_set)
     result = pd.DataFrame(
-        update_labels(df, mapping_set, at=at, suffix=suffix, lookup=lkp, synonyms=synonyms)
+        update_labels(
+            df,
+            mapping_set,
+            at=at,
+            suffix=suffix,
+            lookup=lkp,
+            synonyms=synonyms,
+            xref=xref,
+            xref_mapping=xref_mapping,
+            report_path=report_path,
+        )
     )
 
     if output_path is not None:
@@ -1234,8 +1828,265 @@ def list_versions(datasource: str) -> Any:
     return _list_versions(datasource)
 
 
+def _crosswalk_via_xref(
+    tokens: list[str],
+    xref_mapping: XrefMapping,
+    to: str,
+    decisions: list[DecisionRecord],
+) -> dict[str, str]:
+    """Resolve each of *tokens* through a flat ``subject_id -> object_*`` crosswalk.
+
+    Unlike the secondary/primary ambiguity handled by
+    :mod:`pysec2pri.update_ids`, a crosswalk table can itself carry more than
+    one distinct target for the same token; that case is also left
+    unresolved (and logged) rather than guessed.
+    """
+    from mapkgsutils.context import DecisionRecord
+
+    index = xref_mapping.by_subject()
+    result: dict[str, str] = {}
+    for tok in tokens:
+        if tok in result:
+            continue
+        candidates = index.get(tok) or []
+        if not candidates:
+            result[tok] = ""
+            decisions.append(
+                DecisionRecord("xref_crosswalk", tok, None, None, False, "no crossreference entry")
+            )
+            continue
+        targets = {(c.object_id, c.object_label or "") for c in candidates}
+        if len(targets) > 1:
+            result[tok] = ""
+            decisions.append(
+                DecisionRecord(
+                    "xref_crosswalk",
+                    tok,
+                    None,
+                    None,
+                    False,
+                    f"ambiguous crosswalk: {len(targets)} distinct targets",
+                )
+            )
+            continue
+        record = candidates[0]
+        value = record.object_id if to == "hgnc_id" else (record.object_label or "")
+        result[tok] = value
+        decisions.append(
+            DecisionRecord(
+                "xref_crosswalk", tok, record.predicate_id, value, True, "unique crosswalk match"
+            )
+        )
+    return result
+
+
+def _crosswalk_symbol(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    to: str,
+    at: str | None,
+    version: str | None,
+    label_mapping_set: BaseMappingSet | None,
+    report_path: Path | str | None,
+    show_progress: bool,
+) -> dict[str, str] | pd.DataFrame:
+    """``frm == "symbol"`` branch of :func:`crosswalk`."""
+    from mapkgsutils.context import DecisionRecord, write_decision_log
+
+    from pysec2pri.update_ids import (
+        build_ambiguous_labels_set,
+        build_primary_token_to_id,
+        update_labels,
+    )
+
+    label_ms = label_mapping_set or generate_hgnc_labels(
+        version=version, show_progress=show_progress
+    )
+    token_to_id = build_primary_token_to_id(label_ms)
+    ambiguous_symbols = build_ambiguous_labels_set(label_ms)
+
+    def _log_ambiguous(values: set[str]) -> None:
+        if report_path is None:
+            return
+        decisions = [
+            DecisionRecord("symbol", v, None, None, False, "ambiguous symbol, no context provided")
+            for v in sorted(values & ambiguous_symbols)
+        ]
+        write_decision_log(decisions, report_path)
+
+    if isinstance(input_data, (str, list)):
+        resolved = update_labels(input_data, label_ms)
+        _log_ambiguous(set(resolved))
+        if to == "symbol":
+            return resolved
+        return {k: (token_to_id.get(v, "") if v else "") for k, v in resolved.items()}
+
+    if at is None:
+        raise TypeError("crosswalk() requires 'at' when input_data is a DataFrame")
+    result = update_labels(input_data, label_ms, at=at)
+    result[f"{at}_symbol"] = result[f"{at}_current"]
+    result[f"{at}_hgnc_id"] = result[f"{at}_symbol"].map(
+        lambda v: token_to_id.get(v, "") if v else ""
+    )
+    _log_ambiguous(set(input_data[at].astype(str)))
+    return result
+
+
+def _resolve_crosswalk_xref_mapping(
+    frm: str,
+    xref_mapping: XrefMapping | None,
+    xref_source: str,
+    show_progress: bool,
+) -> XrefMapping:
+    """Return *xref_mapping*, or download the configured *xref_source* for it."""
+    from mapkgsutils.context import download_xref_source
+
+    from pysec2pri.parsers.base import get_datasource_config
+
+    if xref_mapping is not None:
+        return xref_mapping
+
+    cfg = get_datasource_config("hgnc", config_package="pysec2pri.config")
+    src = cfg.xref_source(xref_source)
+    if src is None:
+        known = ", ".join(s.id for s in cfg.xref_sources) or "(none configured)"
+        raise ValueError(f"Unknown xref_source {xref_source!r}. Known: {known}")
+    subject_col = src.subject_id_cols.get(frm)
+    if subject_col is None:
+        known_keys = ", ".join(sorted(src.subject_id_cols)) or "(none)"
+        raise ValueError(
+            f"Unsupported 'frm' vocabulary {frm!r} for xref_source {xref_source!r}. "
+            f"Known: {known_keys}"
+        )
+    return download_xref_source(src, subject_col, show_progress=show_progress)
+
+
+def _crosswalk_xref(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    frm: str,
+    to: str,
+    at: str | None,
+    xref_mapping: XrefMapping | None,
+    xref_source: str,
+    report_path: Path | str | None,
+    show_progress: bool,
+) -> dict[str, str] | pd.DataFrame:
+    """Non-``"symbol"`` ``frm`` branch of :func:`crosswalk`: a flat crosswalk-table lookup."""
+    from mapkgsutils.context import write_decision_log
+
+    mapping = _resolve_crosswalk_xref_mapping(frm, xref_mapping, xref_source, show_progress)
+    decisions: list[DecisionRecord] = []
+
+    if isinstance(input_data, str):
+        result_dict = _crosswalk_via_xref([input_data], mapping, to, decisions)
+    elif isinstance(input_data, list):
+        result_dict = _crosswalk_via_xref(list(dict.fromkeys(input_data)), mapping, to, decisions)
+    else:
+        if at is None:
+            raise TypeError("crosswalk() requires 'at' when input_data is a DataFrame")
+        if at not in input_data.columns:
+            raise KeyError(f"Column {at!r} not found in DataFrame.")
+        unique_tokens = [str(v) for v in input_data[at].dropna().unique()]
+        lookup = _crosswalk_via_xref(unique_tokens, mapping, to, decisions)
+        result = input_data.copy()
+        result[f"{at}_{to}"] = result[at].astype(str).map(lambda v: lookup.get(v, ""))
+        if report_path is not None:
+            write_decision_log(decisions, report_path)
+        return result
+
+    if report_path is not None:
+        write_decision_log(decisions, report_path)
+    return result_dict
+
+
+def crosswalk(
+    input_data: str | list[str] | pd.DataFrame,
+    *,
+    frm: str,
+    to: str = "hgnc_id",
+    at: str | None = None,
+    version: str | None = None,
+    label_mapping_set: BaseMappingSet | None = None,
+    xref_mapping: XrefMapping | None = None,
+    xref_source: str = "hgnc_custom",
+    report_path: Path | str | None = None,
+    show_progress: bool = True,
+) -> dict[str, str] | pd.DataFrame:
+    r"""Map a gene identifier from one vocabulary to another, via HGNC.
+
+    A thin convenience wrapper, not a separate resolver: ``frm="symbol"``
+    resolves through :func:`generate_hgnc_labels` +
+    :func:`~pysec2pri.update_ids.update_labels`, so a *previous* HGNC symbol
+    still resolves to its current identity (the temporal aspect) and a
+    genuinely ambiguous symbol is left blank and reported rather than
+    guessed. ``frm`` in ``"ensembl"``, ``"entrez"``, ``"refseq"``, or
+    ``"uniprot"`` resolves through HGNC's own cross-reference crosswalk
+    table, downloaded from the ``xref_sources`` declared in
+    ``config/hgnc.yaml`` unless *xref_mapping* is supplied explicitly.
+
+    Args:
+        input_data: A single identifier string, a list of identifier
+            strings, or a :class:`pandas.DataFrame` (requires *at*).
+        frm: Source vocabulary: ``"symbol"``, ``"ensembl"``, ``"entrez"``,
+            ``"refseq"``, or ``"uniprot"``.
+        to: Target vocabulary: ``"hgnc_id"`` (default) or ``"symbol"``.
+        at: *DataFrame mode only.* Column containing the *frm* values.
+        version: HGNC release version to resolve against (``None`` = latest).
+            Ignored when *label_mapping_set* is given.
+        label_mapping_set: Pre-built :class:`~pysec2pri.parsers.base.LabelMappingSet`
+            for ``frm == "symbol"`` (e.g. the result of
+            ``generate_hgnc_labels()``), to avoid re-downloading. When
+            ``None``, it is generated automatically.
+        xref_mapping: Pre-built crosswalk table for non-``"symbol"`` *frm*
+            values. When ``None``, it is downloaded automatically (see
+            *xref_source*); ignored when ``frm == "symbol"``.
+        xref_source: Which ``xref_sources`` entry declared in
+            ``config/hgnc.yaml`` to download when *xref_mapping* is not
+            given (default ``"hgnc_custom"``).
+        report_path: When given, every disambiguation attempt is logged as a
+            TSV (see :func:`mapkgsutils.context.write_decision_log`).
+        show_progress: Forwarded to the HGNC generator / downloader.
+
+    Returns:
+        dict[str, str]: when *input_data* is a ``str``/``list[str]``, mapping
+        each unique input value to its resolved target (``""`` when
+        unresolved/ambiguous).
+
+        pandas.DataFrame: when *input_data* is a ``DataFrame``, a copy with
+        the columns :func:`~pysec2pri.update_ids.update_labels` adds
+        (``<at>_current``/``<at>_current_id``) for ``frm="symbol"``, plus a
+        uniform ``<at>_symbol``/``<at>_hgnc_id`` pair; for other *frm*
+        values, a single ``<at>_<to>`` column.
+    """
+    if to not in ("hgnc_id", "symbol"):
+        raise ValueError(f"Unsupported 'to' vocabulary: {to!r}. Choose 'hgnc_id' or 'symbol'.")
+
+    if frm == "symbol":
+        return _crosswalk_symbol(
+            input_data,
+            to=to,
+            at=at,
+            version=version,
+            label_mapping_set=label_mapping_set,
+            report_path=report_path,
+            show_progress=show_progress,
+        )
+
+    return _crosswalk_xref(
+        input_data,
+        frm=frm,
+        to=to,
+        at=at,
+        xref_mapping=xref_mapping,
+        xref_source=xref_source,
+        report_path=report_path,
+        show_progress=show_progress,
+    )
+
+
 def find_ambiguous(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
 ) -> AmbiguousMappingSet:
     """Find identifiers that are ambiguous in *mapping_set*.
 
@@ -1245,10 +2096,10 @@ def find_ambiguous(
     references that are already current.
 
     This is a convenience wrapper around
-    :meth:`~pysec2pri.parsers.base.Sec2PriMappingSet.find_ambiguous`.
+    :meth:`~pysec2pri.parsers.base.BaseMappingSet.find_ambiguous`.
 
     Args:
-        mapping_set: A :class:`~pysec2pri.parsers.base.Sec2PriMappingSet`
+        mapping_set: A :class:`~pysec2pri.parsers.base.BaseMappingSet`
             (e.g. the result of ``generate_hgnc()``).
 
     Returns:
@@ -1263,6 +2114,7 @@ def find_ambiguous(
 
 generate_chebi_ids = generate_chebi
 generate_chebi_labels = generate_chebi_synonyms
+generate_ensembl_ids = generate_ensembl
 generate_hgnc_ids = generate_hgnc
 generate_hgnc_labels = generate_hgnc_labels
 generate_ncbi_ids = generate_ncbi
@@ -1270,5 +2122,6 @@ generate_ncbi_labels = generate_ncbi_labels
 generate_hmdb_ids = generate_hmdb
 generate_hmdb_proteins_ids = generate_hmdb_proteins
 generate_uniprot_ids = generate_uniprot
+generate_vgnc_ids = generate_vgnc
 generate_wikidata_ids = generate_wikidata
 generate_wikidata_labels = generate_wikidata_labels

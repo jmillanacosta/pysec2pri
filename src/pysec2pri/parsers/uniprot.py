@@ -17,9 +17,8 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
-    BaseDownloader,
+    BaseMappingSet,
     BaseParser,
-    Sec2PriMappingSet,
 )
 
 
@@ -48,7 +47,7 @@ class UniProtParser(BaseParser):
         self,
         input_path: Path | str | None = None,
         delac_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Parse UniProt mapping files into an IdMappingSet.
 
         Args:
@@ -92,7 +91,7 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first data row
 
-        meta_id = str(self.get_mapping_metadata()["record_id"])
+        meta_ns = self._record_namespace()
 
         df = (
             pl.scan_csv(
@@ -138,14 +137,21 @@ class UniProtParser(BaseParser):
             pl.struct(["subject_id", "object_id"])
             .map_elements(
                 lambda x: self._record_id(
-                    meta_id,
+                    meta_ns,
                     x["object_id"],
                     x["subject_id"],
                 ),
                 return_dtype=pl.Utf8,
                 strategy="thread_local",
             )
-            .alias("record_id")
+            .alias("record_id"),
+            pl.struct(["subject_id", "object_id"])
+            .map_elements(
+                lambda x: self._pair_hash(x["object_id"], x["subject_id"]),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("pair_key"),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -162,9 +168,11 @@ class UniProtParser(BaseParser):
             "mapping_tool": m_meta.get("mapping_tool"),
             "license": m_meta.get("license"),
         }
-        rows = df.select(["subject_id", "object_id", "record_id"]).to_dicts()
+        rows = df.select(["subject_id", "object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            row["mapping_date"] = consolidated.get(row["record_id"])
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
+            row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
     def _parse_delac(self, file_path: Path) -> list[Mapping]:
@@ -185,7 +193,7 @@ class UniProtParser(BaseParser):
                 if raw_line.startswith("_"):
                     break  # next line is first deleted accession
 
-        meta_id = str(self.get_mapping_metadata()["record_id"])
+        meta_ns = self._record_namespace()
 
         df = (
             pl.scan_csv(
@@ -218,14 +226,21 @@ class UniProtParser(BaseParser):
             pl.struct(["object_id"])
             .map_elements(
                 lambda x: self._record_id(
-                    meta_id,
+                    meta_ns,
                     x["object_id"],
                     x["object_id"],  # subject_id == object_id in this dataset
                 ),
                 return_dtype=pl.Utf8,
                 strategy="thread_local",
             )
-            .alias("record_id")
+            .alias("record_id"),
+            pl.struct(["object_id"])
+            .map_elements(
+                lambda x: self._pair_hash(x["object_id"], x["object_id"]),
+                return_dtype=pl.Utf8,
+                strategy="thread_local",
+            )
+            .alias("pair_key"),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -244,21 +259,23 @@ class UniProtParser(BaseParser):
             "license": m_meta.get("license"),
             "comment": "Deleted accession with no replacement.",
         }
-        rows = df.select(["object_id", "record_id"]).to_dicts()
+        rows = df.select(["object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            row["mapping_date"] = consolidated.get(row["record_id"])
+            # The consolidated index is keyed by the version-independent pair
+            # hash, not the whole record_id.
+            row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
     def _create_mapping_set(
         self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Delegate to base class method."""
         return self.create_mapping_set(mappings, mapping_type)
 
     def parse_primary_ids(
         self,
         acindex_path: Path | str | None = None,
-    ) -> Sec2PriMappingSet:
+    ) -> BaseMappingSet:
         """Return a mapping set containing the full list of current UniProt primary ACs.
 
         Parses ``acindex.txt`` (or a gzip-compressed variant) to extract every
@@ -326,61 +343,4 @@ class UniProtParser(BaseParser):
         return primary_ids
 
 
-class UniProtDownloader(BaseDownloader):
-    """Downloader for UniProt data files."""
-
-    datasource_name = "uniprot"
-
-    def get_download_urls(
-        self,
-        version: str | None = None,
-        **kwargs: object,
-    ) -> dict[str, str]:
-        """Get UniProt download URLs for *version*, or latest."""
-        from pysec2pri.download import _get_uniprot_urls_for_version
-
-        if version:
-            return _get_uniprot_urls_for_version(version)
-        if self._config:
-            return dict(self._config.download_urls)
-        raise ValueError("UniProt config not loaded")
-
-    def download(
-        self,
-        output_dir: Path,
-        version: str | None = None,
-        decompress: bool = True,
-        **kwargs: object,
-    ) -> dict[str, Path]:
-        """Download UniProt files into *output_dir*."""
-        urls = self.get_download_urls(version)
-        return self._download_urls(urls, output_dir, decompress)
-
-    def list_versions(self) -> list[str]:
-        """List all available UniProt previous-release versions.
-
-        Scrapes the UniProt FTP previous_releases directory for version
-        strings.
-
-        Returns:
-            Sorted list of version strings
-            (e.g. ``["2024_01", "2024_02", ...]``).
-
-        Raises:
-            ValueError: If the archive URL is not configured.
-        """
-        import re
-
-        import httpx
-
-        if not self._config or not self._config.archive_url:
-            raise ValueError("UniProt archive URL not configured")
-        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-            response = client.get(self._config.archive_url)
-            response.raise_for_status()
-        # FTP HTML index: links like "release-2024_01/"
-        matches = re.findall(r'href="release-(\d{4}_\d{2})/', response.text)
-        return sorted(set(matches))
-
-
-__all__ = ["UniProtDownloader", "UniProtParser"]
+__all__ = ["UniProtParser"]

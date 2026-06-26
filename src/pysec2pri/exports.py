@@ -6,10 +6,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sssom import MappingSetDataFrame
+from mapkgsutils.exports import write_json, write_owl, write_rdf, write_sssom
 
 if TYPE_CHECKING:
-    from pysec2pri.parsers.base import Sec2PriMappingSet
+    from pysec2pri.parsers.base import BaseMappingSet
 
 __all__ = [
     "WRITERS",
@@ -26,170 +26,8 @@ __all__ = [
 ]
 
 
-def write_sssom(
-    mapping_set: Sec2PriMappingSet,
-    output_path: Path | str,
-) -> Path:
-    """Write a mapping set to an SSSOM TSV file.
-
-    Args:
-        mapping_set: The mapping set to write.
-        output_path: Destination ``.sssom.tsv`` file path.
-
-    Returns:
-        Path to the written file.
-    """
-    import codecs
-    import re
-    from typing import cast
-
-    import curies
-    from sssom.parsers import to_mapping_set_dataframe  # type: ignore[attr-defined]
-    from sssom.sssom_document import MappingSetDocument
-    from sssom.writers import write_table
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Build a curies.Converter from the curie_map stored on the mapping set.
-    # Using Converter(records=...) preserves prefix casing exactly as declared
-    # and handles pydantic-wrapped Prefix objects (which expose .prefix_url).
-    raw_curie_map: object = mapping_set.curie_map or {}
-    records: list[curies.Record] = []
-    if isinstance(raw_curie_map, dict):
-        for k, v in raw_curie_map.items():
-            if isinstance(v, str):
-                uri_prefix: str = v
-            elif hasattr(v, "prefix_url"):
-                uri_prefix = cast(str, v.prefix_url)
-            else:
-                continue
-            records.append(curies.Record(prefix=k, uri_prefix=uri_prefix))
-    converter = curies.Converter(records=records)
-    doc = MappingSetDocument(mapping_set=mapping_set, converter=converter)
-    msdf = to_mapping_set_dataframe(doc)
-
-    with output_path.open("w", encoding="utf-8") as f:
-        write_table(msdf, f)
-
-    # Fix escaped unicode in YAML header (sssom issue)
-    content = output_path.read_text(encoding="utf-8")
-    content = re.sub(
-        r"\\x([0-9a-fA-F]{2})",
-        lambda m: codecs.decode(bytes([int(m.group(1), 16)]), "latin-1"),
-        content,
-    )
-    output_path.write_text(content, encoding="utf-8")
-
-    return output_path
-
-
-def _to_msdf_via_sssom_parser(mapping_set: Sec2PriMappingSet) -> MappingSetDataFrame | None:
-    """Write to a temporary SSSOM TSV then parse back with sssom's own parser.
-
-    Args:
-        mapping_set: The mapping set to convert.
-
-    Returns:
-        A fully-validated ``MappingSetDataFrame`` ready for RDF/JSON/OWL serialisation.
-    """
-    import tempfile
-
-    from sssom.parsers import parse_sssom_table
-
-    with tempfile.NamedTemporaryFile(
-        suffix=".sssom.tsv", mode="w", encoding="utf-8", delete=False
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        write_sssom(mapping_set, tmp_path)
-        return parse_sssom_table(str(tmp_path))
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-
-def write_rdf(
-    mapping_set: Sec2PriMappingSet,
-    output_path: Path | str,
-    serialisation: str = "turtle",
-) -> Path:
-    """Write a mapping set to an RDF file.
-
-    Args:
-        mapping_set: The mapping set to write.
-        output_path: Destination file path (e.g. ``mappings.ttl``).
-        serialisation: RDFLib serialisation format.
-
-    Returns:
-        Path to the written file.
-    """
-    from sssom.writers import write_rdf as _sssom_write_rdf
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    msdf = _to_msdf_via_sssom_parser(mapping_set)
-    if msdf is None:
-        raise ValueError("Failed to parse mapping set for RDF serialisation.")
-    with output_path.open("w", encoding="utf-8") as f:
-        _sssom_write_rdf(msdf, f, serialisation=serialisation)
-    return output_path
-
-
-def write_json(
-    mapping_set: Sec2PriMappingSet,
-    output_path: Path | str,
-) -> Path:
-    """Write a mapping set to an SSSOM JSON file.
-
-    Args:
-        mapping_set: The mapping set to write.
-        output_path: Destination file path (e.g. ``mappings.json``).
-
-    Returns:
-        Path to the written file.
-    """
-    from sssom.writers import write_json as _sssom_write_json
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    msdf = _to_msdf_via_sssom_parser(mapping_set)
-    if msdf is None:
-        raise ValueError("Failed to parse mapping set for JSON serialisation.")
-    with output_path.open("w", encoding="utf-8") as f:
-        _sssom_write_json(msdf, f)
-    return output_path
-
-
-def write_owl(
-    mapping_set: Sec2PriMappingSet,
-    output_path: Path | str,
-    serialisation: str = "turtle",
-) -> Path:
-    """Write a mapping set to an OWL/RDF file (default: Turtle).
-
-    Args:
-        mapping_set: The mapping set to write.
-        output_path: Destination file path (e.g. ``mappings_owl.ttl``).
-        serialisation: RDFLib serialisation format.
-
-    Returns:
-        Path to the written file.
-    """
-    from sssom.writers import write_owl as _sssom_write_owl
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    msdf = _to_msdf_via_sssom_parser(mapping_set)
-    if msdf is None:
-        raise ValueError("Failed to parse mapping set for OWL serialisation.")
-    with output_path.open("w", encoding="utf-8") as f:
-        _sssom_write_owl(msdf, f, serialisation=serialisation)
-    return output_path
-
-
 def write_pri_ids(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write unique primary IDs to a text file, one per line.
@@ -209,7 +47,7 @@ def write_pri_ids(
 
     if not all_ids:
         # Fall back to extracting from mappings
-        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+        for m in mapping_set.mappings or []:
             obj_id = getattr(m, "object_id", None)
             if obj_id:
                 all_ids.add(str(obj_id))
@@ -222,7 +60,7 @@ def write_pri_ids(
 
 
 def write_pri_labels(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write unique primary labels to a text file, one per line.
@@ -242,7 +80,7 @@ def write_pri_labels(
 
     if not all_sym:
         # Fall back to extracting from mappings
-        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+        for m in mapping_set.mappings or []:
             obj_label = getattr(m, "object_label", None)
             if obj_label:
                 all_sym.add(str(obj_label))
@@ -255,7 +93,7 @@ def write_pri_labels(
 
 
 def write_sec2pri(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write secondary to primary ID mappings to a TSV file.
@@ -278,7 +116,7 @@ def write_sec2pri(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+        for m in mapping_set.mappings or []:
             values = [
                 str(getattr(m, "object_id", "") or ""),
                 str(getattr(m, "subject_id", "") or ""),
@@ -291,7 +129,7 @@ def write_sec2pri(
 
 
 def write_name2synonym(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write name to synonym mappings to a TSV file.
@@ -315,7 +153,7 @@ def write_name2synonym(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+        for m in mapping_set.mappings or []:
             # Only emit synonym rows; skip deprecation (IAO:0100001) rows
             if getattr(m, "predicate_id", None) != "oboInOwl:hasExactSynonym":
                 continue
@@ -334,7 +172,7 @@ def write_name2synonym(
 
 
 def write_label2prev(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write label to previous (deprecated) label mappings to a TSV file.
@@ -359,7 +197,7 @@ def write_label2prev(
 
     with output_path.open("w", encoding="utf-8") as f:
         f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:  # type: ignore[has-type]
+        for m in mapping_set.mappings or []:
             # Only emit deprecation rows; skip synonym (hasExactSynonym) rows
             if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym":
                 continue
@@ -379,7 +217,7 @@ def write_label2prev(
 
 
 def write_secondary(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write unique secondary IDs (subject_id) to a text file, one per line.
@@ -395,7 +233,7 @@ def write_secondary(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     sec_ids: set[str] = set()
-    for m in mapping_set.mappings or []:  # type: ignore[has-type]
+    for m in mapping_set.mappings or []:
         subj_id = getattr(m, "subject_id", None)
         if subj_id:
             sec_ids.add(str(subj_id))
@@ -424,7 +262,7 @@ WRITERS: dict[str, Callable[..., Path]] = {
 
 
 def write_output(
-    mapping_set: Sec2PriMappingSet,
+    mapping_set: BaseMappingSet,
     output_format: str,
     output_path: Path | str,
 ) -> Path:

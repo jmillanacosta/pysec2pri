@@ -1,0 +1,3 @@
+taxon_id	vgnc_id	status	withdrawn_symbol	merged_into_report(s)
+	VGNC:9001	Entry Withdrawn	OLDSYM1	
+	VGNC:9002	Merged/Split	MERGEDSYM	VGNC:9501/CHIMPGENE1/Approved

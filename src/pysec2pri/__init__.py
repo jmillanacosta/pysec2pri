@@ -5,10 +5,21 @@ identifiers to primary (current) identifiers across various biological
 databases including ChEBI, HMDB, HGNC, NCBI Gene, and UniProt.
 """
 
+from mapkgsutils.context import (
+    ContextSpec,
+    DecisionRecord,
+    XrefMapping,
+    XrefRecord,
+    load_xref_mapping,
+)
+
 from pysec2pri.api import (
+    crosswalk,
     find_ambiguous,
     generate_chebi,
     generate_chebi_synonyms,
+    generate_ensembl,
+    generate_ensembl_labels,
     generate_hgnc,
     generate_hgnc_labels,
     generate_hgnc_primary_ids,
@@ -17,6 +28,8 @@ from pysec2pri.api import (
     generate_ncbi,
     generate_ncbi_labels,
     generate_uniprot,
+    generate_vgnc,
+    generate_vgnc_labels,
     generate_wikidata,
     generate_wikidata_labels,
     list_versions,
@@ -35,9 +48,9 @@ from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
     AmbiguousMappingSet,
+    BaseMappingSet,
     IdMappingSet,
     LabelMappingSet,
-    Sec2PriMappingSet,
 )
 from pysec2pri.update_ids import (
     build_alias_index,
@@ -55,18 +68,26 @@ __all__ = [
     "WITHDRAWN_ENTRY_LABEL",
     # Mapping Set classes
     "AmbiguousMappingSet",
+    "BaseMappingSet",
+    # Disambiguation context (symbol/id/xref)
+    "ContextSpec",
+    "DecisionRecord",
     "IdMappingSet",
     "LabelMappingSet",
-    "Sec2PriMappingSet",
+    "XrefMapping",
+    "XrefRecord",
     # ID resolution
     "build_alias_index",
     "build_label_lookup",
     "build_lookup",
     "build_primary_token_to_id",
+    "crosswalk",
     "find_ambiguous",
     # generate_* (download + parse in one call)
     "generate_chebi",
     "generate_chebi_synonyms",
+    "generate_ensembl",
+    "generate_ensembl_labels",
     "generate_hgnc",
     "generate_hgnc_labels",
     "generate_hgnc_primary_ids",
@@ -75,9 +96,12 @@ __all__ = [
     "generate_ncbi",
     "generate_ncbi_labels",
     "generate_uniprot",
+    "generate_vgnc",
+    "generate_vgnc_labels",
     "generate_wikidata",
     "generate_wikidata_labels",
     "list_versions",
+    "load_xref_mapping",
     "resolve_ambiguous_with_hints",
     "resolve_ids",
     "resolve_labels",
