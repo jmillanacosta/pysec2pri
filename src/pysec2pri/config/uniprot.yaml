@@ -16,13 +16,14 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/uniprot"
   mapping_set_version: null
   mapping_set_title: "UniProt Secondary to Primary Mapping"
-  mapping_set_description: "Mappings from secondary to primary UniProt accessions."
+  mapping_set_description:
+    "Mappings from secondary to primary UniProt accessions."
   mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
@@ -59,7 +60,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:uniprot/" # TODO set namespace, better schema logic to assign namespace
+  record_id: "sec2pri:uniprot/" # TODO set namespace, better schema logic to assign namespace
   subject_id: null
   subject_label: null
   subject_category: null
@@ -80,7 +81,7 @@ mapping:
   subject_type: null
   subject_source: "uniprotweb:uniprotkb"
   subject_source_version: null
-  object_type: null 
+  object_type: null
   object_source: "uniprotweb:uniprotkb"
   object_source_version: null
   predicate_type: null
@@ -149,4 +150,6 @@ xref_sources:
       entrez: "NCBI Gene ID(supplied by NCBI)"
       refseq: "RefSeq IDs"
       uniprot: "UniProt ID(supplied by UniProt)"
-    note: "Source of truth for cross-references varies; for pure UniProt, supply your own XrefMapping."
+    note:
+      "Source of truth for cross-references varies; for pure UniProt, supply
+      your own XrefMapping."

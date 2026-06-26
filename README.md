@@ -222,13 +222,6 @@ resolved = update_labels(
 )
 ```
 
-`xref_predicates` restricts which SSSOM-style equivalence predicates from the
-crosswalk are trusted (by default any predicate is accepted, and an unannotated
-record is assumed to be an equivalence). `context=` accepts a list of
-`ContextSpec` for cases the `synonyms=`/`xref=` shortcuts don't cover (e.g.
-several cross-reference columns); specs are tried in order and the first one
-that resolves a cell wins.
-
 The same options are available on the CLI:
 
 ```bash
@@ -236,16 +229,6 @@ pysec2pri update-labels genes.tsv hgnc --at gene_name \
   --xref ensembl --xref-source hgnc_custom --xref-on ensembl \
   --report decisions.tsv
 ```
-
-`--xref-source`/`--xref-on` auto-download a crosswalk that a datasource config
-suggests (see `xref_sources` in `config/hgnc.yaml`) instead of requiring a
-pre-built `--xref-file`. Run `pysec2pri validate-config` to check that every
-shipped config (including its `xref_sources`) is well-formed.
-
-See
-[`notebooks/hgnc_ensembl_context_showcase.ipynb`](notebooks/hgnc_ensembl_context_showcase.ipynb)
-for a full, real-data walkthrough (GTEx gene symbols disambiguated against
-HGNC's own Ensembl crosswalk).
 
 ### `crosswalk`: a direct identifier lookup helper
 
@@ -263,6 +246,38 @@ crosswalk("TP53", frm="symbol", to="hgnc_id")          # {'TP53': 'HGNC:11998'}
 crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own crosswalk
 ```
 
+### Consolidating mapping dates across releases
+
+A single release snapshot only presents each mapping's _last-seen_ date.
+`consolidate` builds a first-seen-date index by walking a datasource's
+historical archive (or, where the parser already exposes a real per-row date
+such as HGNC's `date_symbol_changed`, a single fast pass) and writes it back out
+as a real SSSOM mapping set whose `mapping_date` is each mapping's true first
+appearance:
+
+```bash
+pysec2pri chebi consolidate --mode release   # walks ~250 ChEBI releases; slow, run as a one-off
+pysec2pri hgnc consolidate --mode date       # fast: uses HGNC's own per-row date
+```
+
+Supported for `chebi`, `ensembl`, `hgnc`, `ncbi`, `uniprot`, and `vgnc`. Ensembl
+additionally supports `label-history`, which derives previous-symbol ->
+current-symbol transitions by diffing each release's labels per stable ID
+(Ensembl has no previous-symbol table of its own):
+
+```bash
+pysec2pri ensembl label-history --species 9606
+```
+
+### Diffing mapping sets
+
+`diff` compares two SSSOM files (e.g. two releases of the same mapping set) and
+reports added/removed/changed rows:
+
+```bash
+pysec2pri diff old.sssom.tsv new.sssom.tsv --datasource hgnc -o diff.tsv
+```
+
 ## Documentation
 
 Full documentation: <https://pysec2pri.readthedocs.io/>
@@ -272,10 +287,12 @@ Full documentation: <https://pysec2pri.readthedocs.io/>
 | Datasource | license                                                                                                                                  | citation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ChEBI      | [CC BY 4.0](docs/licenses/chebi/LICENSE).                                                                                                | Hastings J, Owen G, Dekker A, et al. ChEBI in 2016: Improved services and an expanding collection of metabolites. Nucleic Acids Research. 2016 Jan;44(D1):D1214-9. DOI: [10.1093/nar/gkv1031](https://doi.org/10.1093/nar/gkv1031). PMID: 26467479; PMCID: PMC4702775.                                                                                                                                                                                                                                                                                                                                        |
+| Ensembl    | [link](https://www.ensembl.org/info/about/legal/disclaimer.html)                                                                         | Martin FJ, Amode MR, Aneja A, et al. Ensembl 2023. Nucleic Acids Res. 2023 Jan 6;51(D1):D933-D941. doi: [10.1093/nar/gkac958](https://doi.org/10.1093/nar/gkac958). PMID: 36318249; PMCID: PMC9825606.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | HMDB       | [CC BY 4.0](https://hmdb.ca/about#compliance:~:text=international%20scientific%20conferences.-,Citing%20the%20HMDB,-HMDB%20is%20offered) | Wishart DS, Guo A, Oler E, Wang F, Anjum A, Peters H, Dizon R, Sayeeda Z, Tian S, Lee BL, Berjanskii M, Mah R, Yamamoto M, Jovel J, Torres-Calzada C, Hiebert-Giesbrecht M, Lui VW, Varshavi D, Varshavi D, Allen D, Arndt D, Khetarpal N, Sivakumaran A, Harford K, Sanford S, Yee K, Cao X, Budinski Z, Liigand J, Zhang L, Zheng J, Mandal R, Karu N, Dambrova M, Schiöth HB, Greiner R, Gautam V. HMDB 5.0: the Human Metabolome Database for 2022. Nucleic Acids Res. 2022 Jan 7;50(D1):D622-D631. doi: [10.1093/nar/gkab1062](https://doi.org/10.1093/nar/gkab1062). PMID: 34986597; PMCID: PMC8728138. |
 | HGNC       | [link](https://www.genenames.org/about/license/)                                                                                         | Seal RL, Braschi B, Gray K, Jones TEM, Tweedie S, Haim-Vilmovsky L, Bruford EA. Genenames.org: the HGNC resources in 2023. Nucleic Acids Res. 2023 Jan 6;51(D1):D1003-D1009. doi: [10.1093/nar/gkac888](https://doi.org/10.1093/nar/gkac888). PMID: 36243972; PMCID: PMC9825485.                                                                                                                                                                                                                                                                                                                              |
 | NCBI       | [link](https://www.ncbi.nlm.nih.gov/home/about/policies/)                                                                                | Sayers EW, Bolton EE, Brister JR, Canese K, Chan J, Comeau DC, Connor R, Funk K, Kelly C, Kim S, Madej T, Marchler-Bauer A, Lanczycki C, Lathrop S, Lu Z, Thibaud-Nissen F, Murphy T, Phan L, Skripchenko Y, Tse T, Wang J, Williams R, Trawick BW, Pruitt KD, Sherry ST. Database resources of the national center for biotechnology information. Nucleic Acids Res. 2022 Jan 7;50(D1):D20-D26. doi: [10.1093/nar/gkab1112](https://doi.org/10.1093/nar/gkab1112). PMID: 34850941; PMCID: PMC8728269.                                                                                                        |
 | UniProt    | [CC BY 4.0](https://ftp.uniprot.org/pub/docs/licenses/uniprot/current_release/knowledgebase/complete/LICENSE)                            | UniProt Consortium. UniProt: the universal protein knowledgebase in 2021. Nucleic Acids Res. 2021 Jan 8;49(D1):D480-D489. doi: [10.1093/nar/gkaa1100](https://doi.org/10.1093/nar/gkaa1100). PMID: 33237286; PMCID: PMC7778908.                                                                                                                                                                                                                                                                                                                                                                               |
+| VGNC       | [link](https://www.genenames.org/about/license/)                                                                                         | Tweedie S, Braschi B, Gray KA, Jones TEM, Seal RL, Yates B, Bruford EA. Genenames.org: the HGNC and VGNC resources in 2021. Nucleic Acids Res. 2021 Jan 8;49(D1):D939-D946. doi: [10.1093/nar/gkaa980](https://doi.org/10.1093/nar/gkaa980). PMID: 33152070; PMCID: PMC7779007.                                                                                                                                                                                                                                                                                                                               |
 | Wikidata   |                                                                                                                                          | Vrandecic, D., Krotzsch, M. Wikidata: a free collaborative knowledgebase. Communications of the ACM. 2014. doi: [10.1145/2629489](https://doi.org/10.1145/2629489).                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## License

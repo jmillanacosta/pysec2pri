@@ -17,7 +17,7 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/hgnc" #/version
@@ -60,7 +60,7 @@ mappingset:
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:hgnc/"
+  record_id: "sec2pri:hgnc/"
   subject_id: null
   subject_label: null
   subject_category: null
@@ -141,7 +141,9 @@ xref_sources:
       entrez: "NCBI Gene ID(supplied by NCBI)"
       refseq: "RefSeq IDs"
       uniprot: "UniProt ID(supplied by UniProt)"
-    note: "Source of truth for cross-references varies; this is a suggested default, not authoritative."
+    note:
+      "Source of truth for cross-references varies; this is a suggested default,
+      not authoritative."
 
 mapping_sets:
   ids:
@@ -153,7 +155,8 @@ mapping_sets:
     method: parse_symbols
     primary_input: complete
     required_inputs: [complete]
-    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+    formats:
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

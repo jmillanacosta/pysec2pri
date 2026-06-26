@@ -6,13 +6,13 @@ name: Tests
 
 # by default, give the GITHUB_TOKEN no permissions
 # See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/controlling-permissions-for-github_token
-permissions: { }
+permissions: {}
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   lint:
@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ "3.14", "3.10" ]
-        tox-command: [ "lint", "pyroma", "mypy" ]
+        python-version: ["3.14", "3.10"]
+        tox-command: ["lint", "pyroma", "mypy"]
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: "Install uv"
@@ -48,7 +48,7 @@ jobs:
         # We only test documentation on the latest version
         # sphinx 8.0 / sphinx-rtd-theme 3.0 discontinued Python 3.9 support
         # a year early, which prompted re-thinking about this.
-        python-version: [ "3.14" ]
+        python-version: ["3.14"]
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: "Install uv"
@@ -62,11 +62,14 @@ jobs:
       - name: Lint documentation
         run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e docs-lint
       - name: Check docstring coverage
-        run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e docstr-coverage
+        run:
+          uvx -p ${{ matrix.python-version }} --with tox-uv tox -e
+          docstr-coverage
       - name: Check documentation build with Sphinx
         run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e docs-test
       - name: Lint markdown
-        run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e lint-markdown
+        run:
+          uvx -p ${{ matrix.python-version }} --with tox-uv tox -e lint-markdown
 
   tests:
     name: Tests
@@ -75,8 +78,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest ]
-        python-version: [ "3.14", "3.10" ]
+        os: [ubuntu-latest]
+        python-version: ["3.14", "3.10"]
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: "Install uv"
@@ -85,11 +88,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
       - name: Test with pytest and generate coverage file
-        run:
-          uvx -p ${{ matrix.python-version }} --with tox-uv tox -e py
+        run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e py
       - name: Run doctests
-        run:
-          uvx -p ${{ matrix.python-version }} --with tox-uv tox -e doctests
+        run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e doctests
       - name: Upload coverage report to codecov
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         if: success()

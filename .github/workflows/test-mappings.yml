@@ -6,7 +6,7 @@ on:
       datasource:
         description: 'Data source to test (or "all")'
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -17,7 +17,7 @@ on:
           - uniprot
           # - wikidata Commented out because of 404 on GH actions
   schedule:
-    - cron: "0 0 1,15 * *"  # 1st and 15th of each month
+    - cron: "0 0 1,15 * *" # 1st and 15th of each month
 
 permissions:
   contents: read
@@ -25,9 +25,8 @@ permissions:
 jobs:
   chebi:
     if: >-
-      github.event_name == 'schedule' ||
-      github.event.inputs.datasource == 'all' ||
-      github.event.inputs.datasource == 'chebi'
+      github.event_name == 'schedule' || github.event.inputs.datasource == 'all'
+      || github.event.inputs.datasource == 'chebi'
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space
@@ -48,9 +47,8 @@ jobs:
 
   hgnc:
     if: >-
-      github.event_name == 'schedule' ||
-      github.event.inputs.datasource == 'all' ||
-      github.event.inputs.datasource == 'hgnc'
+      github.event_name == 'schedule' || github.event.inputs.datasource == 'all'
+      || github.event.inputs.datasource == 'hgnc'
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space
@@ -74,9 +72,8 @@ jobs:
 
   ncbi:
     if: >-
-      github.event_name == 'schedule' ||
-      github.event.inputs.datasource == 'all' ||
-      github.event.inputs.datasource == 'ncbi'
+      github.event_name == 'schedule' || github.event.inputs.datasource == 'all'
+      || github.event.inputs.datasource == 'ncbi'
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space
@@ -100,9 +97,8 @@ jobs:
 
   uniprot:
     if: >-
-      github.event_name == 'schedule' ||
-      github.event.inputs.datasource == 'all' ||
-      github.event.inputs.datasource == 'uniprot'
+      github.event_name == 'schedule' || github.event.inputs.datasource == 'all'
+      || github.event.inputs.datasource == 'uniprot'
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space
@@ -123,9 +119,8 @@ jobs:
 
   wikidata:
     if: >-
-      github.event_name == 'schedule' ||
-      github.event.inputs.datasource == 'all' ||
-      github.event.inputs.datasource == 'wikidata'
+      github.event_name == 'schedule' || github.event.inputs.datasource == 'all'
+      || github.event.inputs.datasource == 'wikidata'
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space

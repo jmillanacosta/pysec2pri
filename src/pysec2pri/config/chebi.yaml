@@ -25,7 +25,7 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/"  # TODO set namespace
+    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
   mapping_set_id: "https://sec2pri.github.io/chebi" #/version
@@ -61,14 +61,16 @@ mappingset:
   object_preprocessing: "https://w3id.org/semapv/vocab/BackgroundKnowledgeBasedMatching"
   similarity_measure: null
   curation_rule: "https://w3id.org/semapv/vocab/BackgroundKnowledgeBasedMatching"
-  curation_rule_text: "These mappings were generated using pysec2pri, which identifies deprecated ChEBI IDs based on the information provided in the ChEBI 3-star SDF file."
+  curation_rule_text:
+    "These mappings were generated using pysec2pri, which identifies deprecated
+    ChEBI IDs based on the information provided in the ChEBI 3-star SDF file."
   see_also: "https://github.com/sec2pri/pysec2pri"
   issue_tracker: "https://github.com/sec2pri/pysec2pri/issues"
   other: null
   extension_definitions: null
 
 mapping:
-  record_id : "sec2pri:chebi/" # TODO set namespace, better schema logic to assign namespace
+  record_id: "sec2pri:chebi/" # TODO set namespace, better schema logic to assign namespace
   subject_id: null
   subject_label: null
   subject_category: null
@@ -165,7 +167,8 @@ mapping_sets:
     method: parse_synonyms
     primary_input: names
     required_inputs: [names, compounds]
-    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+    formats:
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
 
 source: "ChEBI database"
 homepage: "https://www.ebi.ac.uk/chebi/"

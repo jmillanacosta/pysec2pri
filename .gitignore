@@ -303,7 +303,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-downloads/
+/downloads/
 eggs/
 .eggs/
 lib/
