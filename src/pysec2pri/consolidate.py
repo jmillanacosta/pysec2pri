@@ -504,7 +504,7 @@ def consolidate_mapping_dates(
 
 
 # Cross-release label history (e.g. Ensembl, whose core schema has no
-# previous-gene-symbol table -- genuine previous->current symbol transitions
+# previous-gene-symbol table: previous->current symbol transitions
 # are recovered by diffing each release's current-label snapshot).
 
 

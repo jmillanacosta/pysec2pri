@@ -7,22 +7,6 @@ prefix: "VGNC"
 curie_base_url: "http://identifiers.org/vgnc/"
 entity_types: ["genes"]
 
-# VGNC (Vertebrate Gene Nomenclature Committee) names genes for vertebrate
-# species that lack their own nomenclature committee (human/mouse/rat are
-# deliberately out of scope -- HGNC/MGI/RGD cover those). Unlike Ensembl
-# (one download URL per species), VGNC publishes a single global TSV per
-# file with a `taxon_id` column, filtered the same way NCBI's
-# gene_info/gene_history are filtered by `#tax_id` -- see VGNCParser.
-# `default: "all"` processes every species together (see
-# VGNCParser.ALL_SPECIES) -- cheap for ids (the global withdrawn set is
-# always parsed in full regardless), heavier for labels (a symbol shared
-# by two species becomes genuinely ambiguous with no per-species scope to
-# disambiguate it). VGNCParser never calls species_token(), so `available`
-# exists only to drive CLI help/choices and never restricts which taxon IDs
-# are accepted. Taxon IDs below were verified against the live data (each
-# species' own vgnc/tsv/<species>/*_vgnc_gene_set_All.tsv, cross-referenced
-# by VGNC ID against vgnc/tsv/all/all_vgnc_gene_set_All.tsv's taxon_id
-# column).
 species:
   default: "all"
   available:

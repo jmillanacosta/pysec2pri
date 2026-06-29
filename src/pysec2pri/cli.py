@@ -464,7 +464,7 @@ def ensembl_label_history_cmd(
     Ensembl's core schema has no previous-gene-symbol table, so this walks
     every historical release (or a bounded --from-version/--to-version
     range) and diffs each release's primary-label snapshot to recover
-    genuine previous -> current symbol transitions. Network-heavy and
+    true previous -> current symbol transitions. Network-heavy and
     resumable; run on demand, not part of normal mapping generation.
     """
     from pysec2pri.api import generate_ensembl_label_history
