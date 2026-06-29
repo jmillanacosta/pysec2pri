@@ -52,6 +52,13 @@ pysec2pri chebi ids
 This will automatically download the latest ChEBI release and generate an SSSOM
 mapping file in your current directory.
 
+Python:
+
+```python
+from pysec2pri import generate_chebi
+chebi_ms = generate_chebi()
+```
+
 To process local files and specify the output:
 
 ```bash
@@ -70,11 +77,18 @@ The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
 ### Updating IDs and labels
 
 A generated mapping set can be used to update IDs and labels in Python:
-
+ChEBI synonyms:
 ```python
 from pysec2pri import generate_chebi_synonyms, resolve_labels
-cs = generate_chebi_synonyms()
+chebi_ms = generate_chebi_synonyms()
 resolve_labels(["Glucose", "ATP", "Guanine"], cs)
+```
+Ensembl gene identifiers in a dataframe:
+
+```python
+from pysec2pri import update_ids, generate_ensembl
+ens_ms = generate_ensembl(version="115", species="9606")
+df_with_new_column = update_ids(mapping_set=ens_ms, ids = df, at="Ensembl_id")  # `at` is the name of the column
 ```
 
 Or from the command line, given a TSV file `gene_ex.tsv`:
