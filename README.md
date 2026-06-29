@@ -61,11 +61,15 @@ pysec2pri hgnc labels (--help)
 pysec2pri ensembl labels (--help)
 pysec2pri vgnc labels (--help)
 ```
+
 Or python:
+
 ```
 from pysec2pri import generate_ensembl_labels, generate_ensembl
 ```
-Replacing Ensembl by the supported database. These functions return either a `IdMappingSet` or `LabelMappingSet`, SSSOM `MappingSet`s.
+
+Replacing Ensembl by the supported database. These functions return either a
+`IdMappingSet` or `LabelMappingSet`, SSSOM `MappingSet`s.
 
 For more options and help on any command:
 
@@ -78,13 +82,15 @@ The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
 
 ### Updating IDs and labels
 
-A generated mapping set can be used to update IDs and labels in Python:
-ChEBI synonyms:
+A generated mapping set can be used to update IDs and labels in Python: ChEBI
+synonyms:
+
 ```python
 from pysec2pri import generate_chebi_synonyms, resolve_labels
 chebi_ms = generate_chebi_synonyms()
 resolve_labels(["Glucose", "ATP", "Guanine"], cs)
 ```
+
 Ensembl gene identifiers in a dataframe:
 
 ```python
