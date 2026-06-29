@@ -280,6 +280,25 @@ class TestConsolidateByRelease:
         assert records["x"]["first_seen_version"] == "2024-01-01"
         assert records["x"]["last_seen_version"] == "2024-04-01"
 
+    def test_output_writes_consolidated_sssom_to_custom_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``output=`` also writes the consolidated mapping set to the given path."""
+        _FakeDownloader.versions = ["1", "2"]
+        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
+        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
+        monkeypatch.setattr(
+            consolidate_module,
+            "_run_one_version",
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
+        )
+
+        out = tmp_path / "subdir" / "custom_consolidated.sssom.tsv"
+        consolidate_mapping_dates(
+            "chebi", cache_dir=tmp_path, show_progress=False, output=out
+        )
+        assert out.exists()
+
 
 class TestBuildConsolidatedMappingSet:
     """Materializing the cached field snapshots back into a real SSSOM mapping set."""

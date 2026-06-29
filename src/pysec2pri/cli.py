@@ -643,6 +643,7 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
         cache_dir: Path | None,
         force: bool,
         no_progress: bool,
+        output: Path | None,
         **extra_kwargs: Any,
     ) -> None:
         from pysec2pri.consolidate import _sssom_output_path, consolidate_mapping_dates
@@ -660,11 +661,14 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
                 mapping_sets=mapping_sets,
                 show_progress=not no_progress,
                 force=force,
+                output=output,
                 **extra_kwargs,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-        click.echo(f"Wrote consolidated mapping set -> {_sssom_output_path(path)}")
+        click.echo(
+            f"Wrote consolidated mapping set -> {output or _sssom_output_path(path)}"
+        )
 
     decorators: list[Callable[..., Any]] = [
         click.option(
@@ -692,6 +696,13 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
             is_flag=True,
             default=False,
             help="Re-scan every release, ignoring resume state.",
+        ),
+        click.option(
+            "-o",
+            "--output",
+            type=PathType,
+            default=None,
+            help="Also write the consolidated SSSOM mapping set to this path.",
         ),
         _opt_no_progress,
     ]

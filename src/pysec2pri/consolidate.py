@@ -161,6 +161,59 @@ _read_meta = _consolidate.read_meta
 _write_meta = _consolidate.write_meta
 
 
+def _save_optional_output(mapping_set: BaseMappingSet, output: Path | None) -> None:
+    """Write *mapping_set* to *output* as SSSOM when an output path is given."""
+    if output is not None:
+        mapping_set.save("sssom", output)
+
+
+def _consolidate_by_date_full(
+    cache_path: Path,
+    meta_path: Path,
+    *,
+    run_one_version: Callable[[], Any],
+) -> bool:
+    """Date mode that caches the *full* mapping set, not just dated rows.
+
+    :func:`mapkgsutils.consolidate.consolidate_by_date` keeps only rows that
+    carry a real per-row ``mapping_date`` and drops the rest, so a single
+    parse of e.g. HGNC labels would cache only its ~12k dated previous-symbol
+    mappings and lose the ~48k alias mappings. This builds a complete cache
+    from one (current) parse: every mapping is kept, stamped with its own
+    per-row date when present and left undated otherwise (exactly how the
+    release walk treats an unresolvable date).
+
+    Returns ``True`` (cache written) when the parse yields at least one real
+    per-row date, and ``False`` (cache untouched) when it yields none -- so
+    date-less sources (ChEBI, UniProt) still fall back to a release walk
+    rather than caching a fully undated set.
+    """
+    mapping_set = run_one_version()
+    mappings = mapping_set.mappings or []
+    if not any(getattr(m, "mapping_date", None) for m in mappings):
+        return False
+
+    version_label = str(getattr(mapping_set, "mapping_set_version", None) or "current")
+    records: dict[str, dict[str, str]] = {}
+    for m in mappings:
+        # record_id is release-scoped; its trailing 16 hex chars are the
+        # version-independent pair hash (see mapkgsutils.parsers.base.pair_hash).
+        pair_key = str(getattr(m, "record_id", None) or "")[-16:]
+        if not pair_key:
+            continue
+        date_str = str(m.mapping_date) if getattr(m, "mapping_date", None) else ""
+        records[pair_key] = {
+            "first_seen_version": version_label,
+            "first_seen_date": date_str,
+            "last_seen_version": version_label,
+            "last_seen_date": date_str,
+            "fields_json": _consolidate._mapping_fields_json(m),
+        }
+    _write_cache(cache_path, records)
+    _write_meta(meta_path, version_label)
+    return True
+
+
 def load_mapping_dates(
     datasource: str,
     cache_dir: Path | None = None,
@@ -387,6 +440,7 @@ def consolidate_mapping_dates(
     mapping_sets: str = "ids",
     show_progress: bool = True,
     force: bool = False,
+    output: Path | None = None,
     **kwargs: Any,
 ) -> tuple[Path, BaseMappingSet]:
     """Build/update the first-seen-date index for *datasource*.
@@ -424,6 +478,10 @@ def consolidate_mapping_dates(
             (``"release"`` mode only).
         force: Re-scan every release from scratch, ignoring any existing
             cache/resume state (``"release"`` mode only).
+        output: Optional path to also write the consolidated SSSOM mapping
+            set to. The internal cache-adjacent copy (see
+            :func:`_sssom_output_path`) is always written; when *output* is
+            given, the same full mapping set is additionally saved there.
         **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
             for NCBI/Ensembl); ignored for datasources with no such config
             block.
@@ -466,7 +524,7 @@ def consolidate_mapping_dates(
     meta_path = _meta_path(cache_dir, datasource, mapping_sets, **kwargs)
 
     if mode == "date":
-        got_dates = _consolidate.consolidate_by_date(
+        got_dates = _consolidate_by_date_full(
             cache_path,
             meta_path,
             run_one_version=lambda: _run_one_version(datasource, None, mapping_sets, **kwargs),
@@ -475,6 +533,7 @@ def consolidate_mapping_dates(
             _, mapping_set = _write_consolidated_sssom(
                 datasource, mapping_sets, cache_path, meta_path
             )
+            _save_optional_output(mapping_set, output)
             return cache_path, mapping_set
         msg = (
             f"{datasource!r} has no parseable per-row mapping dates; "
@@ -500,6 +559,7 @@ def consolidate_mapping_dates(
         force=force,
     )
     _, mapping_set = _write_consolidated_sssom(datasource, mapping_sets, cache_path, meta_path)
+    _save_optional_output(mapping_set, output)
     return cache_path, mapping_set
 
 
