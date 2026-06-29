@@ -878,7 +878,7 @@ def _generate_ensembl_all_species(
         version = check_ensembl_release().version
         if version is None:
             raise ValueError("Could not determine the latest Ensembl release.")
-    release_date = resolve_release_date("ensembl", version)
+    release_date = resolve_release_date("ensembl", version, species=9606)
 
     species_list = discover_ensembl_species(version)
     iterator: Any = species_list

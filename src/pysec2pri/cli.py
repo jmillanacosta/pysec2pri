@@ -653,7 +653,7 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
             f"(mode={mode}{', ' + extras if extras else ''}, {mapping_sets})..."
         )
         try:
-            path = consolidate_mapping_dates(
+            path, _ = consolidate_mapping_dates(
                 cfg_id,
                 mode=mode,
                 cache_dir=cache_dir,

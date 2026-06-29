@@ -71,7 +71,7 @@ dependencies = [
     "rdkit", # Chemistry toolkit for SDF parsing
     "polars-runtime-32", # Polars runtime for 32-bit systems
     "sssom-schema==1.1.0a5", # SSSOM schema for validation
-    "mapkgsutils>=0.0.4",
+    "mapkgsutils>=0.0.5",
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
