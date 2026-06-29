@@ -17,7 +17,6 @@ import gzip
 import io
 import re
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
@@ -85,7 +84,6 @@ class HMDBParser(BaseParser):
         element_tag: str,
         prefix: str,
         desc: str,
-        secondary_normaliser: Callable[[str], str] | None = None,
     ) -> BaseMappingSet:
         """Parse an HMDB XML file and return a mapping set.
 
@@ -95,8 +93,6 @@ class HMDBParser(BaseParser):
                 ``"protein"``).
             prefix: CURIE prefix (``"HMDB"`` for both record types).
             desc: Progress-bar description string.
-            secondary_normaliser: Optional callable ``(raw_str) -> str``
-                applied to each raw secondary accession before prefixing.
 
         Returns:
             :class:`BaseMappingSet` with computed cardinalities and
@@ -130,10 +126,10 @@ class HMDBParser(BaseParser):
                         accession_elem = elem.find("accession")
                     if accession_elem is not None and accession_elem.text:
                         primary_ids_found.add(f"{prefix}:{accession_elem.text.strip()}")
-                    rows_data.extend(self._process_record(elem, prefix, secondary_normaliser))
+                    rows_data.extend(self._process_record(elem, prefix))
                     elem.clear()
         except DefusedET.ParseError:
-            rows_data = self._parse_simple_xml(file_path, element_tag, prefix, secondary_normaliser)
+            rows_data = self._parse_simple_xml(file_path, element_tag, prefix)
 
         mappings = self._build_mappings(
             rows_data, fixed, desc="Building HMDB mappings", total=len(rows_data)
@@ -147,9 +143,14 @@ class HMDBParser(BaseParser):
         self,
         elem: Element,
         prefix: str,
-        secondary_normaliser: Callable[[str], str] | None,
     ) -> list[dict[str, str]]:
-        """Extract row dicts from a single record element."""
+        """Extract row dicts from a single record element.
+
+        Bare-numeric ``secondary_accessions`` entries are skipped: in the
+        proteins file these are HMDB's internal database row ids (not legacy
+        accessions), and a bare integer is never a valid HMDB accession for
+        either record type. See issue #44.
+        """
         # Primary accession
         accession_elem = elem.find("hmdb:accession", HMDB_NS)
         if accession_elem is None:
@@ -177,8 +178,8 @@ class HMDBParser(BaseParser):
             if not sec_elem.text:
                 continue
             raw_sec = sec_elem.text.strip()
-            if secondary_normaliser is not None:
-                raw_sec = secondary_normaliser(raw_sec)
+            if _BARE_NUM_RE.match(raw_sec):
+                continue
             secondary_id = f"{prefix}:{raw_sec}"
             rows.append(
                 {
@@ -200,7 +201,6 @@ class HMDBParser(BaseParser):
         file_path: Path,
         element_tag: str,
         prefix: str,
-        secondary_normaliser: Callable[[str], str] | None,
     ) -> list[dict[str, str]]:
         """Fallback parser for test files without a namespace declaration."""
         rows_data: list[dict[str, str]] = []
@@ -208,7 +208,7 @@ class HMDBParser(BaseParser):
             tree = DefusedET.parse(file_path)
             root = tree.getroot()
             for record in root.findall(f".//{element_tag}"):
-                rows_data.extend(self._process_record(record, prefix, secondary_normaliser))
+                rows_data.extend(self._process_record(record, prefix))
         except Exception as e:
             logger.warning("Failed to parse HMDB XML: %s", e)
         return rows_data
@@ -329,9 +329,15 @@ class HMDBProteinParser(HMDBParser):
 
     Reads configuration from ``hmdb_proteins.yaml``.
     Primary accessions have the form ``HMDBP…`` (e.g. ``HMDBP00001``).
-    Secondary accessions may be bare numbers (legacy format, e.g. ``5229``)
-    or full ``HMDBP`` accessions; both are normalised by
-    :meth:`_normalise_protein_secondary`.
+
+    A record's ``<secondary_accessions>`` block holds two distinct kinds of
+    value. Only the first is a real identifier:
+
+    * **``HMDBP``-prefixed accessions** (e.g. ``HMDBP05261``): genuine retired
+      accessions that map to the record's primary accession.
+    * **Bare numeric values** (e.g. ``5229``): HMDB's internal database row id,
+      *not* a legacy accession. These are dropped by the shared
+      :meth:`~HMDBParser._process_record` (see issue #44).
     """
 
     datasource_name = "hmdb_proteins"
@@ -340,26 +346,6 @@ class HMDBProteinParser(HMDBParser):
     def source_url(self) -> str:
         """Proteins download URL from ``hmdb_proteins.yaml``."""
         return self.get_download_url("proteins") or ""
-
-    @staticmethod
-    def _normalise_protein_secondary(raw: str) -> str:
-        """Normalise a raw secondary protein accession to a ``HMDBP``-prefixed form.
-
-        Bare numeric values (legacy IDs) are zero-padded to five digits and
-        prefixed with ``HMDBP`` to match the primary accession pattern.
-        Already-prefixed values are returned unchanged.
-
-        Args:
-            raw: Raw secondary accession string (e.g. ``"5229"`` or
-                ``"HMDBP05229"``).
-
-        Returns:
-            Normalised accession string (e.g. ``"HMDBP05229"``).
-        """
-        raw = raw.strip()
-        if _BARE_NUM_RE.match(raw):
-            return f"HMDBP{int(raw):05d}"
-        return raw
 
     def parse(self, input_path: Path | str | None) -> BaseMappingSet:
         """Parse ``hmdb_proteins.xml`` (or ``.zip`` / ``.gz``).
@@ -377,7 +363,6 @@ class HMDBProteinParser(HMDBParser):
             element_tag="protein",
             prefix="HMDBP",
             desc="Parsing HMDB proteins XML",
-            secondary_normaliser=self._normalise_protein_secondary,
         )
 
 
