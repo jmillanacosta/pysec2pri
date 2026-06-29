@@ -173,7 +173,7 @@ class TestConsolidateByRelease:
             ),
         )
 
-        cache_path = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
 
         assert records["a"]["first_seen_version"] == "1"
@@ -232,7 +232,7 @@ class TestConsolidateByRelease:
 
         monkeypatch.setattr(consolidate_module, "_run_one_version", _run)
 
-        cache_path = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
 
         assert records["a"]["first_seen_version"] == "1"
@@ -255,7 +255,7 @@ class TestConsolidateByRelease:
             lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
         )
 
-        cache_path = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
 
         assert records["a"]["first_seen_version"] == "183"
@@ -275,7 +275,7 @@ class TestConsolidateByRelease:
             lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["x"]),
         )
 
-        cache_path = consolidate_mapping_dates("hgnc", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates("hgnc", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
         assert records["x"]["first_seen_version"] == "2024-01-01"
         assert records["x"]["last_seen_version"] == "2024-04-01"
@@ -326,7 +326,7 @@ class TestConsolidateByDate:
             ),
         )
 
-        cache_path = consolidate_mapping_dates(
+        cache_path, _ = consolidate_mapping_dates(
             "hgnc", mode="date", cache_dir=tmp_path, show_progress=False
         )
         records = consolidate_module._read_cache(cache_path)
@@ -347,7 +347,7 @@ class TestConsolidateByDate:
         )
 
         with pytest.warns(UserWarning, match="falling back to mode='release'"):
-            cache_path = consolidate_mapping_dates(
+            cache_path, _ = consolidate_mapping_dates(
                 "chebi", mode="date", cache_dir=tmp_path, show_progress=False
             )
 

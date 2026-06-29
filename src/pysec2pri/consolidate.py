@@ -359,8 +359,12 @@ def _build_consolidated_mapping_set(
 
 def _write_consolidated_sssom(
     datasource: str, mapping_sets: str, cache_path: Path, meta_path: Path
-) -> Path:
-    """Build and save the companion SSSOM mapping set next to the cache file."""
+) -> tuple[Path, Any]:
+    """Build and save the companion SSSOM mapping set next to the cache file.
+
+    Returns ``(output_path, mapping_set)`` -- see
+    :func:`mapkgsutils.consolidate.write_consolidated_sssom`.
+    """
     from pysec2pri.parsers.base import IdMappingSet, LabelMappingSet
 
     config = ALL_DATASOURCES[datasource]
@@ -384,7 +388,7 @@ def consolidate_mapping_dates(
     show_progress: bool = True,
     force: bool = False,
     **kwargs: Any,
-) -> Path:
+) -> tuple[Path, BaseMappingSet]:
     """Build/update the first-seen-date index for *datasource*.
 
     Two strategies, selected via *mode*:
@@ -425,8 +429,9 @@ def consolidate_mapping_dates(
             block.
 
     Returns:
-        Path to the written cache TSV (see :func:`_sssom_output_path` for
-        the companion SSSOM mapping set written alongside it).
+        ``(cache_path, mapping_set)``: the path to the written cache TSV
+        (see :func:`_sssom_output_path` for the companion SSSOM mapping set
+        written alongside it) and the in-memory consolidated mapping set.
 
     Raises:
         ValueError: For an unknown *mode*, an unsupported *datasource*, an
@@ -467,8 +472,10 @@ def consolidate_mapping_dates(
             run_one_version=lambda: _run_one_version(datasource, None, mapping_sets, **kwargs),
         )
         if got_dates:
-            _write_consolidated_sssom(datasource, mapping_sets, cache_path, meta_path)
-            return cache_path
+            _, mapping_set = _write_consolidated_sssom(
+                datasource, mapping_sets, cache_path, meta_path
+            )
+            return cache_path, mapping_set
         msg = (
             f"{datasource!r} has no parseable per-row mapping dates; "
             "falling back to mode='release'."
@@ -492,8 +499,8 @@ def consolidate_mapping_dates(
         show_progress=show_progress,
         force=force,
     )
-    _write_consolidated_sssom(datasource, mapping_sets, cache_path, meta_path)
-    return cache_path
+    _, mapping_set = _write_consolidated_sssom(datasource, mapping_sets, cache_path, meta_path)
+    return cache_path, mapping_set
 
 
 # Cross-release label history (e.g. Ensembl, whose core schema has no
