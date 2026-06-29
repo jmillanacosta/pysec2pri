@@ -43,27 +43,29 @@ uv pip install git+https://github.com/jmillanacosta/pysec2pri.git
 
 ### Generating mapping sets
 
-To obtain the secondary to primary identifier SSSOM mapping set for ChEBI:
+Mapping sets can be generated from bash:
 
 ```bash
-pysec2pri chebi ids
+# ID mapping sets
+pysec2pri chebi ids (--help)
+pysec2pri ensembl ids (--help)
+pysec2pri hgnc ids (--help)
+pysec2pri vgnc ids (--help)
+pysec2pri ncbi ids (--help)
+pysec2pri hmdb-protein ids (--help)
+pysec2pri hmdb-gene ids (--help)
+pysec2pri uniprot ids (--help)
+# Label mapping sets
+pysec2pri chebi labels (--help)
+pysec2pri hgnc labels (--help)
+pysec2pri ensembl labels (--help)
+pysec2pri vgnc labels (--help)
 ```
-
-This will automatically download the latest ChEBI release and generate an SSSOM
-mapping file in your current directory.
-
-Python:
-
-```python
-from pysec2pri import generate_chebi
-chebi_ms = generate_chebi()
+Or python:
 ```
-
-To process local files and specify the output:
-
-```bash
-pysec2pri chebi ids ChEBI_complete_3star.sdf --output my_mappings.sssom.tsv
+from pysec2pri import generate_ensembl_labels, generate_ensembl
 ```
+Replacing Ensembl by the supported database. These functions return either a `IdMappingSet` or `LabelMappingSet`, SSSOM `MappingSet`s.
 
 For more options and help on any command:
 
