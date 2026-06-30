@@ -352,6 +352,32 @@ class TestConsolidateByDate:
         assert records["a"]["first_seen_date"] == "1996-03-01"
         assert records["b"]["first_seen_date"] == "2010-05-12"
 
+    def test_caches_full_set_including_undated_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'date' mode caches every mapping, not just the dated subset.
+
+        HGNC labels mix dated previous-symbol mappings with undated alias
+        mappings; the full set must be cached (undated rows with empty date),
+        so long as at least one real per-row date exists.
+        """
+        monkeypatch.setattr(
+            consolidate_module,
+            "_run_one_version",
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
+                ["dated", "alias1", "alias2"], dates={"dated": "2010-05-12"}
+            ),
+        )
+
+        cache_path, _ = consolidate_mapping_dates(
+            "hgnc", mode="date", mapping_sets="labels", cache_dir=tmp_path, show_progress=False
+        )
+        records = consolidate_module._read_cache(cache_path)
+        assert set(records) == {"dated", "alias1", "alias2"}
+        assert records["dated"]["first_seen_date"] == "2010-05-12"
+        assert records["alias1"]["first_seen_date"] == ""
+        assert records["alias2"]["first_seen_date"] == ""
+
     def test_falls_back_to_release_with_warning_when_no_dates(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

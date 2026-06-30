@@ -451,17 +451,18 @@ def consolidate_mapping_dates(
       (oldest first, resuming from the last completed version unless
       *force* is set). For every mapping seen, records the version/date it
       first appeared and keeps bumping the version/date it was last seen.
-      This is a slow, network-heavy operation (~250 releases for ChEBI) and
+      This is a slow, network-heavy operation (e.g. ~250 releases for ChEBI) and
       is meant to be run manually/as a one-off, not as part of normal
       mapping generation. Requires a versioned archive (ChEBI, HGNC,
       UniProt); raises :class:`ValueError` for datasources without one
       (e.g. NCBI).
-    - ``"date"``: a single (current) parse, capturing whatever real
-      per-row ``mapping_date`` the datasource's parser already produces
-      (e.g. HGNC's ``date_symbol_changed``, NCBI's ``Discontinue_Date``).
-      Fast -- no historical walk. If *datasource* never produces a real
-      per-row date (ChEBI, UniProt), falls back to ``"release"`` mode and
-      warns the user.
+    - ``"date"``: a single (current) parse, caching the *full* mapping set
+      with whatever real per-row ``mapping_date`` the datasource's parser
+      already produces (e.g. HGNC's ``date_symbol_changed``, NCBI's
+      ``Discontinue_Date``); rows without such a date are still cached, just
+      left undated. Fast -- no historical walk. If *datasource* never
+      produces a real per-row date at all (ChEBI, UniProt), falls back to
+      ``"release"`` mode and warns the user.
 
     Either way, alongside the internal cache file this also writes a
     companion real SSSOM mapping set (see :func:`_sssom_output_path`) where
