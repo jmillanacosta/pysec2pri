@@ -294,9 +294,7 @@ class TestConsolidateByRelease:
         )
 
         out = tmp_path / "subdir" / "custom_consolidated.sssom.tsv"
-        consolidate_mapping_dates(
-            "chebi", cache_dir=tmp_path, show_progress=False, output=out
-        )
+        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False, output=out)
         assert out.exists()
 
 

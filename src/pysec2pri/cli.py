@@ -666,9 +666,7 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-        click.echo(
-            f"Wrote consolidated mapping set -> {output or _sssom_output_path(path)}"
-        )
+        click.echo(f"Wrote consolidated mapping set -> {output or _sssom_output_path(path)}")
 
     decorators: list[Callable[..., Any]] = [
         click.option(
