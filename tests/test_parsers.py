@@ -219,14 +219,16 @@ class TestHMDBParsers:
         assert "HMDB:HMDB0000003" in result.to_pri_ids()
 
     def test_proteins_parse(self, hmdb_proteins_xml_path: Path) -> None:
-        """parse() normalises bare numeric accessions and skips no-secondary records."""
+        """parse() keeps HMDBP-prefixed secondaries and drops bare row ids."""
         result = HMDBProteinParser(show_progress=False).parse(hmdb_proteins_xml_path)
         assert isinstance(result, BaseMappingSet)
         mappings = result.mappings or []
-        assert len(mappings) == 3
+        # Only HMDBP-prefixed secondaries become mappings (see issue #44).
+        assert len(mappings) == 2
         subjects = {m.subject_id for m in mappings}
-        # bare "5229" normalises to "HMDBP:HMDBP05229"; full accessions pass through.
-        assert {"HMDBP:HMDBP05229", "HMDBP:HMDBP05261"} <= subjects
+        assert {"HMDBP:HMDBP05261", "HMDBP:HMDBP00099"} == subjects
+        # Bare "5229" is an internal row id, not a legacy accession: dropped.
+        assert "HMDBP:HMDBP05229" not in subjects
         # HMDBP00003 has no secondary accessions.
         assert "HMDBP:HMDBP00003" not in subjects
 
@@ -334,7 +336,7 @@ class TestVGNCParser:
 
         Unlike per-species scoping (see
         test_species_scoping_avoids_cross_species_symbol_collision), combining
-        every species means "SHAREDSYM" genuinely has two distinct primary IDs
+        every species means "SHAREDSYM" has two distinct primary IDs
         with no other context to disambiguate them.
         """
         result = VGNCParser(show_progress=False).parse_labels(vgnc_gene_set_path, species="all")

@@ -1001,7 +1001,7 @@ def generate_ensembl_labels(
         species: Canonical NCBI taxon ID, or ``"all"`` (default) to process
             every species Ensembl publishes and combine them into one
             mapping set -- see :func:`_generate_ensembl_all_species`. A
-            symbol shared by two species becomes genuinely ambiguous in
+            symbol shared by two species becomes ambiguous in
             that combined output (there's no longer a per-species scope to
             disambiguate it). This is network-heavy (~276 species); pass
             an explicit taxon ID for a fast, single-species run.

@@ -9,14 +9,6 @@ prefix: "NCBIGene"
 curie_base_url: "http://identifiers.org/ncbigene/"
 entity_types: ["genes"]
 
-# NCBI's own token IS the canonical taxon ID (no translation needed, unlike
-# Ensembl) -- gene_history/gene_info are filtered directly on #tax_id, which
-# accepts ANY taxon ID, not just the ones listed here. `available` exists
-# only to drive CLI help/choices for common species; NCBIParser never calls
-# species_token(), so it never restricts which taxon IDs are accepted.
-# `default: "all"` processes every organism in the file instead of
-# filtering to one (see NCBIParser.ALL_SPECIES) -- cheap here since
-# gene_info/gene_history are single global files already being downloaded.
 species:
   default: "all"
   available:
