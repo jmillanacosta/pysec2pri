@@ -86,8 +86,17 @@ __all__ = [
     "generate_wikidata_labels",
     "generate_wikidata_labels",
     "list_versions",
+    "load_chebi",
+    "load_ensembl",
+    "load_hgnc",
+    "load_hmdb",
+    "load_hmdb_proteins",
     "load_label_mapping",
     "load_mapping",
+    "load_ncbi",
+    "load_uniprot",
+    "load_vgnc",
+    "load_wikidata",
     "load_xref_mapping",
     "resolve_ids",
     "resolve_labels",
@@ -1503,95 +1512,139 @@ def write_diff_output(
 
 
 def load_mapping(path: Path | str) -> IdMappingSet:
-    """Load an ID mapping set from a pysec2pri TSV file.
+    """Load an ID mapping set from an SSSOM TSV file.
 
-    Accepts the ``sec2pri`` TSV format (columns ``subject_id``, ``object_id``,
-    ``predicate_id``, ``mapping_cardinality``) and the full SSSOM TSV format
-    (comment-prefixed metadata lines are skipped automatically).
+    Produces the same :class:`~pysec2pri.parsers.base.IdMappingSet` a fresh
+    parse would, ready to pass to :func:`resolve_ids`.
 
     Args:
-        path: Path to the TSV file to load.
-
-    Returns:
-        An :class:`~pysec2pri.parsers.base.IdMappingSet` populated from the
-        file, ready to pass to :func:`resolve_ids`.
+        path: Path to the SSSOM TSV file to load.
     """
-    import pandas as pd
-    from sssom_schema import Mapping
+    from mapkgsutils.exports import read_sssom
 
-    path = Path(path)
-    df = pd.read_csv(path, sep="\t", dtype=str, comment="#")
-    ms = IdMappingSet(
-        mapping_set_id=str(path),
-        license="https://creativecommons.org/licenses/by/4.0/",
-    )
-    mappings: list[Mapping] = []
-    for _, row in df.iterrows():
-        m = Mapping(
-            subject_id=row.get("subject_id") or "",
-            object_id=row.get("object_id") or "",
-            predicate_id=row.get("predicate_id") or "",
-            mapping_justification=row.get("mapping_justification")
-            or "semapv:BackgroundKnowledgeBasedMatching",
-            mapping_cardinality=row.get("mapping_cardinality") or None,
-        )
-        mappings.append(m)
-    ms.mappings = mappings
-    return ms
+    return read_sssom(path, mapping_set_class=IdMappingSet, on="id")
 
 
 def load_label_mapping(path: Path | str) -> LabelMappingSet:
-    """Load a label/label mapping set from a pysec2pri TSV file.
+    """Load a label mapping set from an SSSOM TSV file.
 
-    Accepts two column-name conventions:
-
-    - **New** (``label_sec2pri`` tabular output): ``secondary_id``,
-      ``secondary_label``, ``primary_id``, ``primary_label``,
-      ``predicate_id``, ``mapping_cardinality``.
-    - **Legacy** (SSSOM or old tabular output): ``subject_id``,
-      ``subject_label``, ``object_id``, ``object_label``, ``predicate_id``.
-
-    Full SSSOM TSV (comment-prefixed metadata lines) is also accepted.
+    Produces the same :class:`~pysec2pri.parsers.base.LabelMappingSet` a fresh
+    parse would, ready to pass to :func:`resolve_labels`.
 
     Args:
-        path: Path to the TSV file to load.
-
-    Returns:
-        A :class:`~pysec2pri.parsers.base.LabelMappingSet` populated from
-        the file, ready to pass to :func:`resolve_labels`.
+        path: Path to the SSSOM TSV file to load.
     """
-    import pandas as pd
-    from sssom_schema import Mapping
+    from mapkgsutils.exports import read_sssom
 
-    path = Path(path)
-    df = pd.read_csv(path, sep="\t", dtype=str, comment="#")
-    ms = LabelMappingSet(
-        mapping_set_id=str(path),
-        license="https://creativecommons.org/licenses/by/4.0/",
-    )
+    return read_sssom(path, mapping_set_class=LabelMappingSet, on="label")
 
-    def _col(row: pd.Series, *names: str) -> str | None:
-        for name in names:
-            val = row.get(name)
-            if val and str(val).strip():
-                return str(val).strip()
-        return None
 
-    mappings: list[Mapping] = []
-    for _, row in df.iterrows():
-        m = Mapping(
-            subject_id=_col(row, "secondary_id", "subject_id") or "",
-            subject_label=_col(row, "secondary_label", "subject_label"),
-            object_id=_col(row, "primary_id", "object_id") or "",
-            object_label=_col(row, "primary_label", "object_label"),
-            predicate_id=_col(row, "predicate_id") or "",
-            mapping_justification=_col(row, "mapping_justification")
-            or "semapv:BackgroundKnowledgeBasedMatching",
-            mapping_cardinality=_col(row, "mapping_cardinality"),
-        )
-        mappings.append(m)
-    ms.mappings = mappings
-    return ms
+def load_chebi(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load a ChEBI SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import ChEBIParser
+
+    return ChEBIParser().load(path, mapping_type=mapping_type)
+
+
+def load_ensembl(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load an Ensembl SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import EnsemblParser
+
+    return EnsemblParser().load(path, mapping_type=mapping_type)
+
+
+def load_hgnc(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load an HGNC SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import HGNCParser
+
+    return HGNCParser().load(path, mapping_type=mapping_type)
+
+
+def load_ncbi(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load an NCBI SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import NCBIParser
+
+    return NCBIParser().load(path, mapping_type=mapping_type)
+
+
+def load_uniprot(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load a UniProt SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import UniProtParser
+
+    return UniProtParser().load(path, mapping_type=mapping_type)
+
+
+def load_vgnc(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load a VGNC SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import VGNCParser
+
+    return VGNCParser().load(path, mapping_type=mapping_type)
+
+
+def load_hmdb(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load an HMDB metabolite SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import HMDBMetaboliteParser
+
+    return HMDBMetaboliteParser().load(path, mapping_type=mapping_type)
+
+
+def load_hmdb_proteins(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load an HMDB protein SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import HMDBProteinParser
+
+    return HMDBProteinParser().load(path, mapping_type=mapping_type)
+
+
+def load_wikidata(path: Path | str, *, mapping_type: str | None = None) -> BaseMappingSet:
+    """Load a Wikidata SSSOM file into the proper mapping set object.
+
+    Args:
+        path: Path to the SSSOM TSV file.
+        mapping_type: ``"id"``/``"label"`` to force the class, else inferred.
+    """
+    from pysec2pri.parsers import WikidataParser
+
+    return WikidataParser().load(path, mapping_type=mapping_type)
 
 
 def resolve_ids(

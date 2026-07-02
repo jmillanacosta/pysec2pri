@@ -129,6 +129,15 @@ pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
 pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
 ```
 
+In Python, `load_<datasource>` reads a written SSSOM file back into the same
+`IdMappingSet`/`LabelMappingSet`:
+
+```python
+from pysec2pri import load_hgnc, update_ids
+hgnc_ms = load_hgnc("hgnc_115_sssom.tsv")
+df_with_new_column = update_ids(mapping_set=hgnc_ms, ids=df, at="gene")
+```
+
 Ambiguous mappings (where a deprecated ID or label serves as a recommended for
 another entity) are not resolved, but flagged for users to solve them manually.
 If the input file has a column of known aliases or synonyms for each row, pass
@@ -271,15 +280,15 @@ crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own cross
 ### Consolidating mapping dates across releases
 
 A single release snapshot only presents each mapping's _last-seen_ date.
-`consolidate` builds a first-seen-date index by walking a datasource's
-historical archive (or, where the parser already exposes a real per-row date
-such as HGNC's `date_symbol_changed`, a single fast pass) and writes it back out
-as a real SSSOM mapping set whose `mapping_date` is each mapping's true first
-appearance:
+`consolidate` builds a first-seen-date index and writes it back out as a real
+SSSOM mapping set whose `mapping_date` is each mapping's true first appearance.
+The path is chosen automatically: datasources with a versioned archive are
+walked release by release, while those without one (NCBI, VGNC) are covered in a
+single fast pass over the current release:
 
 ```bash
-pysec2pri chebi consolidate --mode release   # walks ~250 ChEBI releases; slow, run as a one-off
-pysec2pri hgnc consolidate --mode date       # fast: uses HGNC's own per-row date
+pysec2pri chebi consolidate   # walks ~250 ChEBI releases (versioned archive); slow, run as a one-off
+pysec2pri ncbi consolidate    # single fast pass (no versioned archive)
 ```
 
 Supported for `chebi`, `ensembl`, `hgnc`, `ncbi`, `uniprot`, and `vgnc`. Ensembl
