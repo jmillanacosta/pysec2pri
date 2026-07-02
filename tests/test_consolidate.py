@@ -138,12 +138,10 @@ class TestConsolidateMappingDatesValidation:
         [
             ({"datasource": "not-a-real-source"}, "Unsupported datasource"),
             ({"datasource": "uniprot", "mapping_sets": "labels"}, "does not support mapping_sets"),
-            ({"datasource": "chebi", "mode": "bogus"}, "mode must be"),
-            ({"datasource": "ncbi", "mode": "release"}, "no versioned archive"),
         ],
     )
     def test_bad_arguments_raise(self, kwargs: dict[str, Any], match: str) -> None:
-        """Unknown datasource/mapping_sets/mode, and release mode on an unarchived source."""
+        """An unknown datasource or an unsupported mapping_sets for it is rejected."""
         with pytest.raises(ValueError, match=match):
             consolidate_mapping_dates(**kwargs)
 
@@ -153,16 +151,20 @@ class TestConsolidateMappingDatesValidation:
             assert ds in consolidate_module._SUPPORTED_MAPPING_SETS
 
 
-class TestConsolidateByRelease:
-    """Historical-walk 'release' mode, fully monkeypatched (no network)."""
+class TestConsolidateDispatch:
+    """consolidate_mapping_dates picks its path by data availability, not a mode flag.
 
-    def test_first_and_last_seen_tracked_across_versions(
+    The walk/single-parse mechanics themselves live in (and are tested by)
+    mapkgsutils; here we only assert pysec2pri routes each datasource to the
+    right one and wires the arguments through.
+    """
+
+    def test_versioned_datasource_walks_releases(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A mapping's first_seen is its earliest version; last_seen keeps bumping."""
-        records_by_version = {"1": ["a", "b"], "2": ["b", "c"], "3": ["c"]}
-
-        _FakeDownloader.versions = ["1", "2", "3"]
+        """A datasource with a versioned archive walks releases for first/last-seen."""
+        records_by_version = {"1": ["a", "b"], "2": ["b", "c"]}
+        _FakeDownloader.versions = ["1", "2"]
         monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
         monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
         monkeypatch.setattr(
@@ -175,127 +177,26 @@ class TestConsolidateByRelease:
 
         cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
-
-        assert records["a"]["first_seen_version"] == "1"
-        assert records["a"]["last_seen_version"] == "1"
         assert records["b"]["first_seen_version"] == "1"
         assert records["b"]["last_seen_version"] == "2"
-        assert records["c"]["first_seen_version"] == "2"
-        assert records["c"]["last_seen_version"] == "3"
 
-        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "ids")
-        assert json.loads(meta_path.read_text())["last_version"] == "3"
-
-    def test_resume_skips_seen_versions_unless_forced(
+    def test_unarchived_datasource_single_parses_keeping_undated_rows(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A second run re-scans nothing; ``force=True`` re-scans everything."""
-        seen_versions: list[str] = []
-
-        _FakeDownloader.versions = ["1", "2"]
-        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-
-        def _run(
-            datasource: str, version: str, mapping_sets: str, **kwargs: object
-        ) -> _FakeMappingSet:
-            seen_versions.append(version)
-            return _FakeMappingSet(["a"])
-
-        monkeypatch.setattr(consolidate_module, "_run_one_version", _run)
-
-        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
-        assert seen_versions == ["1", "2"]
-
-        seen_versions.clear()
-        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
-        assert seen_versions == []
-
-        seen_versions.clear()
-        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False, force=True)
-        assert seen_versions == ["1", "2"]
-
-    def test_failed_version_is_skipped_not_fatal(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A per-version exception is logged and skipped; later versions still merge."""
-        _FakeDownloader.versions = ["1", "2", "3"]
-        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-
-        def _run(
-            datasource: str, version: str, mapping_sets: str, **kwargs: object
-        ) -> _FakeMappingSet:
-            if version == "2":
-                raise ValueError("simulated parse failure")
-            return _FakeMappingSet(["a"] if version == "1" else ["a", "d"])
-
-        monkeypatch.setattr(consolidate_module, "_run_one_version", _run)
-
-        cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
-        records = consolidate_module._read_cache(cache_path)
-
-        assert records["a"]["first_seen_version"] == "1"
-        assert records["a"]["last_seen_version"] == "3"
-        assert records["d"]["first_seen_version"] == "3"
-
-        meta_path = consolidate_module._meta_path(tmp_path, "chebi", "ids")
-        assert json.loads(meta_path.read_text())["last_version"] == "3"
-
-    def test_unresolvable_release_date_stores_empty_not_the_version_label(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When no real release date is found, the version number is not stored as a date."""
-        _FakeDownloader.versions = ["183"]
-        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", lambda *a, **kw: None)
+        """A datasource with no versioned archive caches the full current set in one parse."""
         monkeypatch.setattr(
             consolidate_module,
             "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
+            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
+                ["dated", "undated"], dates={"dated": "2010-05-12"}
+            ),
         )
 
-        cache_path, _ = consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates("ncbi", cache_dir=tmp_path, show_progress=False)
         records = consolidate_module._read_cache(cache_path)
-
-        assert records["a"]["first_seen_version"] == "183"
-        assert records["a"]["first_seen_date"] == ""
-        assert records["a"]["last_seen_date"] == ""
-
-    def test_works_for_any_versioned_datasource_not_just_chebi(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """HGNC (a second versioned datasource) walks the same generic code path."""
-        _FakeDownloader.versions = ["2024-01-01", "2024-04-01"]
-        monkeypatch.setattr("pysec2pri.downloads.HGNCDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-        monkeypatch.setattr(
-            consolidate_module,
-            "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["x"]),
-        )
-
-        cache_path, _ = consolidate_mapping_dates("hgnc", cache_dir=tmp_path, show_progress=False)
-        records = consolidate_module._read_cache(cache_path)
-        assert records["x"]["first_seen_version"] == "2024-01-01"
-        assert records["x"]["last_seen_version"] == "2024-04-01"
-
-    def test_output_writes_consolidated_sssom_to_custom_path(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``output=`` also writes the consolidated mapping set to the given path."""
-        _FakeDownloader.versions = ["1", "2"]
-        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-        monkeypatch.setattr(
-            consolidate_module,
-            "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
-        )
-
-        out = tmp_path / "subdir" / "custom_consolidated.sssom.tsv"
-        consolidate_mapping_dates("chebi", cache_dir=tmp_path, show_progress=False, output=out)
-        assert out.exists()
+        assert set(records) == {"dated", "undated"}  # undated row kept, not dropped
+        assert records["dated"]["first_seen_date"] == "2010-05-12"
+        assert records["undated"]["first_seen_date"] == ""
 
 
 class TestBuildConsolidatedMappingSet:
@@ -326,76 +227,6 @@ class TestBuildConsolidatedMappingSet:
         )
 
         assert mapping_set.mappings[0].mapping_date is None
-
-
-class TestConsolidateByDate:
-    """Single-pass 'date' mode, fully monkeypatched (no network)."""
-
-    def test_uses_real_per_row_date_directly(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When real per-row dates exist, they're captured without any historical walk."""
-        monkeypatch.setattr(
-            consolidate_module,
-            "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
-                ["a", "b"], dates={"a": "1996-03-01", "b": "2010-05-12"}
-            ),
-        )
-
-        cache_path, _ = consolidate_mapping_dates(
-            "hgnc", mode="date", cache_dir=tmp_path, show_progress=False
-        )
-        records = consolidate_module._read_cache(cache_path)
-        assert records["a"]["first_seen_date"] == "1996-03-01"
-        assert records["b"]["first_seen_date"] == "2010-05-12"
-
-    def test_caches_full_set_including_undated_rows(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """'date' mode caches every mapping, not just the dated subset.
-
-        HGNC labels mix dated previous-symbol mappings with undated alias
-        mappings; the full set must be cached (undated rows with empty date),
-        so long as at least one real per-row date exists.
-        """
-        monkeypatch.setattr(
-            consolidate_module,
-            "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(
-                ["dated", "alias1", "alias2"], dates={"dated": "2010-05-12"}
-            ),
-        )
-
-        cache_path, _ = consolidate_mapping_dates(
-            "hgnc", mode="date", mapping_sets="labels", cache_dir=tmp_path, show_progress=False
-        )
-        records = consolidate_module._read_cache(cache_path)
-        assert set(records) == {"dated", "alias1", "alias2"}
-        assert records["dated"]["first_seen_date"] == "2010-05-12"
-        assert records["alias1"]["first_seen_date"] == ""
-        assert records["alias2"]["first_seen_date"] == ""
-
-    def test_falls_back_to_release_with_warning_when_no_dates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """ChEBI never produces real per-row dates: 'date' mode must warn and use 'release'."""
-        _FakeDownloader.versions = ["1"]
-        monkeypatch.setattr("pysec2pri.downloads.ChEBIDownloader", _FakeDownloader)
-        monkeypatch.setattr("pysec2pri.download.resolve_release_date", _fake_release_date)
-        monkeypatch.setattr(
-            consolidate_module,
-            "_run_one_version",
-            lambda datasource, version, mapping_sets, **kwargs: _FakeMappingSet(["a"]),
-        )
-
-        with pytest.warns(UserWarning, match="falling back to mode='release'"):
-            cache_path, _ = consolidate_mapping_dates(
-                "chebi", mode="date", cache_dir=tmp_path, show_progress=False
-            )
-
-        records = consolidate_module._read_cache(cache_path)
-        assert records["a"]["first_seen_version"] == "1"
 
 
 class TestLabelTransitions:

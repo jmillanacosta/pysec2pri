@@ -181,7 +181,7 @@ mappings.
 ### Aliases / synonyms
 
 Alias mappings use `oboInOwl:hasExactSynonym`. The alias is the `subject_label`
-and the authoritative name is the `object_label`/`object_id`.
+and the primary name is the `object_label`/`object_id`.
 
 ```mermaid
 flowchart LR

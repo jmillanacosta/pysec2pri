@@ -638,7 +638,6 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
     """Return a decorated (but not yet click.command-wrapped) ``consolidate`` callable."""
 
     def _cmd(
-        mode: str,
         mapping_sets: str,
         cache_dir: Path | None,
         force: bool,
@@ -651,12 +650,11 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
         extras = ", ".join(f"{k}={v}" for k, v in extra_kwargs.items() if v is not None)
         click.echo(
             f"Consolidating {cfg_id.upper()} mapping dates "
-            f"(mode={mode}{', ' + extras if extras else ''}, {mapping_sets})..."
+            f"({extras + ', ' if extras else ''}{mapping_sets})..."
         )
         try:
             path, _ = consolidate_mapping_dates(
                 cfg_id,
-                mode=mode,
                 cache_dir=cache_dir,
                 mapping_sets=mapping_sets,
                 show_progress=not no_progress,
@@ -669,17 +667,6 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
         click.echo(f"Wrote consolidated mapping set -> {output or _sssom_output_path(path)}")
 
     decorators: list[Callable[..., Any]] = [
-        click.option(
-            "--mode",
-            default="release",
-            show_default=True,
-            type=click.Choice(["release", "date"]),
-            help=(
-                "'release': walk every historical release for the first-seen version/date. "
-                "'date': single pass using the source's own per-row date (falls back to "
-                "'release' with a warning if the source has none)."
-            ),
-        ),
         *extra_opts,
         click.option(
             "--mapping-sets",
@@ -727,12 +714,13 @@ def _register_consolidate_commands(parent: click.Group) -> None:
                     "Build/update the per-mapping first-seen-date index, written as a real "
                     "SSSOM mapping set whose mapping_date is each mapping's date of first "
                     "appearance.\n\n"
-                    "In 'release' mode (default), walks every historical release once to "
-                    "discover the earliest release each mapping appeared in. This is slow "
-                    "and network-heavy (~250 releases for ChEBI); meant to be run as a "
-                    "manual/one-off operation, not as part of normal mapping generation. "
-                    "In 'date' mode, a single current-release pass captures the source's "
-                    "own per-row date directly (fast)."
+                    "For datasources with a versioned archive (ChEBI, Ensembl, HGNC, "
+                    "UniProt), walks every historical release once to discover the earliest "
+                    "release each mapping appeared in. This is slow and network-heavy (~250 "
+                    "releases for ChEBI); meant to be run as a manual/one-off operation, not "
+                    "as part of normal mapping generation. For datasources without one "
+                    "(NCBI, VGNC), a single current-release pass captures the source's own "
+                    "per-row date directly (fast)."
                 ),
             )(raw_cmd)
         )

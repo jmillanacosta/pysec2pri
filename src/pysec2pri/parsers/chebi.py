@@ -190,8 +190,7 @@ class ChEBIParser(BaseParser):
         Reads ``compounds.tsv`` (TSV releases >= 245) to extract every current
         ChEBI compound ID.  The returned mapping set has an empty ``mappings``
         list; its ``_primary_ids`` store is populated with every current ChEBI
-        ID (CHEBI: prefixed) so that ``to_pri_ids()`` produces the authoritative
-        complete list.
+        ID (CHEBI: prefixed) so that ``to_pri_ids()`` produces the complete list.
 
         Args:
             input_path: Path to a directory containing ``compounds.tsv``, or
@@ -496,7 +495,7 @@ def _parse_names_tsv(
 
     Format: id|compound_id|name|type|status_id|adapted|language_code|ascii_name
 
-    The authoritative primary (canonical) name for each compound is taken from
+    The true primary (canonical) name for each compound is taken from
     the ``name`` column of ``compounds.tsv``: the same value displayed on the
     ChEBI website and stored as the top-level label in the ChEBI ontology.
     Every entry in ``names.tsv`` that differs from that canonical name is
@@ -526,7 +525,7 @@ def _parse_names_tsv(
             "Pass the path to compounds.tsv."
         )
 
-    # Load canonical names from compounds.tsv (ChEBI-authoritative primary label)
+    # Load canonical names from compounds.tsv (ChEBI primary label)
     cpd_cols = ["id", "name", "stars"] if subset == "3star" else ["id", "name"]
     cpd_df = pl.read_csv(
         compounds_path,

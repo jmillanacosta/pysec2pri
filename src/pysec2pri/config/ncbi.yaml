@@ -165,5 +165,4 @@ xref_sources:
       refseq: "RefSeq IDs"
       uniprot: "UniProt ID(supplied by UniProt)"
     note:
-      "Source of truth for cross-references varies; this is a suggested default,
-      not authoritative."
+      "Source of truth for cross-references varies; this is a suggested default"

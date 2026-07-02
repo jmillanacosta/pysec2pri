@@ -40,7 +40,6 @@ import json
 import os
 import shutil
 import tempfile
-import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -60,7 +59,7 @@ __all__ = [
 ]
 
 # Datasources this module knows how to download+parse per release.
-# NCBI and VGNC have no versioned archive, so only mode="date" applies to them.
+# NCBI and VGNC have no versioned archive, so they take the single-parse path.
 SUPPORTED_DATASOURCES = ("chebi", "ensembl", "hgnc", "ncbi", "uniprot", "vgnc")
 
 # mapping_sets kinds each datasource's parser actually supports.
@@ -100,7 +99,8 @@ def _uniprot_versions(**kwargs: Any) -> list[str]:
     return UniProtDownloader().list_versions()
 
 
-# Datasources with a versioned archive that can be walked for mode="release".
+# Datasources with a versioned archive that can be walked release by release.
+# Datasources absent here (NCBI, VGNC) take the single-parse path instead.
 _LIST_VERSIONS_FNS: dict[str, Callable[..., list[str]]] = {
     "chebi": _chebi_versions,
     "ensembl": _ensembl_versions,
@@ -165,53 +165,6 @@ def _save_optional_output(mapping_set: BaseMappingSet, output: Path | None) -> N
     """Write *mapping_set* to *output* as SSSOM when an output path is given."""
     if output is not None:
         mapping_set.save("sssom", output)
-
-
-def _consolidate_by_date_full(
-    cache_path: Path,
-    meta_path: Path,
-    *,
-    run_one_version: Callable[[], Any],
-) -> bool:
-    """Date mode that caches the *full* mapping set, not just dated rows.
-
-    :func:`mapkgsutils.consolidate.consolidate_by_date` keeps only rows that
-    carry a real per-row ``mapping_date`` and drops the rest, so a single
-    parse of e.g. HGNC labels would cache only its ~12k dated previous-symbol
-    mappings and lose the ~48k alias mappings. This builds a complete cache
-    from one (current) parse: every mapping is kept, stamped with its own
-    per-row date when present and left undated otherwise (exactly how the
-    release walk treats an unresolvable date).
-
-    Returns ``True`` (cache written) when the parse yields at least one real
-    per-row date, and ``False`` (cache untouched) when it yields none -- so
-    date-less sources (ChEBI, UniProt) still fall back to a release walk
-    rather than caching a fully undated set.
-    """
-    mapping_set = run_one_version()
-    mappings = mapping_set.mappings or []
-    if not any(getattr(m, "mapping_date", None) for m in mappings):
-        return False
-
-    version_label = str(getattr(mapping_set, "mapping_set_version", None) or "current")
-    records: dict[str, dict[str, str]] = {}
-    for m in mappings:
-        # record_id is release-scoped; its trailing 16 hex chars are the
-        # version-independent pair hash (see mapkgsutils.parsers.base.pair_hash).
-        pair_key = str(getattr(m, "record_id", None) or "")[-16:]
-        if not pair_key:
-            continue
-        date_str = str(m.mapping_date) if getattr(m, "mapping_date", None) else ""
-        records[pair_key] = {
-            "first_seen_version": version_label,
-            "first_seen_date": date_str,
-            "last_seen_version": version_label,
-            "last_seen_date": date_str,
-            "fields_json": _consolidate._mapping_fields_json(m),
-        }
-    _write_cache(cache_path, records)
-    _write_meta(meta_path, version_label)
-    return True
 
 
 def load_mapping_dates(
@@ -435,7 +388,6 @@ def _write_consolidated_sssom(
 def consolidate_mapping_dates(
     datasource: str,
     *,
-    mode: str = "release",
     cache_dir: Path | None = None,
     mapping_sets: str = "ids",
     show_progress: bool = True,
@@ -445,40 +397,35 @@ def consolidate_mapping_dates(
 ) -> tuple[Path, BaseMappingSet]:
     """Build/update the first-seen-date index for *datasource*.
 
-    Two strategies, selected via *mode*:
+    Collects every mapping using all available provenance. The walk shape is
+    chosen automatically by data availability, not by a requested mode:
 
-    - ``"release"``: walk every historical release of *datasource* once
-      (oldest first, resuming from the last completed version unless
-      *force* is set). For every mapping seen, records the version/date it
-      first appeared and keeps bumping the version/date it was last seen.
-      This is a slow, network-heavy operation (e.g. ~250 releases for ChEBI) and
-      is meant to be run manually/as a one-off, not as part of normal
-      mapping generation. Requires a versioned archive (ChEBI, HGNC,
-      UniProt); raises :class:`ValueError` for datasources without one
-      (e.g. NCBI).
-    - ``"date"``: a single (current) parse, caching the *full* mapping set
-      with whatever real per-row ``mapping_date`` the datasource's parser
-      already produces (e.g. HGNC's ``date_symbol_changed``, NCBI's
-      ``Discontinue_Date``); rows without such a date are still cached, just
-      left undated. Fast -- no historical walk. If *datasource* never
-      produces a real per-row date at all (ChEBI, UniProt), falls back to
-      ``"release"`` mode and warns the user.
+    - Datasources **with** a versioned archive (ChEBI, Ensembl, HGNC,
+      UniProt): walk every historical release once (oldest first, resuming
+      from the last completed version unless *force*). For every mapping
+      seen, records the version/date it first appeared and keeps bumping the
+      version/date it was last seen. Slow and network-heavy (~250 releases
+      for ChEBI); meant to be run manually/as a one-off.
+    - Datasources **without** one (NCBI, VGNC): a single current parse
+      caching the *full* mapping set — every mapping kept, stamped with its
+      own per-row ``mapping_date`` when the parser provides one and left
+      undated otherwise. Fast, no historical walk.
 
-    Either way, alongside the internal cache file this also writes a
-    companion real SSSOM mapping set (see :func:`_sssom_output_path`) where
-    every row's ``mapping_date`` is its true first-seen date, rather than
-    whichever release happened to be parsed last.
+    Alongside the internal cache file this also writes a companion real SSSOM
+    mapping set (see :func:`_sssom_output_path`) where each row's
+    ``mapping_date`` is its per-row date when present, else its first-seen
+    release date — distinct from the first-seen release version carried in
+    ``subject_source_version``/``object_source_version``.
 
     Args:
         datasource: One of :data:`SUPPORTED_DATASOURCES`.
-        mode: ``"release"`` or ``"date"``.
         cache_dir: Directory to write the cache file. Defaults to
             :func:`default_cache_dir`.
         mapping_sets: ``"ids"`` or ``"labels"``.
         show_progress: Whether to show a progress bar over releases
-            (``"release"`` mode only).
+            (versioned-archive datasources only).
         force: Re-scan every release from scratch, ignoring any existing
-            cache/resume state (``"release"`` mode only).
+            cache/resume state (versioned-archive datasources only).
         output: Optional path to also write the consolidated SSSOM mapping
             set to. The internal cache-adjacent copy (see
             :func:`_sssom_output_path`) is always written; when *output* is
@@ -493,13 +440,9 @@ def consolidate_mapping_dates(
         written alongside it) and the in-memory consolidated mapping set.
 
     Raises:
-        ValueError: For an unknown *mode*, an unsupported *datasource*, an
-            unsupported *mapping_sets* for *datasource*, or
-            ``mode="release"`` against a datasource with no versioned
-            archive.
+        ValueError: For an unsupported *datasource* or an unsupported
+            *mapping_sets* for *datasource*.
     """
-    if mode not in ("release", "date"):
-        raise ValueError(f"mode must be 'release' or 'date', got {mode!r}")
     if datasource not in SUPPORTED_DATASOURCES:
         raise ValueError(
             f"Unsupported datasource: {datasource!r}. Supported: {SUPPORTED_DATASOURCES}"
@@ -524,41 +467,36 @@ def consolidate_mapping_dates(
     cache_path = _cache_path(cache_dir, datasource, mapping_sets, **kwargs)
     meta_path = _meta_path(cache_dir, datasource, mapping_sets, **kwargs)
 
-    if mode == "date":
-        got_dates = _consolidate_by_date_full(
-            cache_path,
-            meta_path,
-            run_one_version=lambda: _run_one_version(datasource, None, mapping_sets, **kwargs),
-        )
-        if got_dates:
-            _, mapping_set = _write_consolidated_sssom(
-                datasource, mapping_sets, cache_path, meta_path
-            )
-            _save_optional_output(mapping_set, output)
-            return cache_path, mapping_set
-        msg = (
-            f"{datasource!r} has no parseable per-row mapping dates; "
-            "falling back to mode='release'."
-        )
-        logger.warning(msg)
-        warnings.warn(msg, UserWarning, stacklevel=2)
+    def _run(version: str | None) -> Any:
+        return _run_one_version(datasource, version, mapping_sets, **kwargs)
 
     list_versions_fn = _LIST_VERSIONS_FNS.get(datasource)
     if list_versions_fn is None:
-        raise ValueError(f"{datasource!r} has no versioned archive; only mode='date' is supported.")
+        # No versioned archive (NCBI, VGNC): single current parse, full set.
+        _consolidate.consolidate(
+            cache_path,
+            meta_path,
+            label=datasource,
+            run_one_version=_run,
+            show_progress=show_progress,
+            force=force,
+        )
+    else:
+        # Versioned archive: walk every historical release for first-seen dates.
+        from pysec2pri.download import resolve_release_date
 
-    from pysec2pri.download import resolve_release_date
+        fn = list_versions_fn
+        _consolidate.consolidate(
+            cache_path,
+            meta_path,
+            label=datasource,
+            run_one_version=_run,
+            list_versions=lambda: fn(**kwargs),
+            resolve_release_date=lambda v: resolve_release_date(datasource, v, **kwargs),
+            show_progress=show_progress,
+            force=force,
+        )
 
-    _consolidate.consolidate_by_release(
-        cache_path,
-        meta_path,
-        label=datasource,
-        list_versions=lambda: list_versions_fn(**kwargs),
-        run_one_version=lambda v: _run_one_version(datasource, v, mapping_sets, **kwargs),
-        resolve_release_date=lambda v: resolve_release_date(datasource, v, **kwargs),
-        show_progress=show_progress,
-        force=force,
-    )
     _, mapping_set = _write_consolidated_sssom(datasource, mapping_sets, cache_path, meta_path)
     _save_optional_output(mapping_set, output)
     return cache_path, mapping_set
@@ -632,8 +570,8 @@ def build_label_history(
     previous release's, oldest to newest. Network-heavy and resumable --
     meant to be run on demand, not as part of normal mapping generation
     (mirrors the release-walk pattern in
-    :func:`mapkgsutils.consolidate.consolidate_by_release`, but tracks a
-    carried label map instead of first/last-seen dates).
+    :func:`mapkgsutils.consolidate.consolidate`, but tracks a carried label
+    map instead of first/last-seen dates).
 
     Args:
         datasource: Currently only ``"ensembl"`` is supported.
@@ -709,7 +647,7 @@ def build_label_history(
             shutil.rmtree(tmpdir, ignore_errors=True)
 
         release_date = resolve_release_date(datasource, v, species=species)
-        # Unlike consolidate_by_release's plain-dict cache, these rows become
+        # Unlike the consolidate walk's plain-dict cache, these rows become
         # real Mapping objects -- mapping_date must be a valid date or None,
         # never the raw (non-date-shaped) version string.
         date_str = release_date.date().isoformat() if release_date else None
