@@ -25,9 +25,8 @@ This parser extracts:
    detection and ``to_pri_labels()`` stay scoped to one species' namespace
    instead of flagging cross-species homonyms as ambiguous. Passing
    :data:`ALL_SPECIES` processes every species together instead, in which
-   case a shared symbol *is* genuinely ambiguous (there's no other context
-   to tell the species apart) and gets flagged accordingly -- that's
-   ``_annotate_ambiguous_mappings`` doing its job, not a bug.
+   case a shared symbol is really ambiguous (there's no other context
+   to tell the species apart) and gets flagged accordingly.
 
 Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """

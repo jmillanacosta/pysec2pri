@@ -5,7 +5,7 @@ Parsers
 Database-specific parsers that produce SSSOM-compliant MappingSets.
 
 All parsers inherit from :class:`~pysec2pri.parsers.base.BaseParser`
-and return :class:`~pysec2pri.parsers.base.Sec2PriMappingSet` objects.
+and return :class:`~pysec2pri.parsers.base.BaseMappingSet` objects.
 
 Anybody can add a new database by adding the necessary config yaml,
 parser class, and a DataSourceConfig entry in constants.py.

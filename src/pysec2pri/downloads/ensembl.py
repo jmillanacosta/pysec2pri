@@ -375,8 +375,16 @@ def urls_and_date(
         urls = _get_ensembl_urls_for_version(version, species=species)
         logger.info("Ensembl version %s (species %s): %s", version, species, urls)
     else:
-        release_info = check_ensembl_release()
-        urls = release_info.files
-        release_date = release_info.release_date
-        logger.info("Ensembl release %s: %s", release_info.version, urls)
+        # The release number is global across species, but the URLs (and the
+        # resolved release date) are species-specific, so resolve the latest
+        # version and build URLs for the requested species rather than reusing
+        # check_ensembl_release()'s human-only URLs.
+        versions = EnsemblDownloader(show_progress=False).list_versions()
+        if not versions:
+            raise ValueError("Could not find Ensembl releases on the FTP server")
+        version = versions[-1]
+        urls = _get_ensembl_urls_for_version(version, species=species)
+        check_url = urls.get("stable_id_event")
+        release_date = get_file_last_modified(check_url) if check_url else None
+        logger.info("Ensembl release %s (species %s): %s", version, species, urls)
     return urls, release_date

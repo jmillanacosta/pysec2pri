@@ -244,8 +244,7 @@ def generate_hgnc_primary_ids(
     Only the HGNC complete set file is downloaded/read.  The returned mapping
     set has an empty ``mappings`` list; its ``_primary_ids`` store is
     populated with every current HGNC ID so that ``to_pri_ids()`` produces
-    the authoritative complete list, not just the subset of primaries that
-    happen to have an associated secondary.
+    the complete list.
 
     Args:
         input_path: Local HGNC complete set TSV. Auto-downloaded if ``None``.
@@ -1112,9 +1111,7 @@ def generate_ensembl_label_history(
     previous-symbol -> current-symbol transitions are derived by diffing
     each release's primary-label snapshot per stable ID. Delegates to
     :func:`pysec2pri.consolidate.build_label_history`, which walks every
-    historical release (or a bounded range) and resumes on re-run. This is
-    a network-heavy, run-on-demand operation, not part of normal
-    single-release generation.
+    historical release (or a bounded range) and resumes on re-run.
 
     Args:
         species: Canonical NCBI taxon ID (default ``9606`` for human).
@@ -2015,15 +2012,10 @@ def crosswalk(
 ) -> dict[str, str] | pd.DataFrame:
     r"""Map a gene identifier from one vocabulary to another, via HGNC.
 
-    A thin convenience wrapper, not a separate resolver: ``frm="symbol"``
-    resolves through :func:`generate_hgnc_labels` +
+    Wrapper: ``frm="symbol"`` resolves through :func:`generate_hgnc_labels` +
     :func:`~pysec2pri.update_ids.update_labels`, so a *previous* HGNC symbol
-    still resolves to its current identity (the temporal aspect) and a
-    genuinely ambiguous symbol is left blank and reported rather than
-    guessed. ``frm`` in ``"ensembl"``, ``"entrez"``, ``"refseq"``, or
-    ``"uniprot"`` resolves through HGNC's own cross-reference crosswalk
-    table, downloaded from the ``xref_sources`` declared in
-    ``config/hgnc.yaml`` unless *xref_mapping* is supplied explicitly.
+    still resolves to its current identity (the temporal aspect) and an ambiguous
+    label is left blank and reported rather than guessed.
 
     Args:
         input_data: A single identifier string, a list of identifier

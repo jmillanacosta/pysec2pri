@@ -7,7 +7,7 @@ Data models extending sssom-schema for secondary-to-primary mappings.
 Mapping Sets
 ============
 
-.. autoclass:: pysec2pri.parsers.base.Sec2PriMappingSet
+.. autoclass:: pysec2pri.parsers.base.BaseMappingSet
     :members:
     :show-inheritance:
 
