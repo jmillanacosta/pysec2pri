@@ -6,6 +6,7 @@ secondary-to-primary mapping files and generating and using the standardized Map
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,7 @@ from mapkgsutils.context import ContextSpec, load_xref_mapping
 
 from pysec2pri.exports import (
     write_json,
+    write_label_sec2pri,
     write_name2synonym,
     write_output,
     write_owl,
@@ -20,9 +22,6 @@ from pysec2pri.exports import (
     write_rdf,
     write_sec2pri,
     write_sssom,
-)
-from pysec2pri.exports import (
-    write_label2prev as write_label_sec2pri,
 )
 
 if TYPE_CHECKING:
@@ -42,48 +41,32 @@ __all__ = [
     "combine_mapping_sets",
     "crosswalk",
     "find_ambiguous",
-    # Need to remove at some point the old functions
-    # (see aliased functions at the bottom)
     "generate_chebi",
-    # Core
-    "generate_chebi_ids",
-    "generate_chebi_labels",
     "generate_chebi_primary_ids",
     "generate_chebi_primary_labels",
     "generate_chebi_synonyms",
     "generate_ensembl",
-    "generate_ensembl_ids",
     "generate_ensembl_label_history",
     "generate_ensembl_labels",
     "generate_ensembl_primary_ids",
     "generate_ensembl_primary_labels",
     "generate_hgnc",
-    "generate_hgnc_ids",
-    "generate_hgnc_labels",
     "generate_hgnc_labels",
     "generate_hgnc_primary_ids",
     "generate_hmdb",
-    "generate_hmdb_ids",
     "generate_hmdb_primary_ids",
     "generate_hmdb_proteins",
-    "generate_hmdb_proteins_ids",
     "generate_ncbi",
-    "generate_ncbi_ids",
-    "generate_ncbi_labels",
     "generate_ncbi_labels",
     "generate_ncbi_primary_ids",
     "generate_ncbi_primary_labels",
     "generate_uniprot",
-    "generate_uniprot_ids",
     "generate_uniprot_primary_ids",
     "generate_vgnc",
-    "generate_vgnc_ids",
     "generate_vgnc_labels",
     "generate_vgnc_primary_ids",
     "generate_vgnc_primary_labels",
     "generate_wikidata",
-    "generate_wikidata_ids",
-    "generate_wikidata_labels",
     "generate_wikidata_labels",
     "list_versions",
     "load_chebi",
@@ -215,11 +198,7 @@ def generate_hgnc(
     """Return HGNC secondary to primary ID mappings.
 
     Downloads the withdrawn and complete set files automatically when
-    ``input_path`` / ``complete_set_path`` are omitted.  The complete set is
-    used to populate the full list of current primary IDs so that
-    :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids` returns the
-    authoritative list (~45 k IDs) rather than just the ~5 k primaries that
-    happen to have a secondary.
+    ``input_path`` / ``complete_set_path`` are omitted.
 
     Args:
         input_path: Local HGNC withdrawn TSV. Auto-downloaded if ``None``.
@@ -340,17 +319,7 @@ def generate_vgnc(
     """Return VGNC secondary to primary ID mappings.
 
     Downloads the withdrawn and gene-set files automatically when
-    ``input_path`` / ``complete_set_path`` are omitted. The withdrawn
-    file's own ``taxon_id`` column is not populated upstream (see
-    :mod:`pysec2pri.parsers.vgnc`), so the *full* set is always parsed
-    first; *species* (when not ``"all"``) then subsets the output by
-    resolving each mapping's primary VGNC ID against the gene-set file.
-    The gene-set file is also used to populate the full list of current
-    primary IDs (for *species*, or across every species when *species* is
-    ``"all"``) so that
-    :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids` returns the
-    authoritative list rather than just the primaries that happen to have a
-    secondary.
+    ``input_path`` / ``complete_set_path`` are omitted, full set is parsed.
 
     Args:
         input_path: Local VGNC withdrawn TSV. Auto-downloaded if ``None``.
@@ -708,9 +677,7 @@ def generate_ncbi(
     Downloads the gene_history file automatically when ``input_path`` is
     omitted.  When ``gene_info_path`` is supplied (or auto-downloaded), the
     full list of current primary IDs is read from ``gene_info`` and stored in
-    ``_primary_ids``, so that :meth:`~pysec2pri.parsers.base.BaseMappingSet.to_pri_ids`
-    returns the authoritative complete set rather than only the subset of
-    primaries that happen to appear in ``gene_history``.
+    ``_primary_ids``.
 
     Args:
         input_path: Local gene_history file. Auto-downloaded if ``None``.
@@ -851,19 +818,6 @@ def _generate_ensembl_all_species(
     show_progress: bool,
 ) -> BaseMappingSet:
     """Process every Ensembl species at *version* and combine into one mapping set.
-
-    Network-heavy: downloads and parses each of Ensembl's ~276 species in
-    turn (one at a time, deleting each species' files before starting the
-    next, so disk usage never exceeds a single species). A per-species
-    failure is logged and skipped rather than aborting the whole run,
-    mirroring :mod:`pysec2pri.consolidate`'s per-release resilience.
-
-    Each individual mapping keeps the ``record_id`` it was parsed with
-    (scoped to its own species, as normal); only the *combined* mapping
-    set's own ``mapping_set_id`` is tagged with the ``"all"`` slug. Because
-    every species is now folded into one mapping set, a symbol shared by
-    two species' genes is correctly flagged ambiguous (there's no longer
-    separate per-species scoping to disambiguate it).
 
     Args:
         kind: ``"ids"`` or ``"labels"``.
@@ -1349,10 +1303,11 @@ def combine_mapping_sets(
         return synonym_mappings  # type: ignore[return-value]
     if synonym_mappings is None:
         return id_mappings
-    combined = list(id_mappings.mappings or [])
-    combined.extend(synonym_mappings.mappings or [])
-    id_mappings.mappings = combined
-    return id_mappings
+    combined_mappings = list(id_mappings.mappings or [])
+    combined_mappings.extend(synonym_mappings.mappings or [])
+    result = copy.copy(id_mappings)
+    result.mappings = combined_mappings
+    return result
 
 
 # Output helpers
@@ -1884,13 +1839,7 @@ def _crosswalk_via_xref(
     to: str,
     decisions: list[DecisionRecord],
 ) -> dict[str, str]:
-    """Resolve each of *tokens* through a flat ``subject_id -> object_*`` crosswalk.
-
-    Unlike the secondary/primary ambiguity handled by
-    :mod:`pysec2pri.update_ids`, a crosswalk table can itself carry more than
-    one distinct target for the same token; that case is also left
-    unresolved (and logged) rather than guessed.
-    """
+    """Resolve each of *tokens* through a flat ``subject_id -> object_*`` crosswalk."""
     from mapkgsutils.context import DecisionRecord
 
     index = xref_mapping.by_subject()
@@ -2065,11 +2014,6 @@ def crosswalk(
 ) -> dict[str, str] | pd.DataFrame:
     r"""Map a gene identifier from one vocabulary to another, via HGNC.
 
-    Wrapper: ``frm="symbol"`` resolves through :func:`generate_hgnc_labels` +
-    :func:`~pysec2pri.update_ids.update_labels`, so a *previous* HGNC symbol
-    still resolves to its current identity (the temporal aspect) and an ambiguous
-    label is left blank and reported rather than guessed.
-
     Args:
         input_data: A single identifier string, a list of identifier
             strings, or a :class:`pandas.DataFrame` (requires *at*).
@@ -2153,20 +2097,3 @@ def find_ambiguous(
         ``comment`` explaining the conflict.
     """
     return mapping_set.find_ambiguous()
-
-
-# The functions here use old names, remove at some point
-
-generate_chebi_ids = generate_chebi
-generate_chebi_labels = generate_chebi_synonyms
-generate_ensembl_ids = generate_ensembl
-generate_hgnc_ids = generate_hgnc
-generate_hgnc_labels = generate_hgnc_labels
-generate_ncbi_ids = generate_ncbi
-generate_ncbi_labels = generate_ncbi_labels
-generate_hmdb_ids = generate_hmdb
-generate_hmdb_proteins_ids = generate_hmdb_proteins
-generate_uniprot_ids = generate_uniprot
-generate_vgnc_ids = generate_vgnc
-generate_wikidata_ids = generate_wikidata
-generate_wikidata_labels = generate_wikidata_labels

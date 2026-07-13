@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from pysec2pri.cli import _make_generate_cmd
@@ -36,10 +37,13 @@ class TestSpeciesInOutputFilename:
     silently overwrite the same default file.
     """
 
-    def test_species_is_folded_into_default_filename(self) -> None:
+    def test_species_is_folded_into_default_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """--species 9615 produces a filename containing "9615", not just the version."""
+        import pysec2pri.api as api
+
+        monkeypatch.setattr(api, "_fake_generate", _fake_generate, raising=False)
         cmd_fn = _make_generate_cmd(
-            "ensembl", "ids", _fake_generate, [click.option("--species", default="9606")]
+            "ensembl", "ids", "_fake_generate", [click.option("--species", default="9606")]
         )
         cmd = click.command(name="ids")(cmd_fn)
 
@@ -49,9 +53,12 @@ class TestSpeciesInOutputFilename:
             assert result.exit_code == 0, result.output
             assert Path("ensembl_ids_9615_115_sssom.tsv").exists()
 
-    def test_no_species_option_omits_species_segment(self) -> None:
+    def test_no_species_option_omits_species_segment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A command with no --species option (e.g. hgnc) keeps the old filename shape."""
-        cmd_fn = _make_generate_cmd("hgnc", "ids", _fake_generate, [])
+        import pysec2pri.api as api
+
+        monkeypatch.setattr(api, "_fake_generate", _fake_generate, raising=False)
+        cmd_fn = _make_generate_cmd("hgnc", "ids", "_fake_generate", [])
         cmd = click.command(name="ids")(cmd_fn)
 
         runner = CliRunner()

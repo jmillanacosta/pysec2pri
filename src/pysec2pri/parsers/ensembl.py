@@ -223,12 +223,7 @@ class EnsemblParser(BaseParser):
         """Species (NCBI taxon ID) the parsed files belong to.
 
         Different species are disjoint datasets at the same release, so the
-        taxon ID is folded into ``mapping_set_id``/``record_id`` (see
-        :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`). When this
-        instance built its mappings via :meth:`parse_label_history`, a
-        trailing ``consolidate`` segment marks the IRI as a derived,
-        cross-release product rather than a single release's parse --
-        ``version`` is then the *last* release that walk consolidated.
+        taxon ID is folded into ``mapping_set_id``/``record_id`` as a slug.
         """
         species_slug = str(self.species) if self.species is not None else None
         if getattr(self, "_is_label_history", False):
@@ -666,36 +661,39 @@ class EnsemblParser(BaseParser):
             LabelMappingSet with ``IAO:0100001`` ("term replaced by") mappings.
         """
         self._is_label_history = True
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        try:
+            m_meta = self.get_mapping_metadata()
+            fixed = {
+                "mapping_justification": m_meta["mapping_justification"],
+                "subject_source": m_meta.get("subject_source"),
+                "object_source": m_meta.get("object_source"),
+                "mapping_tool": m_meta.get("mapping_tool"),
+                "license": m_meta.get("license"),
+            }
 
-        record_ns = self._record_namespace()
-        rows_data: list[dict[str, Any]] = []
-        for stable_id, prev_label, curr_label, mapping_date in transitions:
-            curie_id = f"ENSEMBL:{stable_id}"
-            rows_data.append(
-                {
-                    "object_id": curie_id,
-                    "subject_label": prev_label,
-                    "subject_type": "rdfs literal",
-                    "object_label": curr_label,
-                    "_label_type": "previous",
-                    "mapping_date": mapping_date,
-                    "comment": "Derived from snapshots across releases.",
-                    "record_id": self._record_id(record_ns, curie_id, prev_label),
-                }
+            record_ns = self._record_namespace()
+            rows_data: list[dict[str, Any]] = []
+            for stable_id, prev_label, curr_label, mapping_date in transitions:
+                curie_id = f"ENSEMBL:{stable_id}"
+                rows_data.append(
+                    {
+                        "object_id": curie_id,
+                        "subject_label": prev_label,
+                        "subject_type": "rdfs literal",
+                        "object_label": curr_label,
+                        "_label_type": "previous",
+                        "mapping_date": mapping_date,
+                        "comment": "Derived from snapshots across releases.",
+                        "record_id": self._record_id(record_ns, curie_id, prev_label),
+                    }
+                )
+
+            mappings = self._build_mappings(
+                rows_data, fixed, desc="Building label history", total=len(rows_data)
             )
-
-        mappings = self._build_mappings(
-            rows_data, fixed, desc="Building label history", total=len(rows_data)
-        )
-        return self.create_mapping_set(mappings, mapping_type="label")
+            return self.create_mapping_set(mappings, mapping_type="label")
+        finally:
+            self._is_label_history = False
 
 
 __all__ = ["ALL_SPECIES", "EnsemblParser"]

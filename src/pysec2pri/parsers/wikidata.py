@@ -39,7 +39,7 @@ __all__ = ["WikidataParser", "query_wikidata"]
 def query_wikidata(
     query: str,
     endpoint: str | None = None,
-    timeout: float = 100000.0,
+    timeout: float = 10000.0,
 ) -> pl.DataFrame:
     """Execute a SPARQL query against Wikidata/QLever endpoint.
 
@@ -227,6 +227,8 @@ class WikidataParser(BaseParser):
                 " (test subset)" if self.test_subset else "",
             )
 
+            original_entity = self.entity_type
+            self.entity_type = entity_type
             try:
                 df = query_wikidata(query_str, endpoint=self.endpoint)
 
@@ -234,19 +236,14 @@ class WikidataParser(BaseParser):
                     logger.info("No results for %s", entity_type)
                     continue
 
-                # Temporarily set entity_type for normalization
-                original_entity = self.entity_type
-                self.entity_type = entity_type
-
                 df = self._normalize_ids(df)
                 mappings = self._build_redirect_mappings(df)
                 all_mappings.extend(mappings)
-
-                self.entity_type = original_entity
-
             except Exception as e:
                 logger.warning("Failed to query %s: %s", entity_type, e)
                 continue
+            finally:
+                self.entity_type = original_entity
 
         version = self._resolve_version()
         return self._create_mapping_set(all_mappings, version)
@@ -410,18 +407,6 @@ class WikidataParser(BaseParser):
             .then(pl.lit("WD:") + c.str.split("/").list.last())
             .otherwise(pl.lit("WD:") + c)
         )
-
-    @staticmethod
-    def _normalize_qid(qid: str | None) -> str | None:
-        """Normalize a QID to WD:Qxxx format."""
-        if not qid or qid == "":
-            return None
-        qid = qid.strip()
-        if qid.startswith("WD:"):
-            return qid
-        if "wikidata.org/entity/" in qid:
-            qid = qid.split("/")[-1]
-        return f"WD:{qid}"
 
     def _build_redirect_mappings(self, df: pl.DataFrame) -> list[Mapping]:
         col_map = get_column_mapping(self.entity_type)

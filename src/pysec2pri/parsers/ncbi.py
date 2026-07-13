@@ -77,16 +77,6 @@ class NCBIParser(BaseParser):
         """
         return getattr(self, "species", None)
 
-    @property
-    def history_source_url(self) -> str:
-        """Get the gene_history download URL from config."""
-        return self.get_download_url("gene_history") or ""
-
-    @property
-    def info_source_url(self) -> str:
-        """Get the gene_info download URL from config."""
-        return self.get_download_url("gene_info") or ""
-
     def parse(
         self,
         input_path: Path | str | None = None,

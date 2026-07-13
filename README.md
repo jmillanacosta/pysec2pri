@@ -232,8 +232,7 @@ and `update_labels` support three kinds, via `pysec2pri.context.ContextSpec`:
   above).
 - **`id`** -- a related/foreign identifier string, matched the same way.
 - **`xref`** -- a cross-reference token (e.g. an Ensembl ID) resolved through an
-  independent crosswalk table (`pysec2pri.context.XrefMapping`), rather than the
-  mapping set's own alias index.
+  independent crosswalk table (`pysec2pri.context.XrefMapping`).
 
 All three only ever touch cells already flagged ambiguous, and every attempt can
 be written to an auditable decision log:

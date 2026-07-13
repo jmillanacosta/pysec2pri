@@ -10,25 +10,23 @@ Uses SSSOM-compliant MappingSet classes with cardinality computation.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import polars as pl
 from sssom_schema import Mapping
 
-from pysec2pri.parsers.base import (
-    WITHDRAWN_ENTRY,
-    WITHDRAWN_ENTRY_LABEL,
-    BaseMappingSet,
-    BaseParser,
-    LabelMappingSet,
+from pysec2pri.parsers._nomenclature import (
+    ALIAS_SYMBOL,
+    DATE_SYMBOL_CHANGED,
+    PREV_SYMBOL,
+    STATUS,
+    SYMBOL,
+    GeneNomenclatureParser,
 )
+from pysec2pri.parsers.base import BaseMappingSet, LabelMappingSet
 
 # HGNC column names (case-insensitive matching used)
 HGNC_ID = "hgnc_id"
-SYMBOL = "symbol"
-ALIAS_SYMBOL = "alias_symbol"
-PREV_SYMBOL = "prev_symbol"
-DATE_SYMBOL_CHANGED = "date_symbol_changed"
-STATUS = "status"
 
 # Merged info column has different naming variants across HGNC file versions
 MERGED_INFO_PATTERNS = [
@@ -38,7 +36,7 @@ MERGED_INFO_PATTERNS = [
 ]
 
 
-class HGNCParser(BaseParser):
+class HGNCParser(GeneNomenclatureParser):
     """Parser for HGNC TSV files using Polars for memory efficiency.
 
     Extracts secondary-to-primary HGNC identifier mappings and
@@ -50,6 +48,9 @@ class HGNCParser(BaseParser):
     """
 
     datasource_name = "hgnc"
+    id_column: ClassVar[str] = HGNC_ID
+    withdrawn_label_column: ClassVar[str] = SYMBOL
+    merged_patterns: ClassVar[list[str]] = MERGED_INFO_PATTERNS
 
     def __init__(
         self,
@@ -63,16 +64,6 @@ class HGNCParser(BaseParser):
             show_progress: Whether to show progress bars during parsing.
         """
         super().__init__(version=version, show_progress=show_progress)
-
-    @property
-    def withdrawn_source_url(self) -> str:
-        """Get the withdrawn file download URL from config."""
-        return self.get_download_url("withdrawn") or ""
-
-    @property
-    def complete_set_source_url(self) -> str:
-        """Get the complete set download URL from config."""
-        return self.get_download_url("complete") or ""
 
     def parse(
         self,
@@ -96,10 +87,7 @@ class HGNCParser(BaseParser):
         input_path = Path(input_path)
         self._resolve_version(input_path)
 
-        # Parse withdrawn file for ID mappings
         mappings = self._parse_withdrawn(input_path)
-
-        # Create IdMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="id")
 
         # Populate the full primary ID set when the complete set is available
@@ -134,11 +122,10 @@ class HGNCParser(BaseParser):
         self._resolve_version(complete_set_path)
 
         mapping_set = self._create_mapping_set([], mapping_type="label")
-        complete_pri_sym = self._extract_primary_labels(complete_set_path)
         object.__setattr__(
             mapping_set,
             "_primary_labels",
-            complete_pri_sym,
+            self._extract_primary_labels(complete_set_path),
         )
         return mapping_set
 
@@ -192,16 +179,12 @@ class HGNCParser(BaseParser):
         complete_set_path = Path(complete_set_path)
         self._resolve_version(complete_set_path)
 
-        # Parse complete set for symbol mappings
         mappings = self._parse_complete_set(complete_set_path, statuses=statuses)
-
-        # Create LabelMappingSet and compute cardinalities
         mapping_set = self._create_mapping_set(mappings, mapping_type="label")
-        # Set of all primary symbols
         object.__setattr__(
             mapping_set,
             "_primary_labels",
-            self._extract_primary_labels(Path(complete_set_path)),
+            self._extract_primary_labels(complete_set_path),
         )
         return mapping_set
 
@@ -223,26 +206,6 @@ class HGNCParser(BaseParser):
         label_mappings = self.parse_labels(complete_set_path)
         return id_mappings, label_mappings
 
-    def _extract_primary_ids(self, file_path: Path) -> set[str]:
-        """Extract all current HGNC IDs from the complete set file.
-
-        Args:
-            file_path: Path to the HGNC complete set TSV file.
-
-        Returns:
-            Set of all HGNC IDs present in the complete set.
-        """
-        df = pl.read_csv(
-            file_path,
-            separator="\t",
-            infer_schema_length=10000,
-            null_values=[""],
-        )
-        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
-        if hgnc_id_col is None:
-            raise ValueError(f"Could not find hgnc_id column in {file_path}")
-        return {str(val) for val in df[hgnc_id_col].drop_nulls().to_list()}
-
     def _extract_primary_labels(self, file_path: Path) -> dict[str, set[str]]:
         """Extract all current HGNC Symbols from the complete set file.
 
@@ -255,115 +218,16 @@ class HGNCParser(BaseParser):
         Returns:
             ``dict[label, set[hgnc_id]]``
         """
-        df = pl.read_csv(
-            file_path,
-            separator="\t",
-            infer_schema_length=10000,
-            null_values=[""],
-        )
-        hgnc_sym_col = self._find_column(df.columns, SYMBOL)
-        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
-        if hgnc_sym_col is None:
-            raise ValueError(f"Could not find hgnc_symbol column in {file_path}")
-        result: dict[str, set[str]] = {}
-        for id_, label in (
-            df.filter(pl.col("status") == "Approved")
-            .select([hgnc_id_col, hgnc_sym_col])
-            .drop_nulls()
-            .rows()
-        ):
-            result.setdefault(str(label), set()).add(str(id_))
-        return result
-
-    def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
-        """Parse withdrawn HGNC file for ID-to-ID mappings.
-
-        Args:
-            file_path: Path to the withdrawn HGNC TSV file.
-
-        Returns:
-            List of SSSOM Mapping objects.
-        """
-        df = pl.read_csv(
-            file_path,
-            separator="\t",
-            infer_schema_length=10000,
-            null_values=[""],
-        )
-
-        merged_col = self._find_merged_column(df.columns, MERGED_INFO_PATTERNS)
-        if merged_col is None:
-            raise ValueError(f"Could not find merged_into_report column in {file_path}")
-
-        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
-        if hgnc_id_col is None:
-            raise ValueError(f"Could not find hgnc_id column in {file_path}")
-
+        df = self._read_tsv(file_path)
+        sym_col = self._find_column(df.columns, SYMBOL)
+        id_col = self._find_column(df.columns, self.id_column)
         status_col = self._find_column(df.columns, STATUS)
-        label_col = self._find_column(df.columns, SYMBOL)
-
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
-
-        rows_data: list[dict[str, str | None]] = []
-        for row in df.iter_rows(named=True):
-            hgnc_id = row.get(hgnc_id_col)
-            if not hgnc_id:
-                continue
-
-            merged_info = row.get(merged_col)
-            status = row.get(status_col) if status_col else None
-            label = row.get(label_col) if label_col else None
-
-            # Case 1: Withdrawn with no replacement
-            if not merged_info and status and "Entry Withdrawn" in str(status):
-                rows_data.append(
-                    {
-                        "subject_id": hgnc_id,
-                        "object_id": WITHDRAWN_ENTRY,
-                        "subject_label": label or "",
-                        "object_label": WITHDRAWN_ENTRY_LABEL,
-                        "predicate_id": "oboInOwl:consider",
-                        "comment": "Withdrawn entry with no replacement.",
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            WITHDRAWN_ENTRY,
-                            hgnc_id,
-                        ),
-                    }
-                )
-                continue
-
-            # Case 2: Merged into another entry
-            if merged_info:
-                parsed = self._parse_merged_info(merged_info)
-                if parsed:
-                    target_id, target_label = parsed
-                    rows_data.append(
-                        {
-                            "subject_id": hgnc_id,
-                            "object_id": target_id,
-                            "subject_label": label or "",
-                            "object_label": target_label or "",
-                            "predicate_id": m_meta["predicate_id"],
-                            "predicate_label": m_meta.get("predicate_label"),
-                            "record_id": self._record_id(
-                                self._record_namespace(),
-                                target_id,
-                                hgnc_id,
-                            ),
-                        }
-                    )
-
-        return self._build_mappings(
-            rows_data, fixed, desc="Processing withdrawn", total=len(rows_data)
-        )
+        if sym_col is None:
+            raise ValueError(f"Could not find hgnc_symbol column in {file_path}")
+        if id_col is None:
+            raise ValueError(f"Could not find hgnc_id column in {file_path}")
+        approved = df.filter(pl.col(status_col) == "Approved") if status_col else df
+        return self._labels_by_id(approved, id_col, sym_col)
 
     def _parse_complete_set(
         self, file_path: Path, statuses: list[str] | None = None
@@ -378,104 +242,31 @@ class HGNCParser(BaseParser):
         Returns:
             List of SSSOM Mapping objects for label mappings.
         """
-        df = pl.read_csv(
-            file_path,
-            separator="\t",
-            infer_schema_length=10000,
-            null_values=[""],
-        )
+        df = self._read_tsv(file_path)
 
         status_col = self._find_column(df.columns, STATUS)
-        hgnc_id_col = self._find_column(df.columns, HGNC_ID)
+        id_col = self._find_column(df.columns, self.id_column)
         label_col = self._find_column(df.columns, SYMBOL)
         alias_col = self._find_column(df.columns, ALIAS_SYMBOL)
         prev_col = self._find_column(df.columns, PREV_SYMBOL)
         date_changed_col = self._find_column(df.columns, DATE_SYMBOL_CHANGED)
 
-        if not all([status_col, hgnc_id_col, label_col]):
+        if not all([status_col, id_col, label_col]):
             raise ValueError(f"Missing required columns in {file_path}")
-        assert hgnc_id_col is not None
+        assert id_col is not None
         assert label_col is not None
 
-        # Optionally filter by status
         if statuses is not None and status_col:
-            df_approved = df.filter(pl.col(status_col).is_in(statuses))
-        else:
-            df_approved = df
+            df = df.filter(pl.col(status_col).is_in(statuses))
 
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
-
-        rows_data: list[dict[str, str | None]] = []
-        for row in df_approved.iter_rows(named=True):
-            hgnc_id = row.get(hgnc_id_col)
-            label = row.get(label_col)
-            if not hgnc_id or not label:
-                continue
-
-            alias_str = row.get(alias_col) if alias_col else None
-            prev_str = row.get(prev_col) if prev_col else None
-            aliases = self._split_labels(labels_str=alias_str) if alias_str else []
-            prev_labels = self._split_labels(labels_str=prev_str) if prev_str else []
-            # The date the current symbol was set, i.e. when its previous
-            # symbol(s) became secondary. HGNC records only the most recent
-            # change, so with multiple prev_symbol entries this date applies
-            # exactly to the latest rename and approximately to earlier ones.
-            symbol_changed_date = row.get(date_changed_col) if date_changed_col else None
-
-            for alias in aliases:
-                rows_data.append(
-                    {
-                        "object_id": hgnc_id,
-                        "subject_label": alias,
-                        "subject_type": "rdfs literal",
-                        "object_label": label,
-                        "_label_type": "alias",
-                        "comment": "Alias symbol mapping.",
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            hgnc_id,
-                            alias,
-                        ),
-                    }
-                )
-
-            for prev in prev_labels:
-                rows_data.append(
-                    {
-                        "object_id": hgnc_id,
-                        "subject_label": prev,
-                        "subject_type": "rdfs literal",
-                        "object_label": label,
-                        "_label_type": "previous",
-                        "comment": "Previous symbol mapping.",
-                        "mapping_date": symbol_changed_date,
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            hgnc_id,
-                            prev,
-                        ),
-                    }
-                )
-
-        return self._build_mappings(
-            rows_data, fixed, desc="Processing symbols", total=len(rows_data)
+        return self._build_label_mappings(
+            df,
+            id_col=id_col,
+            label_col=label_col,
+            alias_col=alias_col,
+            prev_col=prev_col,
+            date_changed_col=date_changed_col,
         )
-
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Create an IdMappingSet or LabelMappingSet with config metadata.
-
-        Delegates to BaseParser.create_mapping_set().
-        """
-        return self.create_mapping_set(mappings, mapping_type)
 
 
 __all__ = ["HGNCParser"]

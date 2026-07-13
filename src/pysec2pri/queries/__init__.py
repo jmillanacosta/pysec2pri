@@ -14,7 +14,6 @@ __all__ = [
     "PROTEIN_REDIRECTS_QUERY",
     "WIKIDATA_QUERIES",
     "WIKIDATA_TEST_QUERIES",
-    "get_query",
 ]
 
 # Directory containing .rq query files
@@ -78,25 +77,6 @@ QUERY_COLUMNS: dict[str, dict[str, str]] = {
         "secondary_label": "synonym",
     },
 }
-
-
-def get_query(entity_type: str) -> str:
-    """Get the SPARQL query for a specific entity type.
-
-    Args:
-        entity_type: Type of entities (metabolites, chemicals, genes, proteins).
-
-    Returns:
-        The SPARQL query string.
-
-    Raises:
-        ValueError: If entity type is unknown.
-    """
-    query = WIKIDATA_QUERIES.get(entity_type.lower())
-    if query is None:
-        available = list(WIKIDATA_QUERIES.keys())
-        raise ValueError(f"Unknown entity type: {entity_type}. Available: {available}")
-    return query
 
 
 def get_column_mapping(entity_type: str) -> dict[str, str]:

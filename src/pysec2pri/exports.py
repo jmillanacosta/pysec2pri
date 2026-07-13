@@ -15,10 +15,12 @@ __all__ = [
     "WRITERS",
     "write_json",
     "write_label2prev",
+    "write_label_sec2pri",
     "write_name2synonym",
     "write_output",
     "write_owl",
     "write_pri_ids",
+    "write_pri_labels",
     "write_rdf",
     "write_sec2pri",
     "write_secondary",
@@ -43,7 +45,7 @@ def write_pri_ids(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Use the authoritative set when available (never appears in other outputs)
-    all_ids: set[str] = getattr(mapping_set, "_primary_ids", set()) or set()
+    all_ids: set[str] = set(getattr(mapping_set, "_primary_ids", None) or ())
 
     if not all_ids:
         # Fall back to extracting from mappings
@@ -76,7 +78,7 @@ def write_pri_labels(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Use the authoritative set when available (never appears in other outputs)
-    all_sym: set[str] = getattr(mapping_set, "_primary_labels", set()) or set()
+    all_sym: set[str] = set(getattr(mapping_set, "_primary_labels", None) or ())
 
     if not all_sym:
         # Fall back to extracting from mappings
@@ -98,7 +100,8 @@ def write_sec2pri(
 ) -> Path:
     """Write secondary to primary ID mappings to a TSV file.
 
-    Columns: ``subject_id``, ``object_id``, ``predicate_id``, ``mapping_cardinality``.
+    Columns: ``primary_id`` (object_id), ``secondary_id`` (subject_id),
+    ``predicate_id``, ``mapping_cardinality``.
 
     Args:
         mapping_set: The mapping set to write.
@@ -110,8 +113,6 @@ def write_sec2pri(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use explicit primary/secondary column names for clarity
-    # Columns: primary_id (object_id), secondary_id (subject_id), predicate_id, mapping_cardinality
     columns = ["primary_id", "secondary_id", "predicate_id", "mapping_cardinality"]
 
     with output_path.open("w", encoding="utf-8") as f:
@@ -120,6 +121,51 @@ def write_sec2pri(
             values = [
                 str(getattr(m, "object_id", "") or ""),
                 str(getattr(m, "subject_id", "") or ""),
+                str(getattr(m, "predicate_id", "") or ""),
+                str(getattr(m, "mapping_cardinality", "") or ""),
+            ]
+            f.write("\t".join(values) + "\n")
+
+    return output_path
+
+
+def write_label_sec2pri(
+    mapping_set: BaseMappingSet,
+    output_path: Path | str,
+) -> Path:
+    """Write the full previous/alias-label to current-label table to a TSV file.
+
+    Every mapping row is written (both deprecation and synonym predicates).
+    Columns: ``secondary_id``, ``secondary_label``, ``primary_id``,
+    ``primary_label``, ``predicate_id``, ``mapping_cardinality``.
+
+    Args:
+        mapping_set: The mapping set to write.
+        output_path: Destination file path (e.g. ``label_sec2pri.tsv``).
+
+    Returns:
+        Path to the written file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    columns = [
+        "secondary_id",
+        "secondary_label",
+        "primary_id",
+        "primary_label",
+        "predicate_id",
+        "mapping_cardinality",
+    ]
+
+    with output_path.open("w", encoding="utf-8") as f:
+        f.write("\t".join(columns) + "\n")
+        for m in mapping_set.mappings or []:
+            values = [
+                str(getattr(m, "subject_id", "") or ""),
+                str(getattr(m, "subject_label", "") or ""),
+                str(getattr(m, "object_id", "") or ""),
+                str(getattr(m, "object_label", "") or ""),
                 str(getattr(m, "predicate_id", "") or ""),
                 str(getattr(m, "mapping_cardinality", "") or ""),
             ]
@@ -252,8 +298,10 @@ WRITERS: dict[str, Callable[..., Path]] = {
     "secID2priID": write_sec2pri,
     "pri_ids": write_pri_ids,
     "priIDs": write_pri_ids,
+    "pri_labels": write_pri_labels,
     "secIDs": write_secondary,
     "name2synonym": write_name2synonym,
+    "label_sec2pri": write_label_sec2pri,
     "label2prev": write_label2prev,
     "rdf": write_rdf,
     "json": write_json,

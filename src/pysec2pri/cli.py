@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import click
-
-from pysec2pri.parsers.base import get_datasource_config
+from mapkgsutils.parsers.config import get_datasource_config
 
 if TYPE_CHECKING:
     from pysec2pri.parsers.base import BaseMappingSet
@@ -82,14 +81,7 @@ def _species_choices_text(cfg_id: str, limit: int = _MAX_INLINE_SPECIES) -> str:
 
 
 def _opt_species_for(cfg_id: str) -> Callable[..., Any]:
-    """Build a ``--species`` option defaulting to ``<cfg_id>.yaml``'s ``species.default``.
-
-    Config-yaml-centric: each species-aware datasource (ensembl, ncbi, vgnc)
-    declares its own ``species.default`` in its own config file (see
-    ``DatasourceConfig.default_species``), rather than this module
-    hardcoding a single literal for every datasource. The help text lists
-    every species curated in that datasource's ``species.available``.
-    """
+    """Build a ``--species`` option defaulting to ``<cfg_id>.yaml``'s ``species.default``."""
     default = str(get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE).default_species())
     choices = _species_choices_text(cfg_id)
     help_text = "Species as NCBI taxon ID, or 'all' to process every species."
@@ -318,10 +310,15 @@ def _resolve_and_print(
 def _make_generate_cmd(
     config_id: str,
     kind: str,
-    generate_fn: Callable[..., Any],
+    generate_fn_name: str,
     extra_opts: list[Callable[..., Any]],
 ) -> Callable[..., Any]:
-    """Return a decorated (but not yet click.command-wrapped) callable."""
+    """Return a decorated (but not yet click.command-wrapped) callable.
+
+    *generate_fn_name* is the name of the generator in :mod:`pysec2pri.api`,
+    resolved lazily when the command runs so that registering commands stays
+    cheap (no eager ``pysec2pri.api`` import).
+    """
     formats = get_datasource_config(config_id, config_package=_CONFIG_PACKAGE).formats_for(kind)
 
     def _cmd(
@@ -332,6 +329,9 @@ def _make_generate_cmd(
         no_progress: bool,
         **extra_kwargs: Any,
     ) -> None:
+        from pysec2pri import api
+
+        generate_fn = getattr(api, generate_fn_name)
         ms = generate_fn(
             input_path=input_file,
             version=data_version,
@@ -377,27 +377,28 @@ def _make_generate_cmd(
 # Datasource registry
 
 
-def _build_registry() -> dict[tuple[str, str], tuple[Callable[..., Any], list[Callable[..., Any]]]]:
-    """Return (config_id, kind) -> (generate_fn, [extra_opt_decorators])."""
-    from pysec2pri import api
+def _build_registry() -> dict[tuple[str, str], tuple[str, list[Callable[..., Any]]]]:
+    """Return (config_id, kind) -> (api_generator_name, [extra_opt_decorators]).
 
+    The generator is stored by name.
+    """
     return {
-        ("chebi", "ids"): (api.generate_chebi_ids, [_opt_subset]),
-        ("chebi", "labels"): (api.generate_chebi_labels, [_opt_subset]),
-        ("ensembl", "ids"): (api.generate_ensembl_ids, [_opt_species_for("ensembl")]),
-        ("ensembl", "labels"): (api.generate_ensembl_labels, [_opt_species_for("ensembl")]),
-        ("hgnc", "ids"): (api.generate_hgnc_ids, []),
-        ("hgnc", "labels"): (api.generate_hgnc_labels, []),
-        ("ncbi", "ids"): (api.generate_ncbi_ids, [_opt_species_for("ncbi")]),
-        ("ncbi", "labels"): (api.generate_ncbi_labels, [_opt_species_for("ncbi")]),
-        ("hmdb_metabolites", "ids"): (api.generate_hmdb_ids, []),
-        ("hmdb_proteins", "ids"): (api.generate_hmdb_proteins_ids, []),
-        ("uniprot", "ids"): (api.generate_uniprot_ids, [_opt_delac_file]),
-        ("vgnc", "ids"): (api.generate_vgnc_ids, [_opt_species_for("vgnc")]),
-        ("vgnc", "labels"): (api.generate_vgnc_labels, [_opt_species_for("vgnc")]),
-        ("wikidata", "ids"): (api.generate_wikidata_ids, [_opt_entity_type, _opt_test_subset]),
+        ("chebi", "ids"): ("generate_chebi", [_opt_subset]),
+        ("chebi", "labels"): ("generate_chebi_synonyms", [_opt_subset]),
+        ("ensembl", "ids"): ("generate_ensembl", [_opt_species_for("ensembl")]),
+        ("ensembl", "labels"): ("generate_ensembl_labels", [_opt_species_for("ensembl")]),
+        ("hgnc", "ids"): ("generate_hgnc", []),
+        ("hgnc", "labels"): ("generate_hgnc_labels", []),
+        ("ncbi", "ids"): ("generate_ncbi", [_opt_species_for("ncbi")]),
+        ("ncbi", "labels"): ("generate_ncbi_labels", [_opt_species_for("ncbi")]),
+        ("hmdb_metabolites", "ids"): ("generate_hmdb", []),
+        ("hmdb_proteins", "ids"): ("generate_hmdb_proteins", []),
+        ("uniprot", "ids"): ("generate_uniprot", [_opt_delac_file]),
+        ("vgnc", "ids"): ("generate_vgnc", [_opt_species_for("vgnc")]),
+        ("vgnc", "labels"): ("generate_vgnc_labels", [_opt_species_for("vgnc")]),
+        ("wikidata", "ids"): ("generate_wikidata", [_opt_entity_type, _opt_test_subset]),
         ("wikidata", "labels"): (
-            api.generate_wikidata_labels,
+            "generate_wikidata_labels",
             [_opt_entity_type, _opt_test_subset],
         ),
         # Add new sources here
@@ -407,7 +408,7 @@ def _build_registry() -> dict[tuple[str, str], tuple[Callable[..., Any], list[Ca
 def _register_datasources(parent: click.Group) -> None:
     """Register one Click group per config_id on *parent*."""
     registry = _build_registry()
-    by_config: dict[str, dict[str, tuple[Callable[..., Any], list[Callable[..., Any]]]]] = {}
+    by_config: dict[str, dict[str, tuple[str, list[Callable[..., Any]]]]] = {}
     for (cfg_id, kind), (fn, opts) in registry.items():
         by_config.setdefault(cfg_id, {})[kind] = (fn, opts)
 
@@ -619,12 +620,7 @@ def validate_config_cmd(datasource: str | None) -> None:
 
 
 def _consolidate_extra_opts(cfg_id: str) -> list[Callable[..., Any]]:
-    """Return the ``--subset``/``--species`` option(s) *cfg_id*'s config declares.
-
-    Driven by ``DatasourceConfig.subset``/``.species`` (see
-    ``config/<cfg_id>.yaml``) rather than a hardcoded per-datasource list, so
-    e.g. HGNC never shows an irrelevant ``--subset`` flag.
-    """
+    """Return the ``--subset``/``--species`` option(s) *cfg_id*'s config declares."""
     cfg = get_datasource_config(cfg_id, config_package=_CONFIG_PACKAGE)
     opts: list[Callable[..., Any]] = []
     if cfg.subset:
@@ -700,9 +696,9 @@ def _make_consolidate_cmd(cfg_id: str, extra_opts: list[Callable[..., Any]]) -> 
 
 def _register_consolidate_commands(parent: click.Group) -> None:
     """Register a ``consolidate`` subcommand on every supported datasource's group."""
-    from pysec2pri.consolidate import SUPPORTED_DATASOURCES
+    from pysec2pri.constants import CONSOLIDATE_DATASOURCES
 
-    for cfg_id in SUPPORTED_DATASOURCES:
+    for cfg_id in CONSOLIDATE_DATASOURCES:
         group = parent.commands.get(cfg_id)
         if group is None:
             continue
@@ -760,9 +756,11 @@ def ambiguous_cmd(
     if match is None:
         raise click.ClickException(f"Unknown datasource: {datasource!r}")
 
-    generate_fn, _ = registry[match]
+    generate_fn_name, _ = registry[match]
     click.echo(f"Loading {datasource.upper()} mappings...")
-    ms = generate_fn(version=data_version, show_progress=not no_progress)
+    from pysec2pri import api
+
+    ms = getattr(api, generate_fn_name)(version=data_version, show_progress=not no_progress)
 
     from pysec2pri.api import find_ambiguous
 
@@ -800,10 +798,12 @@ def export_all(output_dir: Path, datasources: str) -> None:
         if entry is None:
             click.echo(f"  Unknown datasource: {ds!r}", err=True)
             continue
-        generate_fn, _ = entry
+        generate_fn_name, _ = entry
         click.echo(f"\n=== {ds.upper()} ===")
         try:
-            ms = generate_fn()
+            from pysec2pri import api
+
+            ms = getattr(api, generate_fn_name)()
             version = getattr(ms, "mapping_set_version", None)
             base = f"{ds}{'_' + version if version else ''}"
             ds_dir = output_dir / (f"{ds}_{version}" if version else ds)
@@ -819,7 +819,7 @@ def export_all(output_dir: Path, datasources: str) -> None:
 
 _ID_DATASOURCES = sorted(cfg for cfg, kind in _build_registry() if kind == "ids")
 _LABEL_GENERATORS_FOR_IDS: dict[str, str] = {
-    "chebi": "generate_chebi_labels",
+    "chebi": "generate_chebi_synonyms",
     "hgnc": "generate_hgnc_labels",
     "ncbi": "generate_ncbi_labels",
     "vgnc": "generate_vgnc_labels",
@@ -905,9 +905,11 @@ def update_ids_cmd(
         click.echo(f"Loading mappings from {mapping_file}...")
         ms = load_mapping(mapping_file)
     else:
-        generate_fn, _ = registry[(datasource, "ids")]
+        generate_fn_name, _ = registry[(datasource, "ids")]
         click.echo(f"Loading {datasource.upper()} mappings...")
-        ms = generate_fn(version=data_version, show_progress=not no_progress)
+        from pysec2pri import api
+
+        ms = getattr(api, generate_fn_name)(version=data_version, show_progress=not no_progress)
 
     label_ms = None
     if synonyms_cols:
@@ -956,9 +958,9 @@ def update_ids_cmd(
 
 _LABELS_DATASOURCES = sorted(cfg for cfg, kind in _build_registry() if kind == "labels")
 _ID_GENERATORS_FOR_LABELS: dict[str, str] = {
-    "hgnc": "generate_hgnc_ids",
-    "ncbi": "generate_ncbi_ids",
-    "vgnc": "generate_vgnc_ids",
+    "hgnc": "generate_hgnc",
+    "ncbi": "generate_ncbi",
+    "vgnc": "generate_vgnc",
 }
 
 
@@ -1048,7 +1050,7 @@ def update_labels_cmd(
             --xref-source hgnc_custom --xref-on ensembl --report decisions.tsv
     """
     from pysec2pri.api import (
-        generate_chebi_labels,
+        generate_chebi_synonyms,
         generate_hgnc_labels,
         generate_ncbi_labels,
         generate_vgnc_labels,
@@ -1067,7 +1069,7 @@ def update_labels_cmd(
     else:
         click.echo(f"Loading {datasource.upper()} label mappings...")
         _label_fns: dict[str, Callable[..., Any]] = {
-            "chebi": lambda: generate_chebi_labels(
+            "chebi": lambda: generate_chebi_synonyms(
                 version=data_version, subset=subset, show_progress=not no_progress
             ),
             "hgnc": lambda: generate_hgnc_labels(

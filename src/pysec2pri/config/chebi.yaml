@@ -42,10 +42,10 @@ mappingset:
   comment: "Generated with pysec2pri"
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: "CHEBI:24431"
-  subject_source: "obo:chebi.owl"
+  subject_source: "chebi:"
   subject_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
   object_type: "CHEBI:24431"
-  object_source: "obo:chebi.owl"
+  object_source: "chebi:"
   object_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
   predicate_type: null
   mapping_provider: "http://github.com/sec2pri/pysec2pri"
@@ -89,10 +89,10 @@ mapping:
   creator_label: null
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: null
-  subject_source: "obo:chebi.owl"
+  subject_source: "chebi:"
   subject_source_version: null
   object_type: null
-  object_source: "obo:chebi.owl"
+  object_source: "chebi:"
   object_source_version: null
   predicate_type: null
   mapping_provider: null

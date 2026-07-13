@@ -44,40 +44,6 @@ class IdMappingSet(BaseMappingSet):
         """Compute cardinalities using subject_id and object_id fields."""
         self._compute_cardinalities(on="id")
 
-    def to_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
-        """Return a ``DataFrame`` of secondary to primary ID mappings.
-
-        Columns: ``subject_id`` (secondary), ``object_id`` (primary),
-        ``predicate_id``, ``mapping_cardinality``.
-
-        Args:
-            output_path: If given, the DataFrame is also written as a TSV file.
-
-        Returns:
-            :class:`pandas.DataFrame` with one row per mapping.
-        """
-        import pandas as pd
-
-        rows = [
-            {
-                "subject_id": str(getattr(m, "subject_id", "") or ""),
-                "object_id": str(getattr(m, "object_id", "") or ""),
-                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
-                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
-            }
-            for m in (self.mappings or [])
-        ]
-        df = pd.DataFrame(
-            rows, columns=["subject_id", "object_id", "predicate_id", "mapping_cardinality"]
-        )
-
-        if output_path is not None:
-            path = self._resolve_path(output_path, "_sec2pri.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
-
-        return df
-
     def to_pri_ids(self, output_path: Path | str | None = None) -> list[str]:
         """Return a sorted list of unique primary IDs, optionally writing to TXT.
 
@@ -139,8 +105,9 @@ class IdMappingSet(BaseMappingSet):
             return shared
 
         if fmt == "sec2pri":
-            self.to_sec2pri(output_path)
-            return self._resolve_path(output_path, "_sec2pri.tsv")
+            from pysec2pri.exports import write_sec2pri
+
+            return write_sec2pri(self, self._resolve_path(output_path, "_sec2pri.tsv"))
 
         if fmt == "pri_ids":
             self.to_pri_ids(output_path)
@@ -326,8 +293,9 @@ class LabelMappingSet(BaseMappingSet):
             return shared
 
         if fmt in ("label_sec2pri", "label2prev"):
-            self.to_label_sec2pri(output_path)
-            return self._resolve_path(output_path, "_label_sec2pri.tsv")
+            from pysec2pri.exports import write_label_sec2pri
+
+            return write_label_sec2pri(self, self._resolve_path(output_path, "_label_sec2pri.tsv"))
 
         if fmt == "pri_labels":
             self.to_pri_labels(output_path)

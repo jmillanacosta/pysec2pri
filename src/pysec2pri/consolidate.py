@@ -47,6 +47,7 @@ from typing import Any
 import mapkgsutils.consolidate as _consolidate
 
 from pysec2pri.constants import ALL_DATASOURCES
+from pysec2pri.constants import CONSOLIDATE_DATASOURCES as SUPPORTED_DATASOURCES
 from pysec2pri.logging import logger
 from pysec2pri.parsers.base import BaseMappingSet, _cmp_versions
 
@@ -58,9 +59,6 @@ __all__ = [
     "load_mapping_dates",
 ]
 
-# Datasources this module knows how to download+parse per release.
-# NCBI and VGNC have no versioned archive, so they take the single-parse path.
-SUPPORTED_DATASOURCES = ("chebi", "ensembl", "hgnc", "ncbi", "uniprot", "vgnc")
 
 # mapping_sets kinds each datasource's parser actually supports.
 _SUPPORTED_MAPPING_SETS: dict[str, tuple[str, ...]] = {
@@ -120,14 +118,7 @@ def default_cache_dir() -> Path:
 
 
 def _product_slugs(datasource: str, **kwargs: Any) -> tuple[str, ...]:
-    """Return the IRI/path slug(s) disambiguating *this* datasource's product.
-
-    Driven entirely by the datasource's own config -- a ``subset`` block
-    (ChEBI) or a ``species`` block (NCBI/Ensembl) -- rather than a hardcoded
-    per-datasource knob list, mirroring
-    :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`. Datasources
-    with neither block get no slug.
-    """
+    """Return the IRI/path slug(s) disambiguating datasource product."""
     config = ALL_DATASOURCES.get(datasource)
     if config is None:
         return ()
@@ -157,8 +148,6 @@ def _meta_path(cache_dir: Path, datasource: str, mapping_sets: str, **kwargs: An
 _sssom_output_path = _consolidate.sssom_output_path
 _read_cache = _consolidate.read_cache
 _write_cache = _consolidate.write_cache
-_read_meta = _consolidate.read_meta
-_write_meta = _consolidate.write_meta
 
 
 def _save_optional_output(mapping_set: BaseMappingSet, output: Path | None) -> None:
@@ -176,11 +165,6 @@ def load_mapping_dates(
 ) -> dict[str, str]:
     """Load the consolidated ``record_id -> first_seen_date`` index for *datasource*.
 
-    Safe to call even when the index hasn't been built yet: returns ``{}``,
-    which leaves ``Mapping.mapping_date`` unset for every row (the caller
-    falls back to the set-level pinned release date, exactly as before this
-    feature existed).
-
     Args:
         datasource: Datasource name (e.g. ``"chebi"``, ``"uniprot"``).
         cache_dir: Directory holding the cache file. Defaults to
@@ -193,9 +177,6 @@ def load_mapping_dates(
 
     Returns:
         Dict mapping each ``record_id`` to its first-seen ISO date string.
-        Records walked but never assigned a real release date (e.g. an
-        unresolvable ``Last-Modified``) are omitted, leaving their
-        ``mapping_date`` unset rather than passing through a non-date value.
     """
     cache_path = _cache_path(cache_dir or default_cache_dir(), datasource, mapping_sets, **kwargs)
     return _consolidate.load_mapping_dates(cache_path)
@@ -208,14 +189,7 @@ def _parse_mapping_set(
     mapping_sets: str,
     **kwargs: Any,
 ) -> Any:
-    """Parse one downloaded release into a mapping set, dispatched by datasource.
-
-    Calls each parser with explicit paths from *files* rather than relying
-    on directory auto-discovery, so consolidation never depends on the
-    tmpdir-guessing logic used by the ``generate_*`` convenience functions.
-    Each branch pulls only the kwarg it needs (falling back to the
-    datasource's own config default), so unsupported kwargs are just ignored.
-    """
+    """Parse one downloaded release into a mapping set, dispatched by datasource."""
     config = ALL_DATASOURCES.get(datasource)
     if datasource == "chebi":
         subset = kwargs.get("subset") or (config.default_subset() if config else None) or "3star"

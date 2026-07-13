@@ -13,7 +13,6 @@ Uses SSSOM-compliant MappingSet classes with cardinality computation.
 
 from __future__ import annotations
 
-from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,9 +26,6 @@ from pysec2pri.parsers.base import (
 
 if TYPE_CHECKING:
     pass
-
-# Threshold version where TSV format was introduced
-NEW_FORMAT_VERSION = 245
 
 
 class ChEBIParser(BaseParser):
@@ -62,20 +58,6 @@ class ChEBIParser(BaseParser):
         """
         super().__init__(version=version, show_progress=show_progress)
         self.subset = subset
-
-    @property
-    def source_url(self) -> str:
-        """Get the default download URL from config."""
-        return self.get_download_url("sdf") or ""
-
-    def _is_new_format(self) -> bool:
-        """Check if we should use new TSV format based on version."""
-        if self.version is None:
-            return True  # Default to new format for latest
-        try:
-            return int(self.version) >= NEW_FORMAT_VERSION
-        except ValueError:
-            return True  # Default to new if version is not numeric
 
     def parse(
         self,
@@ -418,16 +400,11 @@ class ChEBIParser(BaseParser):
 # TSV parsing functions (new format >= 245)
 
 
-@cache
-def _get_3star_compound_ids(
-    compounds_path: Path,
-    show_progress: bool = True,
-) -> set[int]:
+def _get_3star_compound_ids(compounds_path: Path) -> set[int]:
     """Get set of compound IDs with 3 stars from compounds.tsv.
 
     Args:
         compounds_path: Path to compounds.tsv file.
-        show_progress: Whether to show progress.
 
     Returns:
         Set of compound IDs (as integers) with stars == 3.
@@ -471,7 +448,7 @@ def _parse_secondary_ids_tsv(
 
     # Filter to 3-star compounds if requested
     if subset == "3star" and compounds_path is not None:
-        three_star_ids = _get_3star_compound_ids(compounds_path, show_progress)
+        three_star_ids = _get_3star_compound_ids(compounds_path)
         df = df.filter(pl.col("compound_id").is_in(three_star_ids))
 
     # Build mapping tuples with CHEBI: prefix

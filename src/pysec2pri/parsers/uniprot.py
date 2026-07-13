@@ -14,6 +14,7 @@ from pathlib import Path
 import polars as pl
 from sssom_schema import Mapping
 
+from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
@@ -85,11 +86,16 @@ class UniProtParser(BaseParser):
         """
         # Count lines until (and including) the separator row.
         skip_rows = 0
+        found_separator = False
         with file_path.open("r", encoding="utf-8") as f:
             for raw_line in f:
                 skip_rows += 1
                 if raw_line.startswith("_"):
+                    found_separator = True
                     break  # next line is first data row
+        if not found_separator:
+            logger.warning("No '_' separator line in %s; parsing from the first line.", file_path)
+            skip_rows = 0
 
         meta_ns = self._record_namespace()
 
@@ -187,11 +193,16 @@ class UniProtParser(BaseParser):
             List of SSSOM Mapping objects.
         """
         skip_rows = 0
+        found_separator = False
         with file_path.open("r", encoding="utf-8") as f:
             for raw_line in f:
                 skip_rows += 1
                 if raw_line.startswith("_"):
+                    found_separator = True
                     break  # next line is first deleted accession
+        if not found_separator:
+            logger.warning("No '_' separator line in %s; parsing from the first line.", file_path)
+            skip_rows = 0
 
         meta_ns = self._record_namespace()
 

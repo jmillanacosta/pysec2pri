@@ -28,18 +28,11 @@ _ENSEMBL_REST_SPECIES_URL = "https://rest.ensembl.org/info/species?content-type=
 
 
 def _lookup_ensembl_species_token(taxon_id: str | int) -> str | None:
-    """Resolve a taxon ID to its Ensembl species token via Ensembl's own REST API.
-
-    ``config/ensembl.yaml``'s ``species.available`` only curates a handful
-    of species for CLI defaults/help; Ensembl itself publishes 300+ (e.g.
-    dog, pig, chicken). This is the live fallback for anything not in that
-    static list, queried on demand rather than hardcoded, since the list
-    changes every release.
+    """Resolve a taxon ID to its Ensembl species token via Ensembl REST API.
 
     Several taxon IDs map to more than one entry (per-breed/per-strain
-    assemblies, e.g. multiple dog breeds): the *shortest* matching name is
-    returned, which is reliably the canonical species-level entry (breed/
-    strain variants always have additional characters appended).
+    assemblies, e.g. multiple dog breeds), then the shortest matching name is
+    returned.
 
     Args:
         taxon_id: Canonical NCBI taxon ID.
@@ -84,21 +77,10 @@ def _ensembl_taxon_by_token() -> dict[str, str]:
 
 
 def discover_ensembl_species(version: str) -> list[tuple[str, str]]:
-    """Return ``(species_token, assembly)`` for every species published at *version*.
+    """Return ``(species_token, assembly)`` for every species published at ``(version)``.
 
-    Scrapes the release's ``mysql/`` directory listing exactly once -- a
-    single HTTP request covers every species at once, unlike per-species
-    assembly auto-discovery (:meth:`EnsemblDownloader._resolve_core_dir`),
-    which would otherwise need one request per species to do the same.
-    Used by the ``species="all"`` bulk path (see
-    :func:`pysec2pri.api._generate_ensembl_all_species`).
-
-    The raw directory listing includes one entry per *assembly*, not per
-    species -- several breed/strain assemblies can share one species (e.g.
-    half a dozen dog breeds). Those are deduped to a single canonical
-    (shortest-named) token per taxon ID, cross-referenced via Ensembl's
-    REST species list, so the bulk run produces one mapping set per
-    species rather than one per assembly.
+    Scrapes the release's ``mysql/`` directory listing. The directory listing
+    includes one entry per assembly.
 
     Args:
         version: Ensembl release number.
@@ -376,9 +358,7 @@ def urls_and_date(
         logger.info("Ensembl version %s (species %s): %s", version, species, urls)
     else:
         # The release number is global across species, but the URLs (and the
-        # resolved release date) are species-specific, so resolve the latest
-        # version and build URLs for the requested species rather than reusing
-        # check_ensembl_release()'s human-only URLs.
+        # resolved release date) are species-specific
         versions = EnsemblDownloader(show_progress=False).list_versions()
         if not versions:
             raise ValueError("Could not find Ensembl releases on the FTP server")

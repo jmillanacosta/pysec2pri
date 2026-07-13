@@ -117,17 +117,18 @@ class HMDBParser(BaseParser):
         primary_ids_found: set[str] = set()
 
         try:
-            context = DefusedET.iterparse(xml_content, events=("end",))
-            for _event, elem in self._progress(context, desc=desc):
-                tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
-                if tag == element_tag:
-                    accession_elem = elem.find("hmdb:accession", HMDB_NS)
-                    if accession_elem is None:
-                        accession_elem = elem.find("accession")
-                    if accession_elem is not None and accession_elem.text:
-                        primary_ids_found.add(f"{prefix}:{accession_elem.text.strip()}")
-                    rows_data.extend(self._process_record(elem, prefix))
-                    elem.clear()
+            with xml_content:
+                context = DefusedET.iterparse(xml_content, events=("end",))
+                for _event, elem in self._progress(context, desc=desc):
+                    tag = elem.tag.replace(f"{{{HMDB_NS['hmdb']}}}", "")
+                    if tag == element_tag:
+                        accession_elem = elem.find("hmdb:accession", HMDB_NS)
+                        if accession_elem is None:
+                            accession_elem = elem.find("accession")
+                        if accession_elem is not None and accession_elem.text:
+                            primary_ids_found.add(f"{prefix}:{accession_elem.text.strip()}")
+                        rows_data.extend(self._process_record(elem, prefix))
+                        elem.clear()
         except DefusedET.ParseError:
             rows_data = self._parse_simple_xml(file_path, element_tag, prefix)
 
@@ -300,11 +301,6 @@ class HMDBMetaboliteParser(HMDBParser):
 
     datasource_name = "hmdb_metabolites"
 
-    @property
-    def source_url(self) -> str:
-        """Metabolites download URL from ``hmdb_metabolites.yaml``."""
-        return self.get_download_url("metabolites") or ""
-
     def parse(self, input_path: Path | str | None) -> BaseMappingSet:
         """Parse ``hmdb_metabolites.xml`` (or ``.zip`` / ``.gz``).
 
@@ -341,11 +337,6 @@ class HMDBProteinParser(HMDBParser):
     """
 
     datasource_name = "hmdb_proteins"
-
-    @property
-    def source_url(self) -> str:
-        """Proteins download URL from ``hmdb_proteins.yaml``."""
-        return self.get_download_url("proteins") or ""
 
     def parse(self, input_path: Path | str | None) -> BaseMappingSet:
         """Parse ``hmdb_proteins.xml`` (or ``.zip`` / ``.gz``).

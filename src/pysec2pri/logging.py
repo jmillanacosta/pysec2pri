@@ -1,14 +1,14 @@
 """Logging configuration for pysec2pri.
 
-This module provides a centralized logger for the package.
-By default, only CRITICAL messages are shown. Use set_log_level()
-to adjust verbosity.
+Provides the ``pysec2pri`` package logger, built by :mod:`mapkgsutils.logging`.
+Only CRITICAL messages show by default; call :func:`set_log_level` to raise
+verbosity.
 """
 
 from __future__ import annotations
 
-import logging
-import sys
+from mapkgsutils.logging import LOG_LEVELS, get_logger
+from mapkgsutils.logging import set_log_level as _set_log_level
 
 __all__ = [
     "LOG_LEVELS",
@@ -16,50 +16,14 @@ __all__ = [
     "set_log_level",
 ]
 
-# Package logger
-logger = logging.getLogger("pysec2pri")
-
-# Default to CRITICAL (minimal output)
-logger.setLevel(logging.CRITICAL)
-
-# Add a handler if none exists
-if not logger.handlers:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
-    logger.addHandler(handler)
-
-# Map of log level names to logging constants
-LOG_LEVELS: dict[str, int] = {
-    "critical": logging.CRITICAL,
-    "error": logging.ERROR,
-    "warning": logging.WARNING,
-    "warn": logging.WARNING,
-    "info": logging.INFO,
-    "debug": logging.DEBUG,
-}
+logger = get_logger("pysec2pri")
 
 
 def set_log_level(level: str | int) -> None:
-    """Set the logging level for pysec2pri.
+    """Set the pysec2pri log level.
 
     Args:
-        level: Log level as string ('debug', 'info', 'warning', 'error', 'critical')
-               or as an int (logging.DEBUG, logging.INFO, etc.)
-
-    Example:
-        >>> from pysec2pri.logging import set_log_level
-        >>> set_log_level("warning")  # Show warnings and above
-        >>> set_log_level("debug")  # Show all messages
+        level: Level name (``"debug"``/``"info"``/``"warning"``/``"error"``/
+            ``"critical"``) or an integer such as ``logging.INFO``.
     """
-    if isinstance(level, str):
-        level_int = LOG_LEVELS.get(level.lower())
-        if level_int is None:
-            raise ValueError(f"Unknown log level: {level}. Available: {list(LOG_LEVELS.keys())}")
-        logger.setLevel(level_int)
-    else:
-        logger.setLevel(level)
+    _set_log_level(level, logger)
