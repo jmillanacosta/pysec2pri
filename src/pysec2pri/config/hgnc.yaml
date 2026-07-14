@@ -155,11 +155,11 @@ mapping_sets:
     primary_input: complete
     required_inputs: [complete]
     formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt
 
 source: "HGNC database"
 homepage: "https://www.genenames.org/"
-data_license: "https://www.genenames.org/about/license"
+data_license: "https://creativecommons.org/publicdomain/zero/1.0/"

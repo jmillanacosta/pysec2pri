@@ -134,7 +134,7 @@ input_file_types:
 
 source: "UniProt"
 homepage: "https://www.uniprot.org/"
-data_license: "https://www.uniprot.org/help/license"
+data_license: "https://creativecommons.org/licenses/by/4.0/"
 
 # Suggested cross-reference crosswalk source(s) for disambiguation context
 # (see mapkgsutils.context.ContextSpec, kind="xref")

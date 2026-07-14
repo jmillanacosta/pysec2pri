@@ -140,7 +140,7 @@ mapping_sets:
     primary_input: gene_info
     required_inputs: [gene_info]
     formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 
 input_file_types:
   - gene_info.gz

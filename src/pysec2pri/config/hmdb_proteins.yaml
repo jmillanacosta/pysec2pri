@@ -124,5 +124,5 @@ mapping_sets:
 
 source: "HMDB"
 homepage: "https://hmdb.ca/"
-data_license: "https://hmdb.ca/about#citing"
+data_license: "https://creativecommons.org/licenses/by/4.0/"
 id_pattern: "^HMDBP\\d+$"

@@ -8,9 +8,9 @@ curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
 entity_types: ["chemical entities"]
 
 # Compound subset: which compounds.tsv "star" filter to apply (TSV releases),
-# or which legacy SDF file to use (pre-245 releases). Only ChEBI has this axis.
+# or which legacy SDF file to use (pre-245 releases).
 subset:
-  default: 3star
+  default: complete
   available:
     3star: { label: "3-star (curated, reviewed)" }
     complete: { label: "Complete (all entries, including unreviewed)" }
@@ -43,10 +43,10 @@ mappingset:
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: "CHEBI:24431"
   subject_source: "chebi:"
-  subject_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+  subject_source_version: null
   object_type: "CHEBI:24431"
   object_source: "chebi:"
-  object_source_version: "http://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz"
+  object_source_version: null
   predicate_type: null
   mapping_provider: "http://github.com/sec2pri/pysec2pri"
   cardinality_scope: null
@@ -168,9 +168,9 @@ mapping_sets:
     primary_input: names
     required_inputs: [names, compounds]
     formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 
 source: "ChEBI database"
 homepage: "https://www.ebi.ac.uk/chebi/"
-data_license: "https://www.ebi.ac.uk/about/terms-of-use"
+data_license: "https://creativecommons.org/licenses/by/4.0/"
 id_pattern: "^CHEBI:\\d+$"
