@@ -17,7 +17,7 @@
         <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/pysec2pri" /></a>
     <a href="https://github.com/jmillanacosta/pysec2pri/blob/main/LICENSE">
         <img alt="PyPI - License" src="https://img.shields.io/pypi/l/pysec2pri" /></a>
-    <a href='https://pysec2pri.readthedocs.io/en/latest/?badge=latest'>
+    <a href='https://pysec2pri.readthedocs.io/'>
         <img src='https://readthedocs.org/projects/pysec2pri/badge/?version=latest' alt='Documentation Status' /></a>
 </p>
 
