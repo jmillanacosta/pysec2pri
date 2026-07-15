@@ -33,7 +33,7 @@ class ChEBIDownloader(BaseDownloader):
         self,
         version: str | None = None,
         show_progress: bool = True,
-        subset: str = "3star",
+        subset: str | None = None,
         use_sdf: bool = False,
     ) -> None:
         """Initialize the ChEBI downloader.
@@ -41,10 +41,13 @@ class ChEBIDownloader(BaseDownloader):
         Args:
             version: Version/release identifier.
             show_progress: Whether to show progress bars.
-            subset: "3star" or "complete" - which compound subset to use.
+            subset: Which compound subset to use, e.g. ``"3star"`` or
+                ``"complete"``. Defaults to ``chebi.yaml``'s ``subset.default``.
             use_sdf: Force SDF format even for releases >= 245.
         """
         super().__init__(version=version, show_progress=show_progress)
+        if subset is None and self._config is not None:
+            subset = self._config.default_subset()
         self.subset = subset
         self.use_sdf = use_sdf
 
@@ -169,7 +172,7 @@ class ChEBIDownloader(BaseDownloader):
         return sorted(versions, key=int)
 
 
-def _get_chebi_urls_for_version(version: str, subset: str = "3star") -> dict[str, str]:
+def _get_chebi_urls_for_version(version: str, subset: str | None = None) -> dict[str, str]:
     """Build ChEBI URLs for a specific release version.
 
     Delegates to :meth:`ChEBIDownloader.get_download_urls`, which resolves
@@ -195,6 +198,8 @@ def check_chebi_release() -> ReleaseInfo:
         ReleaseInfo with the latest ChEBI release details.
     """
     archive_url = ALL_DATASOURCES["chebi"].archive_url
+    if not archive_url:
+        raise ValueError("ChEBI config defines no archive_url")
     with httpx.Client(follow_redirects=True) as client:
         response = client.get(archive_url)
         response.raise_for_status()
@@ -208,7 +213,7 @@ def check_chebi_release() -> ReleaseInfo:
     version = str(latest_release)
 
     # Return URLs based on release version
-    urls = _get_chebi_urls_for_version(version, subset="3star")
+    urls = _get_chebi_urls_for_version(version)
     # Get release date from secondary_ids (new) or sdf (legacy)
     check_url = urls.get("secondary_ids") or urls.get("sdf")
     release_date = get_file_last_modified(check_url) if check_url else None

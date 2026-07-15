@@ -15,15 +15,12 @@ import polars as pl
 from sssom_schema import Mapping
 
 from pysec2pri.parsers.base import (
+    ALL_SPECIES,
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
     BaseMappingSet,
     BaseParser,
 )
-
-#: Sentinel accepted by every species-filtered method: skip the taxon
-#: filter entirely and process every organism in the file.
-ALL_SPECIES = "all"
 
 
 def _filter_by_taxon(lazy: pl.LazyFrame, species: str) -> pl.LazyFrame:
@@ -68,25 +65,6 @@ class NCBIParser(BaseParser):
 
     datasource_name = "ncbi"
 
-    def _product_slug(self) -> str | None:
-        """Species (NCBI taxon ID) the current run was filtered to.
-
-        Different species are disjoint datasets at the same release, so the
-        taxon ID is folded into ``mapping_set_id``/``record_id`` (see
-        :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`).
-        """
-        return getattr(self, "species", None)
-
-    @property
-    def history_source_url(self) -> str:
-        """Get the gene_history download URL from config."""
-        return self.get_download_url("gene_history") or ""
-
-    @property
-    def info_source_url(self) -> str:
-        """Get the gene_info download URL from config."""
-        return self.get_download_url("gene_info") or ""
-
     def parse(
         self,
         input_path: Path | str | None = None,
@@ -117,18 +95,13 @@ class NCBIParser(BaseParser):
         # Parse gene_history for ID mappings
         mappings = self._parse_gene_history(input_path, species)
 
-        # Create IdMappingSet and compute cardinalities
-        mapping_set = self._create_mapping_set(mappings, mapping_type="id")
-
         # Populate the full primary ID set when gene_info is available
-        if gene_info_path is not None:
-            object.__setattr__(
-                mapping_set,
-                "_primary_ids",
-                self._extract_primary_ids(Path(gene_info_path), species),
-            )
-
-        return mapping_set
+        primary_ids = (
+            self._extract_primary_ids(Path(gene_info_path), species)
+            if gene_info_path is not None
+            else None
+        )
+        return self.create_mapping_set(mappings, mapping_type="id", primary_ids=primary_ids)
 
     def parse_labels(
         self,
@@ -154,16 +127,13 @@ class NCBIParser(BaseParser):
         # Parse gene_info for symbol mappings
         mappings = self._parse_gene_info(gene_info_path, species)
 
-        # Create LabelMappingSet and compute cardinalities
-        mapping_set = self._create_mapping_set(mappings, mapping_type="label")
-        # Populate full primary symbol set from the same file
-        object.__setattr__(
-            mapping_set, "_primary_labels", self._extract_primary_labels(gene_info_path, species)
+        # Populate full primary symbol and ID sets from the same file
+        return self.create_mapping_set(
+            mappings,
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(gene_info_path, species),
+            primary_ids=self._extract_primary_ids(gene_info_path, species),
         )
-        object.__setattr__(
-            mapping_set, "_primary_ids", self._extract_primary_ids(gene_info_path, species)
-        )
-        return mapping_set
 
     def parse_primary_ids(
         self,
@@ -190,9 +160,9 @@ class NCBIParser(BaseParser):
         gene_info_path = Path(gene_info_path)
         self._resolve_version(gene_info_path)
         self.species = species
-        ms = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_info_path, species))
-        return ms
+        return self.create_mapping_set(
+            [], mapping_type="id", primary_ids=self._extract_primary_ids(gene_info_path, species)
+        )
 
     def parse_primary_labels(
         self,
@@ -219,11 +189,11 @@ class NCBIParser(BaseParser):
         gene_info_path = Path(gene_info_path)
         self._resolve_version(gene_info_path)
         self.species = species
-        ms = self._create_mapping_set([], mapping_type="label")
-        object.__setattr__(
-            ms, "_primary_labels", self._extract_primary_labels(gene_info_path, species)
+        return self.create_mapping_set(
+            [],
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(gene_info_path, species),
         )
-        return ms
 
     def parse_all(
         self,
@@ -407,15 +377,6 @@ class NCBIParser(BaseParser):
         return self._build_mappings(
             rows_data, fixed, desc="Processing gene_info", total=len(rows_data)
         )
-
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Create an IdMappingSet or LabelMappingSet with config metadata.
-
-        Delegates to BaseParser.create_mapping_set().
-        """
-        return self.create_mapping_set(mappings, mapping_type)
 
     def _extract_primary_ids(self, file_path: Path, species: str) -> set[str]:
         """Extract all current NCBI Gene IDs from gene_info for a given taxonomy.

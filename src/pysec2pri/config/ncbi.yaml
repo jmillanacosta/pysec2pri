@@ -3,6 +3,8 @@ config_id: "ncbi"
 datasource_id: "ncbi"
 name: "NCBI Gene"
 parser_class: "NCBIParser"
+# Splits this source into disjoint datasets: folded into the IRIs.
+products: ["species"]
 parse_options:
   default_taxonomy_id: 9606
 prefix: "NCBIGene"
@@ -131,17 +133,25 @@ default_output_filename: "ncbi_sec2pri.sssom.tsv"
 
 mapping_sets:
   ids:
+    consolidate: true
     method: parse
-    primary_input: gene_history
-    required_inputs: [gene_history, gene_info]
+    # download_urls key -> parameter of `method`
+    inputs: { gene_history: input_path, gene_info: gene_info_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
   labels:
-    method: parse_symbols
-    primary_input: gene_info
-    required_inputs: [gene_info]
-    formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, owl, all]
+    consolidate: true
+    method: parse_labels
+    inputs: { gene_info: gene_info_path }
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { gene_info: gene_info_path }
+    formats: [pri_ids]
+  primary_labels:
+    method: parse_primary_labels
+    inputs: { gene_info: gene_info_path }
+    formats: [pri_labels]
 input_file_types:
   - gene_info.gz
   - gene_history.gz

@@ -123,18 +123,23 @@ default_output_filename: "uniprot_sec2pri.sssom.tsv"
 
 mapping_sets:
   ids:
+    consolidate: true
     method: parse
-    primary_input: sec_ac
-    required_inputs: [sec_ac, delac_sp]
+    # download_urls key -> parameter of `method`
+    inputs: { sec_ac: input_path, delac_sp: delac_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
 
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { acindex: acindex_path }
+    formats: [pri_ids]
 input_file_types:
   - sec_ac.txt
   - delac_sp.txt
 
 source: "UniProt"
 homepage: "https://www.uniprot.org/"
-data_license: "https://www.uniprot.org/help/license"
+data_license: "https://creativecommons.org/licenses/by/4.0/"
 
 # Suggested cross-reference crosswalk source(s) for disambiguation context
 # (see mapkgsutils.context.ContextSpec, kind="xref")

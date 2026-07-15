@@ -1,7 +1,7 @@
 """Download and release detection for biological database sources.
 
 The datasource-agnostic dispatch logic lives in :mod:`mapkgsutils.download`;
-this module just binds it to pysec2pri's own datasource registries (see
+this module just binds it to pysec2pri's datasource registries (see
 :mod:`pysec2pri.downloads`).
 """
 
@@ -131,7 +131,7 @@ def get_download_urls(
         version: Specific version to get URLs for.
         **kwargs: Datasource-specific knobs (e.g. ``subset`` for ChEBI,
             ``species`` for Ensembl/NCBI) -- which ones apply depends on the
-            datasource's own config (see ``DatasourceConfig.subset``/
+            datasource's config (see ``DatasourceConfig.subset``/
             ``.species``); irrelevant kwargs are simply ignored.
 
     Returns:

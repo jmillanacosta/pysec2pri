@@ -7,7 +7,7 @@ build-backend = "uv_build"
 
 [project]
 name = "pysec2pri"
-version = "0.2.4"
+version = "0.3.0"
 description = "Secondary to primary identifier mapping"
 readme = "README.md"
 authors = [
@@ -54,24 +54,24 @@ license-files = [
 
 requires-python = ">=3.10"
 dependencies = [
-    "more_itertools", # missing from itertools in stdlib
-    "tqdm", # progress bars
+    "more_itertools",
+    "tqdm",
     "typing-extensions",
-    "pydantic>=2.0", # data validation and models
+    "pydantic>=2.0",
     "linkml>=1.10.0",
-    "sssom==0.4.21", # SSSOM standard support
-    "curies>=0.7.0", # CURIE handling
-    "httpx>=0.24.0", # HTTP client for downloads
-    "polars>=0.20.0", # Fast dataframe operations for diffs
+    "sssom==0.4.21",
+    "curies>=0.7.0",
+    "httpx>=0.24.0",
+    "polars>=0.20.0",
     "regex==2026.1.15",
-    "lxml", # XML parsing for HMDB
-    "defusedxml", # Secure XML parsing
-    "pandas", # DataFrame support for some workflows
-    "numpy", # Required by pandas and polars
-    "rdkit", # Chemistry toolkit for SDF parsing
-    "polars-runtime-32", # Polars runtime for 32-bit systems
-    "sssom-schema==1.1.0a5", # SSSOM schema for validation
-    "mapkgsutils==0.1.2",
+    "lxml",
+    "defusedxml",
+    "pandas",
+    "numpy",
+    "rdkit",
+    "polars-runtime-32",
+    "sssom-schema==1.1.0a5",
+    "mapkgsutils==0.2.5",
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
@@ -89,6 +89,8 @@ docs = [
     "sphinx>=8,<9",
     "sphinx-rtd-theme>=3.0","sphinx-click", 
     "sphinx_automodapi",
+    "nbsphinx",
+    "ipykernel",
     # Include if your project uses Pydantic:
     # "autodoc_pydantic",
     # To include LaTeX comments easily in your docs.
@@ -235,7 +237,7 @@ ignore = [
 # Ignore commented out code in Sphinx configuration file
 "docs/source/conf.py" = ["ERA001"]
 # Prints are okay in notebooks
-"notebooks/**/*.ipynb" = ["T201"]
+"**/*.ipynb" = ["T201"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
@@ -255,7 +257,7 @@ known-first-party = [
 docstring-code-format = true
 
 [tool.bumpversion]
-current_version = "0.2.4"
+current_version = "0.3.0"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:-(?P<release>[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+(?P<build>[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?"
 serialize = [
     "{major}.{minor}.{patch}-{release}+{build}",

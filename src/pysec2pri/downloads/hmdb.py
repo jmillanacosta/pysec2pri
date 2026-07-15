@@ -19,7 +19,7 @@ __all__ = ["check_hmdb_release", "urls_and_date"]
 # the lightweight HEAD request the generic Last-Modified fallback relies on.
 # HMDB also has not published a new release since Version 5.0, so a static
 # lookup is both necessary and safe to keep current. Dates are the "Released
-# on" values published on HMDB's own Downloads page
+# on" values published on HMDB Downloads page
 # (https://hmdb.ca/downloads, Version 5.0 / "Current Version" tab), keyed by
 # each config's ``config_id`` ("hmdb_metabolites"/"hmdb_proteins").
 _RELEASE_DATES: dict[str, datetime] = {
@@ -51,13 +51,7 @@ def check_hmdb_release() -> ReleaseInfo:
 def urls_and_date(
     version: str | None, config: DatasourceConfig, **kwargs: Any
 ) -> tuple[dict[str, str], datetime | None]:
-    """Resolve HMDB download URLs and the source release date.
-
-    HMDB sits behind Cloudflare bot protection (blocks even the generic
-    Last-Modified fallback) and has not published a new release since
-    Version 5.0, so the release date comes from the static
-    :data:`_RELEASE_DATES` lookup rather than being resolved live.
-    """
+    """Resolve HMDB download URLs and the source release date."""
     if version:
         logger.warning(
             "%s does not have versioned archives. Downloading latest version instead.",

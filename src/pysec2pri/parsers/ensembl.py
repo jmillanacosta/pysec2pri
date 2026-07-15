@@ -28,7 +28,9 @@ from typing import Any
 import polars as pl
 from sssom_schema import Mapping
 
+from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
+    ALL_SPECIES,
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
     BaseMappingSet,
@@ -117,11 +119,6 @@ def _scan_ensembl_tsv(
         infer_schema_length=10000,
         schema_overrides=schema_overrides,
     )
-
-
-#: Sentinel accepted by ``species=``: process every species Ensembl
-#: publishes for the release, instead of one.
-ALL_SPECIES = "all"
 
 
 def _ensembl_date_to_iso(value: object) -> str | None:
@@ -220,17 +217,13 @@ class EnsemblParser(BaseParser):
         self.species = species
 
     def _product_slug(self) -> str | None:
-        """Species (NCBI taxon ID) the parsed files belong to.
+        """Species slug, suffixed with ``consolidate`` for label-history runs.
 
-        Different species are disjoint datasets at the same release, so the
-        taxon ID is folded into ``mapping_set_id``/``record_id`` (see
-        :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`). When this
-        instance built its mappings via :meth:`parse_label_history`, a
-        trailing ``consolidate`` segment marks the IRI as a derived,
-        cross-release product rather than a single release's parse --
-        ``version`` is then the *last* release that walk consolidated.
+        Label history is a distinct data product at the same release/species,
+        so it gets an IRI segment.
         """
-        species_slug = str(self.species) if self.species is not None else None
+        base = super()._product_slug()
+        species_slug = str(base) if base is not None else None
         if getattr(self, "_is_label_history", False):
             return f"{species_slug}/consolidate" if species_slug else "consolidate"
         return species_slug
@@ -261,14 +254,8 @@ class EnsemblParser(BaseParser):
         self._resolve_version(stable_id_event_path)
 
         mappings = self._parse_stable_id_event(stable_id_event_path, mapping_session_path)
-        mapping_set = self.create_mapping_set(mappings, mapping_type="id")
-
-        if gene_path is not None:
-            object.__setattr__(
-                mapping_set, "_primary_ids", self._extract_primary_ids(Path(gene_path))
-            )
-
-        return mapping_set
+        primary_ids = self._extract_primary_ids(Path(gene_path)) if gene_path is not None else None
+        return self.create_mapping_set(mappings, mapping_type="id", primary_ids=primary_ids)
 
     def parse_labels(
         self,
@@ -277,6 +264,10 @@ class EnsemblParser(BaseParser):
         external_synonym_path: Path | str | None = None,
     ) -> BaseMappingSet:
         """Parse external gene synonyms into a LabelMappingSet.
+
+        A release's files state a gene's *current* symbol and its synonyms, but
+        not the symbols it previously had, so a single release yields alias
+        mappings only. Renames are recovered by consolidating across releases.
 
         Args:
             gene_path: Path to ``gene.txt``.
@@ -294,18 +285,24 @@ class EnsemblParser(BaseParser):
         xref_path = Path(xref_path)
         self._resolve_version(gene_path)
 
+        logger.warning(
+            "%s releases carry no previous-symbol field, so this label mapping set holds "
+            "alias mappings only. Consolidate to also recover symbol renames.",
+            self.datasource_name.upper(),
+        )
+
         mappings: list[Mapping] = []
         if external_synonym_path is not None:
             mappings = self._parse_external_synonyms(
                 gene_path, xref_path, Path(external_synonym_path)
             )
 
-        mapping_set = self.create_mapping_set(mappings, mapping_type="label")
-        object.__setattr__(
-            mapping_set, "_primary_labels", self._extract_primary_labels(gene_path, xref_path)
+        return self.create_mapping_set(
+            mappings,
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(gene_path, xref_path),
+            primary_ids=self._extract_primary_ids(gene_path),
         )
-        object.__setattr__(mapping_set, "_primary_ids", self._extract_primary_ids(gene_path))
-        return mapping_set
 
     def parse_primary_ids(self, gene_path: Path | str | None = None) -> BaseMappingSet:
         """Return a mapping set containing the full list of current Ensembl gene IDs.
@@ -321,9 +318,9 @@ class EnsemblParser(BaseParser):
             raise ValueError("gene_path must not be None")
         gene_path = Path(gene_path)
         self._resolve_version(gene_path)
-        ms = self.create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(gene_path))
-        return ms
+        return self.create_mapping_set(
+            [], mapping_type="id", primary_ids=self._extract_primary_ids(gene_path)
+        )
 
     def parse_primary_labels(
         self,
@@ -345,11 +342,11 @@ class EnsemblParser(BaseParser):
         gene_path = Path(gene_path)
         xref_path = Path(xref_path)
         self._resolve_version(gene_path)
-        ms = self.create_mapping_set([], mapping_type="label")
-        object.__setattr__(
-            ms, "_primary_labels", self._extract_primary_labels(gene_path, xref_path)
+        return self.create_mapping_set(
+            [],
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(gene_path, xref_path),
         )
-        return ms
 
     def parse_all(
         self,
@@ -666,36 +663,39 @@ class EnsemblParser(BaseParser):
             LabelMappingSet with ``IAO:0100001`` ("term replaced by") mappings.
         """
         self._is_label_history = True
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        try:
+            m_meta = self.get_mapping_metadata()
+            fixed = {
+                "mapping_justification": m_meta["mapping_justification"],
+                "subject_source": m_meta.get("subject_source"),
+                "object_source": m_meta.get("object_source"),
+                "mapping_tool": m_meta.get("mapping_tool"),
+                "license": m_meta.get("license"),
+            }
 
-        record_ns = self._record_namespace()
-        rows_data: list[dict[str, Any]] = []
-        for stable_id, prev_label, curr_label, mapping_date in transitions:
-            curie_id = f"ENSEMBL:{stable_id}"
-            rows_data.append(
-                {
-                    "object_id": curie_id,
-                    "subject_label": prev_label,
-                    "subject_type": "rdfs literal",
-                    "object_label": curr_label,
-                    "_label_type": "previous",
-                    "mapping_date": mapping_date,
-                    "comment": "Derived from snapshots across releases.",
-                    "record_id": self._record_id(record_ns, curie_id, prev_label),
-                }
+            record_ns = self._record_namespace()
+            rows_data: list[dict[str, Any]] = []
+            for stable_id, prev_label, curr_label, mapping_date in transitions:
+                curie_id = f"ENSEMBL:{stable_id}"
+                rows_data.append(
+                    {
+                        "object_id": curie_id,
+                        "subject_label": prev_label,
+                        "subject_type": "rdfs literal",
+                        "object_label": curr_label,
+                        "_label_type": "previous",
+                        "mapping_date": mapping_date,
+                        "comment": "Derived from snapshots across releases.",
+                        "record_id": self._record_id(record_ns, curie_id, prev_label),
+                    }
+                )
+
+            mappings = self._build_mappings(
+                rows_data, fixed, desc="Building label history", total=len(rows_data)
             )
-
-        mappings = self._build_mappings(
-            rows_data, fixed, desc="Building label history", total=len(rows_data)
-        )
-        return self.create_mapping_set(mappings, mapping_type="label")
+            return self.create_mapping_set(mappings, mapping_type="label")
+        finally:
+            self._is_label_history = False
 
 
 __all__ = ["ALL_SPECIES", "EnsemblParser"]

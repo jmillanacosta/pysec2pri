@@ -1,4 +1,4 @@
-"""Edge-case tests for label/id/xref disambiguation in pysec2pri.update_ids."""
+"""Edge-case tests for label/id/xref disambiguation in pysec2pri.update."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ import pytest
 from mapkgsutils.context import ContextSpec, XrefMapping, XrefRecord
 from sssom_schema import Mapping
 
-from pysec2pri.api import crosswalk
 from pysec2pri.parsers.base import LabelMappingSet
-from pysec2pri.update_ids import update_labels
+from pysec2pri.update import update_labels
 
 _MJ = "semapv:BackgroundKnowledgeBasedMatching"
 
@@ -87,20 +86,3 @@ def test_context_specs_fall_through_on_failure(label_ms: LabelMappingSet, tmp_pa
     log = pd.read_csv(report_path, sep="\t")
     assert list(log["stage"]) == ["label", "xref_filter"]
     assert list(log["accepted"]) == [False, True]
-
-
-def test_crosswalk_ambiguous_target_left_blank(tmp_path: Path) -> None:
-    """A crosswalk token with two distinct targets is ambiguous, not guessed."""
-    xref_mapping = XrefMapping(
-        records=[
-            XrefRecord(subject_id="ENSG_DUP", object_id="HGNC:1", object_label="X"),
-            XrefRecord(subject_id="ENSG_DUP", object_id="HGNC:2", object_label="W"),
-        ]
-    )
-    report_path = tmp_path / "dup.tsv"
-    result = crosswalk(
-        "ENSG_DUP", frm="ensembl", to="hgnc_id", xref_mapping=xref_mapping, report_path=report_path
-    )
-    assert result == {"ENSG_DUP": ""}
-    log = pd.read_csv(report_path, sep="\t")
-    assert "ambiguous crosswalk" in log["reason"].iloc[0]

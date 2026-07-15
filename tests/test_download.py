@@ -111,7 +111,7 @@ class TestEnsemblDownloader:
         assert urls["gene"].endswith("homo_sapiens_core_115_38/gene.txt.gz")
 
     def test_get_download_urls_resolves_mouse_species_token(self) -> None:
-        """A different taxon ID resolves to its own Ensembl species token."""
+        """A different taxon ID resolves to its Ensembl species token."""
         from pysec2pri.downloads.ensembl import EnsemblDownloader
 
         downloader = EnsemblDownloader(
@@ -303,13 +303,7 @@ def _fake_mapping(token: str) -> Mapping:
 
 
 def _patch_species_discovery(monkeypatch: pytest.MonkeyPatch, tokens: list[str]) -> None:
-    """Stub discovery/release-resolution so every test exercises the real version=None path.
-
-    Every real caller invokes the bulk path with ``version=None``, relying
-    on ``check_ensembl_release()`` to resolve "latest" -- rather than
-    hardcoding an arbitrary version literal per test, every test here goes
-    through that same resolution, just against a fake "latest".
-    """
+    """Stub discovery/release-resolution."""
     monkeypatch.setattr(
         "pysec2pri.download.check_ensembl_release", lambda: SimpleNamespace(version="999-test")
     )
@@ -367,7 +361,7 @@ class TestGenerateEnsemblAllSpecies:
         }
 
     def test_raises_when_every_species_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A run where no species could be processed raises, rather than returning empty."""
+        """A run where no species could be processed raises."""
         _patch_species_discovery(monkeypatch, ["species_a"])
 
         def fake_process(*args: Any, **kwargs: Any) -> _FakeMappingSet:

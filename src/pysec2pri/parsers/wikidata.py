@@ -9,7 +9,6 @@ Uses SSSOM-compliant IdMappingSet with cardinality computation.
 from __future__ import annotations
 
 import io
-from datetime import date
 from pathlib import Path
 
 import httpx
@@ -20,15 +19,14 @@ from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
     BaseMappingSet,
     BaseParser,
-    IdMappingSet,
     LabelMappingSet,
+    get_datasource_config,
 )
 from pysec2pri.queries import (
     WIKIDATA_QUERIES,
     WIKIDATA_TEST_QUERIES,
     get_column_mapping,
 )
-from pysec2pri.version import VERSION
 
 # Default QLever endpoint (fallback if not in config)
 DEFAULT_QLEVER_ENDPOINT = "https://qlever.dev/api/wikidata"
@@ -39,7 +37,7 @@ __all__ = ["WikidataParser", "query_wikidata"]
 def query_wikidata(
     query: str,
     endpoint: str | None = None,
-    timeout: float = 100000.0,
+    timeout: float = 6000.0,
 ) -> pl.DataFrame:
     """Execute a SPARQL query against Wikidata/QLever endpoint.
 
@@ -109,11 +107,21 @@ class WikidataParser(BaseParser):
     datasource_name = "wikidata"
     default_source_url = "https://www.wikidata.org/"
 
+    @classmethod
+    def entity_types(cls) -> list[str]:
+        """Return the entity types declared by ``wikidata.yaml``'s ``queries`` block.
+
+        Each key names both a ``--entity-type`` choice and its redirect query,
+        so the config is the only place they are listed.
+        """
+        cfg = get_datasource_config(cls.datasource_name, config_package=cls.config_package)
+        return list(cfg.queries)
+
     def __init__(
         self,
         version: str | None = None,
         show_progress: bool = True,
-        entity_type: str = "metabolites",
+        entity_type: str | None = None,
         endpoint: str | None = None,
         test_subset: bool = False,
     ):
@@ -122,12 +130,13 @@ class WikidataParser(BaseParser):
         Args:
             version: Version/date string for the mappings.
             show_progress: Whether to show progress.
-            entity_type: Type of entities to query.
+            entity_type: Entity type to query; one of :meth:`entity_types`.
+                Defaults to the first one the config declares.
             endpoint: Optional custom SPARQL endpoint.
             test_subset: Whether to use test queries (LIMIT 10).
         """
         super().__init__(version=version, show_progress=show_progress)
-        self.entity_type = entity_type
+        self.entity_type = entity_type if entity_type is not None else self.entity_types()[0]
         self.test_subset = test_subset
 
         # Use provided endpoint, or fall back to config, or default
@@ -168,13 +177,14 @@ class WikidataParser(BaseParser):
         df = query_wikidata(query_str, endpoint=self.endpoint)
 
         if df.is_empty():
-            return self._empty_mappingset()
+            self._resolve_version()
+            return self.create_mapping_set([], mapping_type="id")
 
         df = self._normalize_ids(df)
         mappings = self._build_redirect_mappings(df)
-        version = self._resolve_version()
+        self._resolve_version()
 
-        return self._create_mapping_set(mappings, version)
+        return self.create_mapping_set(mappings, mapping_type="id")
 
     def parse_all(self) -> BaseMappingSet:
         """Query all entity types from config and return combined MappingSet.
@@ -188,29 +198,7 @@ class WikidataParser(BaseParser):
         """
         all_mappings: list[Mapping] = []
 
-        # Get query types from config or use defaults
-        if self._config and self._config.queries:
-            query_types = list(self._config.queries.keys())
-        else:
-            query_types = [
-                "chemical_redirects",
-                "gene_redirects",
-                "protein_redirects",
-            ]
-
-        # Map config query names to entity types
-        query_to_entity = {
-            "chemical_redirects": "metabolites",
-            "gene_redirects": "genes",
-            "protein_redirects": "proteins",
-        }
-
-        for query_name in query_types:
-            entity_type = query_to_entity.get(query_name)
-            if not entity_type:
-                logger.warning("Unknown query type: %s, skipping", query_name)
-                continue
-
+        for entity_type in self.entity_types():
             # Select appropriate query
             if self.test_subset:
                 query_str = WIKIDATA_TEST_QUERIES.get(entity_type)
@@ -227,6 +215,8 @@ class WikidataParser(BaseParser):
                 " (test subset)" if self.test_subset else "",
             )
 
+            original_entity = self.entity_type
+            self.entity_type = entity_type
             try:
                 df = query_wikidata(query_str, endpoint=self.endpoint)
 
@@ -234,22 +224,17 @@ class WikidataParser(BaseParser):
                     logger.info("No results for %s", entity_type)
                     continue
 
-                # Temporarily set entity_type for normalization
-                original_entity = self.entity_type
-                self.entity_type = entity_type
-
                 df = self._normalize_ids(df)
                 mappings = self._build_redirect_mappings(df)
                 all_mappings.extend(mappings)
-
-                self.entity_type = original_entity
-
             except Exception as e:
                 logger.warning("Failed to query %s: %s", entity_type, e)
                 continue
+            finally:
+                self.entity_type = original_entity
 
-        version = self._resolve_version()
-        return self._create_mapping_set(all_mappings, version)
+        self._resolve_version()
+        return self.create_mapping_set(all_mappings, mapping_type="id")
 
     def parse_from_file(self, input_path: Path | str) -> BaseMappingSet:
         """Parse Wikidata redirects from a pre-downloaded TSV file.
@@ -265,9 +250,9 @@ class WikidataParser(BaseParser):
         df = pl.read_csv(input_path, separator="\t", has_header=True)
         df = self._normalize_ids(df)
         mappings = self._build_redirect_mappings(df)
-        version = self._resolve_version()
+        self._resolve_version()
 
-        return self._create_mapping_set(mappings, version)
+        return self.create_mapping_set(mappings, mapping_type="id")
 
     def parse_labels(self, input_path: Path | str | None = None) -> LabelMappingSet:
         """Return a LabelMappingSet of previous-label  to current-label mappings.
@@ -296,81 +281,13 @@ class WikidataParser(BaseParser):
             df = query_wikidata(query_str, endpoint=self.endpoint)
 
         if df.is_empty():
-            return self._create_label_mapping_set([], self._resolve_version())
+            self._resolve_version()
+            return self.create_mapping_set([], mapping_type="label")
 
         df = self._normalize_ids(df)
         mappings = self._build_redirect_mappings(df)
-        version = self._resolve_version()
-        return self._create_label_mapping_set(mappings, version)
-
-    def _create_label_mapping_set(
-        self,
-        mappings: list[Mapping],
-        version: str,
-    ) -> LabelMappingSet:
-        """Create a LabelMappingSet with metadata."""
-        ms_meta = self.get_mappingset_metadata()
-
-        curie_map = ms_meta.get("curie_map", {})
-        curie_map_str: dict[str, str] = {}
-        for k, v in curie_map.items():
-            if hasattr(v, "prefix_reference"):
-                curie_map_str[str(k)] = str(v.prefix_reference)
-            else:
-                curie_map_str[str(k)] = str(v)
-
-        mapping_set = LabelMappingSet(
-            mapping_set_id=ms_meta.get("mapping_set_id", ""),
-            mapping_set_version=version,
-            mapping_set_title=ms_meta.get("mapping_set_title"),
-            mapping_set_description=ms_meta.get("mapping_set_description"),
-            curie_map=curie_map_str,
-            license=ms_meta.get("license"),
-            creator_id=ms_meta.get("creator_id"),
-            creator_label=ms_meta.get("creator_label"),
-            mapping_provider=ms_meta.get("mapping_provider"),
-            mapping_tool=ms_meta.get("mapping_tool"),
-            mapping_tool_version=VERSION,
-            mapping_date=date.today().isoformat(),
-            subject_source=ms_meta.get("subject_source"),
-            object_source=ms_meta.get("object_source"),
-            subject_source_version=version,
-            object_source_version=version,
-            comment=self._build_comment(f"Wikidata label mappings for {self.entity_type}."),
-            mappings=mappings,
-        )
-        mapping_set.compute_cardinalities()
-        return mapping_set
-
-    def _empty_mappingset(self) -> BaseMappingSet:
-        """Create an empty mapping set."""
-        version = self._resolve_version()
-        ms_meta = self.get_mappingset_metadata()
-
-        curie_map = ms_meta.get("curie_map", {})
-        curie_map_str: dict[str, str] = {}
-        for k, v in curie_map.items():
-            if hasattr(v, "prefix_reference"):
-                curie_map_str[str(k)] = str(v.prefix_reference)
-            else:
-                curie_map_str[str(k)] = str(v)
-
-        mapping_set = IdMappingSet(
-            mapping_set_id=ms_meta.get("mapping_set_id", ""),
-            mapping_set_version=version,
-            curie_map=curie_map_str,
-            license=ms_meta.get("license"),
-            mapping_tool=ms_meta.get("mapping_tool"),
-            mapping_tool_version=VERSION,
-            mapping_date=date.today().isoformat(),
-            subject_source=ms_meta.get("subject_source"),
-            object_source=ms_meta.get("object_source"),
-            subject_source_version=version,
-            object_source_version=version,
-            mappings=[],
-        )
-        mapping_set.compute_cardinalities()
-        return mapping_set
+        self._resolve_version()
+        return self.create_mapping_set(mappings, mapping_type="label")
 
     def _normalize_ids(self, df: pl.DataFrame) -> pl.DataFrame:
         """Normalize IDs to WD:Qxxx format."""
@@ -410,18 +327,6 @@ class WikidataParser(BaseParser):
             .then(pl.lit("WD:") + c.str.split("/").list.last())
             .otherwise(pl.lit("WD:") + c)
         )
-
-    @staticmethod
-    def _normalize_qid(qid: str | None) -> str | None:
-        """Normalize a QID to WD:Qxxx format."""
-        if not qid or qid == "":
-            return None
-        qid = qid.strip()
-        if qid.startswith("WD:"):
-            return qid
-        if "wikidata.org/entity/" in qid:
-            qid = qid.split("/")[-1]
-        return f"WD:{qid}"
 
     def _build_redirect_mappings(self, df: pl.DataFrame) -> list[Mapping]:
         col_map = get_column_mapping(self.entity_type)
@@ -488,42 +393,3 @@ class WikidataParser(BaseParser):
             desc=f"Building {self.entity_type} mappings",
             total=len(rows_data),
         )
-
-    def _create_mapping_set(
-        self,
-        mappings: list[Mapping],
-        version: str,
-    ) -> BaseMappingSet:
-        """Create the final MappingSet with metadata."""
-        ms_meta = self.get_mappingset_metadata()
-
-        curie_map = ms_meta.get("curie_map", {})
-        curie_map_str: dict[str, str] = {}
-        for k, v in curie_map.items():
-            if hasattr(v, "prefix_reference"):
-                curie_map_str[str(k)] = str(v.prefix_reference)
-            else:
-                curie_map_str[str(k)] = str(v)
-
-        mapping_set = IdMappingSet(
-            mapping_set_id=ms_meta.get("mapping_set_id", ""),
-            mapping_set_version=version,
-            mapping_set_title=ms_meta.get("mapping_set_title"),
-            mapping_set_description=ms_meta.get("mapping_set_description"),
-            curie_map=curie_map_str,
-            license=ms_meta.get("license"),
-            creator_id=ms_meta.get("creator_id"),
-            creator_label=ms_meta.get("creator_label"),
-            mapping_provider=ms_meta.get("mapping_provider"),
-            mapping_tool=ms_meta.get("mapping_tool"),
-            mapping_tool_version=VERSION,
-            mapping_date=date.today().isoformat(),
-            subject_source=ms_meta.get("subject_source"),
-            object_source=ms_meta.get("object_source"),
-            subject_source_version=version,
-            object_source_version=version,
-            comment=self._build_comment(f"Wikidata mappings for {self.entity_type}."),
-            mappings=mappings,
-        )
-        mapping_set.compute_cardinalities()
-        return mapping_set

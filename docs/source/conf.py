@@ -24,7 +24,7 @@ copyright = f"{date.today().year}, Javier Millán Acosta"
 author = "Javier Millán Acosta"
 
 # The full version, including alpha/beta/rc tags.
-release = "0.2.4"
+release = "0.3.0"
 
 # The short X.Y version.
 parsed_version = re.match(
@@ -74,6 +74,7 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
+    "nbsphinx",
     "sphinx_automodapi.automodapi",
     "sphinx_automodapi.smart_resolver",
     # 'texext',
@@ -263,3 +264,9 @@ todo_emit_warnings = True
 
 # Output SVG inheritance diagrams
 graphviz_output_format = "svg"
+
+# Run the notebooks on every docs build, so a change that breaks them fails the
+# build instead of shipping stale output. They download real data, so give them
+# room; the stored outputs are only a fallback for a build without network.
+nbsphinx_execute = "always"
+nbsphinx_timeout = 900

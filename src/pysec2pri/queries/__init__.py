@@ -14,7 +14,6 @@ __all__ = [
     "PROTEIN_REDIRECTS_QUERY",
     "WIKIDATA_QUERIES",
     "WIKIDATA_TEST_QUERIES",
-    "get_query",
 ]
 
 # Directory containing .rq query files
@@ -36,74 +35,44 @@ PROTEIN_REDIRECTS_QUERY = _load_query("protein_redirects.rq")
 CHEMICAL_REDIRECTS_TEST_QUERY = _load_query("chemical_redirects_test.rq")
 GENE_REDIRECTS_TEST_QUERY = _load_query("gene_redirects_test.rq")
 PROTEIN_REDIRECTS_TEST_QUERY = _load_query("protein_redirects_test.rq")
-# Query mapping by entity type
+# Query mapping by entity type, keyed as in wikidata.yaml's `queries` block.
 WIKIDATA_QUERIES: dict[str, str] = {
-    "metabolites": CHEMICAL_REDIRECTS_QUERY,
     "chemicals": CHEMICAL_REDIRECTS_QUERY,
     "genes": GENE_REDIRECTS_QUERY,
     "proteins": PROTEIN_REDIRECTS_QUERY,
 }
 
 WIKIDATA_TEST_QUERIES: dict[str, str] = {
-    "metabolites": CHEMICAL_REDIRECTS_TEST_QUERY,
     "chemicals": CHEMICAL_REDIRECTS_TEST_QUERY,
     "genes": GENE_REDIRECTS_TEST_QUERY,
     "proteins": PROTEIN_REDIRECTS_TEST_QUERY,
 }
-# Column name mapping for each query type
-# Maps entity type to the expected column names in query results
+
+# Result column names per entity type. Only genes name their label columns
+# after symbols; the rest share the name/synonym pair.
+_NAME_SYNONYM_COLUMNS = {
+    "subject_id": "secondaryID",
+    "object_id": "primaryID",
+    "primary_label": "name",
+    "secondary_label": "synonym",
+}
 QUERY_COLUMNS: dict[str, dict[str, str]] = {
-    "metabolites": {
-        "subject_id": "secondaryID",
-        "object_id": "primaryID",
-        "primary_label": "name",
-        "secondary_label": "synonym",
-    },
-    "chemicals": {
-        "subject_id": "secondaryID",
-        "object_id": "primaryID",
-        "primary_label": "name",
-        "secondary_label": "synonym",
-    },
+    "chemicals": _NAME_SYNONYM_COLUMNS,
     "genes": {
         "subject_id": "secondaryID",
         "object_id": "primaryID",
         "primary_label": "primarySymbol",
         "secondary_label": "secondarySymbol",
     },
-    "proteins": {
-        "subject_id": "secondaryID",
-        "object_id": "primaryID",
-        "primary_label": "name",
-        "secondary_label": "synonym",
-    },
+    "proteins": _NAME_SYNONYM_COLUMNS,
 }
-
-
-def get_query(entity_type: str) -> str:
-    """Get the SPARQL query for a specific entity type.
-
-    Args:
-        entity_type: Type of entities (metabolites, chemicals, genes, proteins).
-
-    Returns:
-        The SPARQL query string.
-
-    Raises:
-        ValueError: If entity type is unknown.
-    """
-    query = WIKIDATA_QUERIES.get(entity_type.lower())
-    if query is None:
-        available = list(WIKIDATA_QUERIES.keys())
-        raise ValueError(f"Unknown entity type: {entity_type}. Available: {available}")
-    return query
 
 
 def get_column_mapping(entity_type: str) -> dict[str, str]:
     """Get the column name mapping for a specific entity type.
 
     Args:
-        entity_type: Type of entities (metabolites, chemicals, genes, proteins).
+        entity_type: Entity type, e.g. ``"chemicals"``/``"genes"``/``"proteins"``.
 
     Returns:
         Dictionary mapping semantic names to actual column names.

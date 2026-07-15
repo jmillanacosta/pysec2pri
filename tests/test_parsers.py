@@ -739,7 +739,7 @@ class TestMappingDate:
 
 
 class TestPerMappingDate:
-    """Per-source ``mapping_date`` sourced from each datasource's own record dates."""
+    """Per-source ``mapping_date`` sourced from each datasource record dates."""
 
     def test_hgnc_dates_only_apply_to_previous_symbols(self, hgnc_complete_path: Path) -> None:
         """HGNC's date_symbol_changed applies to previous-symbol rows, not alias rows.
@@ -753,7 +753,7 @@ class TestPerMappingDate:
         assert by_label["BRCC1"].mapping_date is None
 
     def test_ncbi_discontinued_uses_discontinue_date(self, ncbi_history_path: Path) -> None:
-        """Discontinued-ID mappings carry NCBI's own Discontinue_Date, as ISO.
+        """Discontinued-ID mappings carry NCBI Discontinue_Date, as ISO.
 
         mock_gene_history.tsv: GeneID=1001 -> Discontinued_GeneID=100001, Discontinue_Date=20230115.
         """

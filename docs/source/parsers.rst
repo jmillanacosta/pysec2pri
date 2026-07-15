@@ -74,30 +74,4 @@ Module Reference
 Adding a New Parser
 ===================
 
-1. **Create config YAML** (``config/mydb.yaml``) with ``mappingset``,
-   ``mapping``, and ``download_urls`` sections - see existing configs for
-   reference.
-
-2. **Create parser class** (``src/pysec2pri/parsers/mydb.py``):
-
-   .. code-block:: python
-
-      from pysec2pri.parsers.base import BaseParser
-
-      class MyDBParser(BaseParser):
-          datasource_name = "mydb"
-
-          def parse(self, input_path):
-              raw = self._load(input_path)
-              mappings = self._build_id_mappings(raw)
-              return self._create_mapping_set(mappings, mapping_type="id")
-
-3. **Register in constants** (``src/pysec2pri/constants.py``):
-
-   .. code-block:: python
-
-      MYDB = get_datasource_config("mydb")
-      ALL_DATASOURCES = [..., MYDB]
-
-4. **Expose in API and CLI** - add a ``parse_mydb()`` function in
-   ``src/pysec2pri/api.py`` and a command in ``src/pysec2pri/cli.py``.
+See :doc:`adding_a_source`.
