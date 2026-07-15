@@ -2,13 +2,12 @@
  Generate mapping sets
 ######################
 
-A mapping set says what a database retired. There are two kinds, and one
-function each:
+A mapping set contains identifier or label mappings between secondaries (withdrawn, split, merged, redirected, aliased) and primaries. 
 
 .. list-table::
    :header-rows: 1
 
-   * - kind
+   * - type
      - maps
      - example
    * - ``ids``
@@ -18,65 +17,81 @@ function each:
      - old or alias label -> current label
      - ``TMEM8`` -> ``TMEM8A``
 
+Generating secondary-to-primary identifier and label mapping sets:
+
 .. code-block:: python
 
     from pysec2pri import generate_ids, generate_labels, sources
 
     sources()          # every source
-    sources("labels")  # sources with labels
+    sources("labels")  # sources that produce label mapping sets
 
     hgnc = generate_ids("hgnc")
     chebi = generate_labels("chebi", subset="3star")
 
-Both return an SSSOM mapping set: an ``IdMappingSet`` or a ``LabelMappingSet``.
-Subjects are secondary, objects are primary. See :doc:`exports` to write one
-out, and :doc:`update_ids` to resolve your own data against it.
-
-The same from the command line, one command per kind:
+The same from the command line, one command for IDs and another for labels:
 
 .. code-block:: bash
 
     pysec2pri hgnc ids
     pysec2pri hgnc labels
 
+Both return a SSSOM mapping set: an ``IdMappingSet`` or a ``LabelMappingSet``
+where the secondary identifier or label is the subject of a statement about its relationship to the primary that replaces it, if any.
+
+See :doc:`exports` for the available output formats, and :doc:`update_ids` for
+instructions on to check and update the identifiers and labels in your own data
+against a generated mapping set.
+
+
 Source options
 ==============
 
-Some sources publish several datasets per release, and an argument picks which:
-``species`` for the multi-species ones, ``subset`` for ChEBI, ``entity_type``
-for Wikidata. Each is a mapping set of its own, with its own ``mapping_set_id``.
-Passing one to a source that has no such option does nothing, so the same call
-works everywhere.
+Some sources publish several datasets per release.
+
+To subset the generation of mapping sets, arguments like  ```species`` for the multi-species ones, ``subset`` for ChEBI, ``entity_type``
+for Wikidata result in a mapping set of its own, with its own ``mapping_set_id``.
 
 .. code-block:: python
 
     generate_ids("ensembl", version="115", species="9606")
     generate_ids("hgnc", species="9606")  # HGNC has no species; ignored
 
-``pysec2pri <source> ids --help`` lists what a source takes.
+``pysec2pri <source> ids --help`` lists what flags a source takes.
 
 Input files
 ===========
 
-Files are downloaded unless you pass your own. Each input a source declares
-gets its own option, named after the file:
+Files are downloaded according to the specified ``version``:
+
+.. code-block:: bash
+
+    pysec2pri hgnc ids
 
 .. code-block:: bash
 
     pysec2pri hgnc ids --withdrawn withdrawn.txt --complete hgnc_complete_set.txt
 
+You can see the available versions for a database:
+
+.. code-block:: bash
+
+    pysec2pri list-versions hgnc
+
+You can also provide the needed input files:
+
 .. code-block:: python
 
     generate_ids("hgnc", inputs={"withdrawn": "withdrawn.txt", "complete": "hgnc_complete_set.txt"})
 
-Looking further back
-====================
+Consolidated mapping sets
+=========================
 
-A mapping set says what the source's current release says. Sources keep
-different amounts of their own history, and some drop retired entries
-altogether. ``--consolidate`` reads the source's past releases too: it finds
-mappings the current release no longer mentions, and gives every mapping the
-release it first appeared in.
+A mapping set generated for a specific release of a database is limited to the deprecation information that can be extracted from that release. 
+
+``--consolidate`` reads the source's past releases too: it finds
+mappings the current release might no longer mention, and gives every mapping the
+release version and date it first appeared in.
 
 .. code-block:: bash
 
@@ -89,15 +104,3 @@ release it first appeared in.
     supports_consolidate("hgnc", "ids")
     generate_ids("hgnc", consolidate=True)
 
-This downloads every past release, so it is slow. It saves its progress, so
-stopping it and running it again picks up where it left off. Use ``cache_dir``
-to say where, ``force`` to start over, and ``from_version``/``to_version`` to
-read part of the archive only.
-
-Not every source can do this. :func:`~pysec2pri.api.supports_consolidate` says
-which can, and ``--consolidate`` only appears in a source's ``--help`` when it
-applies.
-
-Full signatures: :func:`~pysec2pri.api.generate_ids`,
-:func:`~pysec2pri.api.generate_labels`, :func:`~pysec2pri.api.sources`,
-:func:`~pysec2pri.api.supports_consolidate`.
