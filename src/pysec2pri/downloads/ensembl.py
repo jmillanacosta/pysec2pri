@@ -136,7 +136,7 @@ class EnsemblDownloader(BaseDownloader):
 
         Args:
             version: Ensembl release number (e.g. ``"115"``).
-            species: Canonical NCBI taxon ID, resolved to Ensembl's own
+            species: Canonical NCBI taxon ID, resolved to Ensembl
                 species token via ``config.species_token()``.
             assembly: Force a specific assembly suffix (e.g. ``"38"``),
                 skipping auto-discovery.
@@ -294,7 +294,7 @@ def _get_ensembl_urls_for_version(
     """Build Ensembl URLs for a specific release/species.
 
     Delegates to :meth:`EnsemblDownloader.get_download_urls`, which resolves
-    *species* to Ensembl's own species token and auto-discovers the assembly
+    *species* to Ensembl species token and auto-discovers the assembly
     suffix when *assembly* is not given.
 
     Args:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,17 +22,36 @@ from pysec2pri.consolidate import (
 
 
 class TestDefaultCacheDir:
-    """Cache directory resolution."""
+    """The cache goes where each OS keeps caches, not always ``~/.cache``."""
 
     def test_uses_env_var_when_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """``$PYSEC2PRI_CACHE_DIR`` takes priority over the default."""
         monkeypatch.setenv("PYSEC2PRI_CACHE_DIR", str(tmp_path))
         assert default_cache_dir() == tmp_path
 
-    def test_falls_back_to_home_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Without the env var, defaults to ``~/.cache/pysec2pri``."""
+    def test_linux_honours_xdg(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """On Linux, ``$XDG_CACHE_HOME`` when set, else ``~/.cache``."""
         monkeypatch.delenv("PYSEC2PRI_CACHE_DIR", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        assert default_cache_dir() == tmp_path / "pysec2pri"
+        monkeypatch.delenv("XDG_CACHE_HOME")
         assert default_cache_dir() == Path.home() / ".cache" / "pysec2pri"
+
+    def test_macos_uses_library_caches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MacOS keeps caches under ``~/Library/Caches``."""
+        monkeypatch.delenv("PYSEC2PRI_CACHE_DIR", raising=False)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert default_cache_dir() == Path.home() / "Library" / "Caches" / "pysec2pri"
+
+    def test_windows_uses_localappdata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Windows keeps caches under ``%LOCALAPPDATA%``."""
+        monkeypatch.delenv("PYSEC2PRI_CACHE_DIR", raising=False)
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        assert default_cache_dir() == tmp_path / "pysec2pri"
 
 
 class TestLoadMappingDates:
@@ -199,36 +218,6 @@ class TestConsolidateDispatch:
         assert records["undated"]["first_seen_date"] == ""
 
 
-class TestBuildConsolidatedMappingSet:
-    """Materializing the cached field snapshots back into a real SSSOM mapping set."""
-
-    def test_empty_first_seen_date_leaves_mapping_date_unset(self) -> None:
-        """An empty (unresolvable) first_seen_date must not reach Mapping(mapping_date=...)."""
-        fields_json = json.dumps(
-            {
-                "subject_id": "CHEBI:10001",
-                "object_id": "CHEBI:99901",
-                "predicate_id": "IAO:0100001",
-                "mapping_justification": "semapv:BackgroundKnowledgeBasedMatching",
-            }
-        )
-        records = {
-            "a" * 16: {
-                "first_seen_version": "183",
-                "first_seen_date": "",
-                "last_seen_version": "183",
-                "last_seen_date": "",
-                "fields_json": fields_json,
-            }
-        }
-
-        mapping_set = consolidate_module._build_consolidated_mapping_set(
-            "chebi", "ids", records, "183"
-        )
-
-        assert mapping_set.mappings[0].mapping_date is None
-
-
 class TestLabelTransitions:
     """Pure-function tests for the Ensembl label-history diff logic."""
 
@@ -251,7 +240,7 @@ class TestLabelTransitions:
         assert _label_transitions(prev, curr) == []
 
     def test_multiple_changes_all_reported(self) -> None:
-        """Every changed gene gets its own transition tuple."""
+        """Every changed gene gets a transition tuple."""
         prev = {"G1": "OLD1", "G2": "OLD2", "G3": "SAME"}
         curr = {"G1": "NEW1", "G2": "NEW2", "G3": "SAME"}
         assert set(_label_transitions(prev, curr)) == {

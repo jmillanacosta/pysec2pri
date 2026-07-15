@@ -4,7 +4,7 @@ This parser extracts ID-to-ID mappings from:
 - hmdb_metabolites.xml  -> HMDB0... accessions  (HMDBMetaboliteParser)
 - hmdb_proteins.xml     -> HMDBP... accessions  (HMDBProteinParser)
 
-Each subclass reads its own YAML config:
+Each subclass reads a YAML config:
 - hmdb_metabolites.yaml
 - hmdb_proteins.yaml
 
@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 import defusedxml.ElementTree as DefusedET
-from sssom_schema import Mapping
 
 from pysec2pri.logging import logger
 from pysec2pri.parsers.base import (
@@ -44,8 +43,8 @@ class HMDBParser(BaseParser):
     Use :class:`HMDBMetaboliteParser` or :class:`HMDBProteinParser`.
     """
 
-    # Subclasses must declare their own datasource_name so each reads
-    # its own YAML config file (hmdb_metabolites.yaml / hmdb_proteins.yaml).
+    # Subclasses declare their own datasource_name so each reads
+    # their YAML config file (hmdb_metabolites.yaml / hmdb_proteins.yaml).
     datasource_name: str  # must be set by subclass
 
     # Internal helpers
@@ -100,7 +99,7 @@ class HMDBParser(BaseParser):
         """
         xml_content = self._read_xml_content(file_path)
         if xml_content is None:
-            return self._create_mapping_set([])
+            return self.create_mapping_set([])
 
         self._resolve_version(file_path)
         m_meta = self.get_mapping_metadata()
@@ -135,10 +134,7 @@ class HMDBParser(BaseParser):
         mappings = self._build_mappings(
             rows_data, fixed, desc="Building HMDB mappings", total=len(rows_data)
         )
-        ms = self._create_mapping_set(mappings)
-        if primary_ids_found:
-            object.__setattr__(ms, "_primary_ids", primary_ids_found)
-        return ms
+        return self.create_mapping_set(mappings, primary_ids=primary_ids_found or None)
 
     def _process_record(
         self,
@@ -245,12 +241,6 @@ class HMDBParser(BaseParser):
                 logger.warning("Failed to read file %s: %s", file_path, e)
                 return None
 
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Delegate to the base-class factory."""
-        return self.create_mapping_set(mappings, mapping_type)
-
     def parse_primary_ids(
         self,
         metabolites_path: Path | str | None = None,
@@ -284,9 +274,7 @@ class HMDBParser(BaseParser):
             ms_p = self.parse(proteins_path)
             primary_ids |= object.__getattribute__(ms_p, "_primary_ids")
 
-        ms = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", primary_ids)
-        return ms
+        return self.create_mapping_set([], mapping_type="id", primary_ids=primary_ids)
 
 
 # Concrete parsers

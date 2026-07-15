@@ -9,6 +9,7 @@ from sssom_schema import Mapping
 from pysec2pri.exports import (
     write_label2prev,
     write_name2synonym,
+    write_output,
     write_sec2pri,
 )
 from pysec2pri.parsers.base import IdMappingSet, LabelMappingSet
@@ -168,3 +169,27 @@ class TestWriteLabel2Prev:
             # Only the header row: no synonym rows should appear
             assert len(lines) == 1
             assert "primary_label" in lines[0]
+
+
+class TestWritePathParity:
+    """``save()`` and ``write_output()`` must emit one schema per format."""
+
+    def test_pri_ids_paths_agree(self, id_mapping_set: IdMappingSet) -> None:
+        """pri_ids is identical whether written via save() or write_output()."""
+        object.__setattr__(id_mapping_set, "_primary_ids", {"CHEBI:99902", "CHEBI:99901"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            via_save = id_mapping_set.save("pri_ids", Path(tmpdir) / "a.txt")
+            via_writers = write_output(id_mapping_set, "pri_ids", Path(tmpdir) / "b.txt")
+            assert via_save.read_text() == via_writers.read_text()
+            assert via_save.read_text() == "CHEBI:99901\nCHEBI:99902\n"
+
+    def test_pri_labels_paths_agree(self, label_mapping_set: LabelMappingSet) -> None:
+        """pri_labels is identical whether written via save() or write_output()."""
+        object.__setattr__(
+            label_mapping_set, "_primary_labels", {"TP53": {"HGNC:1"}, "BRCA1": {"HGNC:2"}}
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            via_save = label_mapping_set.save("pri_labels", Path(tmpdir) / "a.txt")
+            via_writers = write_output(label_mapping_set, "pri_labels", Path(tmpdir) / "b.txt")
+            assert via_save.read_text() == via_writers.read_text()
+            assert via_save.read_text() == "id\tlabel\nHGNC:1\tTP53\nHGNC:2\tBRCA1\n"

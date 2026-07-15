@@ -3,6 +3,8 @@ config_id: "chebi"
 datasource_id: "chebi"
 name: "ChEBI"
 parser_class: "ChEBIParser"
+# Splits this source into disjoint datasets: folded into the IRIs.
+products: ["subset"]
 prefix: "CHEBI"
 curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
 entity_types: ["chemical entities"]
@@ -159,17 +161,25 @@ default_output_filename: "chebi_sec2pri.sssom.tsv"
 
 mapping_sets:
   ids:
+    consolidate: true
     method: parse
-    primary_input: secondary_ids
-    required_inputs: [secondary_ids, compounds]
+    # download_urls key -> parameter of `method`
+    inputs: { secondary_ids: secondary_ids_path, compounds: compounds_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
   labels:
+    consolidate: true
     method: parse_synonyms
-    primary_input: names
-    required_inputs: [names, compounds]
-    formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
+    inputs: { names: names_path, compounds: compounds_path }
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { compounds: compounds_path }
+    formats: [pri_ids]
+  primary_labels:
+    method: parse_primary_labels
+    inputs: { compounds: compounds_path }
+    formats: [pri_labels]
 source: "ChEBI database"
 homepage: "https://www.ebi.ac.uk/chebi/"
 data_license: "https://creativecommons.org/licenses/by/4.0/"

@@ -6,7 +6,45 @@
 and labels to primary (current) ones, with
 `SSSOM <https://mapping-commons.github.io/sssom/>`_ output by default.
 
-Supported databases: ChEBI, HMDB, HGNC, NCBI Gene, UniProt, Wikidata.
+Supported databases
+===================
+
+.. list-table::
+   :header-rows: 1
+
+   * - Database
+     - ``source``
+     - Mapping sets
+   * - ChEBI
+     - ``chebi``
+     - ``ids``, ``labels``
+   * - Ensembl
+     - ``ensembl``
+     - ``ids``, ``labels``
+   * - HGNC
+     - ``hgnc``
+     - ``ids``, ``labels``
+   * - HMDB Metabolites
+     - ``hmdb_metabolites``
+     - ``ids``
+   * - HMDB Proteins
+     - ``hmdb_proteins``
+     - ``ids``
+   * - NCBI Gene
+     - ``ncbi``
+     - ``ids``, ``labels``
+   * - UniProt
+     - ``uniprot``
+     - ``ids``
+   * - VGNC
+     - ``vgnc``
+     - ``ids``, ``labels``
+   * - Wikidata
+     - ``wikidata``
+     - ``ids``, ``labels``
+
+:func:`~pysec2pri.api.sources` returns this list at run time. To add another,
+see :doc:`adding_a_source`: it takes a config and a parser.
 
 Quick Start
 ===========
@@ -16,7 +54,7 @@ Quick Start
 .. code-block:: bash
 
     pysec2pri hgnc ids
-    pysec2pri chebi synonyms
+    pysec2pri chebi labels
 
 **Update IDs or labels in a file (CLI):**
 
@@ -31,20 +69,21 @@ Quick Start
 
 .. code-block:: python
 
-    from pysec2pri import generate_hgnc, resolve_ids
-    from pysec2pri import generate_hgnc_labels, resolve_labels
-    from pysec2pri import load_mapping, load_label_mapping
+    from pysec2pri import generate_ids, generate_labels, resolve_ids, resolve_labels
+    from pysec2pri import load_mapping, load_label_mapping, sources
 
-    ms = generate_hgnc()
+    sources()                                # every source
+
+    ms = generate_ids("hgnc")
     resolve_ids("HGNC:131", ms)              # : "HGNC:145"
     resolve_ids(["HGNC:131", "HGNC:2"], ms)  # : ["HGNC:145", ...]
 
-    lms = generate_hgnc_labels()
-    resolve_labels("BRCA1_OLD", lms)        # : "BRCA1"
+    lms = generate_labels("hgnc")
+    resolve_labels("BRCA1_OLD", lms)         # : "BRCA1"
 
-    # load from a saved sec2pri / SSSOM file
-    ms = load_mapping("hgnc_sec2pri.tsv")
-    lms = load_label_mapping("hgnc_label2prev.tsv")
+    # read back a saved SSSOM file
+    ms = load_mapping("hgnc_sssom.tsv")
+    lms = load_label_mapping("hgnc_labels_sssom.tsv")
 
 .. toctree::
    :maxdepth: 1
@@ -57,8 +96,15 @@ Quick Start
    :maxdepth: 1
    :caption: Features
 
-   download
+   generate
+   update_ids
    exports
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Extending
+
+   adding_a_source
 
 .. toctree::
    :maxdepth: 1
@@ -67,4 +113,4 @@ Quick Start
    api
    parsers
    models
-   update_ids
+   download

@@ -111,7 +111,7 @@ class TestEnsemblDownloader:
         assert urls["gene"].endswith("homo_sapiens_core_115_38/gene.txt.gz")
 
     def test_get_download_urls_resolves_mouse_species_token(self) -> None:
-        """A different taxon ID resolves to its own Ensembl species token."""
+        """A different taxon ID resolves to its Ensembl species token."""
         from pysec2pri.downloads.ensembl import EnsemblDownloader
 
         downloader = EnsemblDownloader(

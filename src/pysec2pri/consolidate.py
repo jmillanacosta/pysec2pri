@@ -31,7 +31,7 @@ This module supports two consolidation strategies, selected via *mode*:
 
 The cache I/O and release/date walk loop shapes are datasource-agnostic and
 live in :mod:`mapkgsutils.consolidate`; this module binds them to
-pysec2pri's own datasource registries, parsers, and path layout.
+pysec2pri's datasource registries, parsers, and path layout.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -49,7 +50,7 @@ import mapkgsutils.consolidate as _consolidate
 from pysec2pri.constants import ALL_DATASOURCES
 from pysec2pri.constants import CONSOLIDATE_DATASOURCES as SUPPORTED_DATASOURCES
 from pysec2pri.logging import logger
-from pysec2pri.parsers.base import BaseMappingSet, _cmp_versions
+from pysec2pri.parsers.base import BaseMappingSet, _cmp_versions, product_slug_values
 
 __all__ = [
     "SUPPORTED_DATASOURCES",
@@ -107,26 +108,36 @@ _LIST_VERSIONS_FNS: dict[str, Callable[..., list[str]]] = {
 }
 
 
+def _user_cache_root() -> Path:
+    """Return where this OS keeps per-user caches."""
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        return Path(local) if local else Path.home() / "AppData" / "Local"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return Path(xdg) if xdg else Path.home() / ".cache"
+
+
 def default_cache_dir() -> Path:
     """Return the default cache directory for consolidated mapping-date indexes.
 
     Returns:
-        ``$PYSEC2PRI_CACHE_DIR`` when set, otherwise ``~/.cache/pysec2pri``.
+        ``$PYSEC2PRI_CACHE_DIR`` when set, otherwise a ``pysec2pri`` directory
+        under this OS's per-user cache: ``%LOCALAPPDATA%`` on Windows,
+        ``~/Library/Caches`` on macOS, ``$XDG_CACHE_HOME`` or ``~/.cache``
+        elsewhere.
     """
     env = os.environ.get("PYSEC2PRI_CACHE_DIR")
-    return Path(env) if env else Path.home() / ".cache" / "pysec2pri"
+    return Path(env) if env else _user_cache_root() / "pysec2pri"
 
 
 def _product_slugs(datasource: str, **kwargs: Any) -> tuple[str, ...]:
-    """Return the IRI/path slug(s) disambiguating datasource product."""
+    """Return the slug(s) naming which of *datasource*'s datasets this is."""
     config = ALL_DATASOURCES.get(datasource)
     if config is None:
         return ()
-    if config.subset:
-        return (str(kwargs.get("subset") or config.default_subset()),)
-    if config.species:
-        return (str(kwargs.get("species", config.default_species())),)
-    return ()
+    return product_slug_values(config, **kwargs)
 
 
 def _cache_dir_for(cache_dir: Path, datasource: str, **kwargs: Any) -> Path:
@@ -311,32 +322,6 @@ def _run_one_version(
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def _build_consolidated_mapping_set(
-    datasource: str,
-    mapping_sets: str,
-    records: dict[str, dict[str, str]],
-    last_version: str | None,
-) -> Any:
-    """Materialize the consolidated index as a real SSSOM mapping set.
-
-    Binds :func:`mapkgsutils.consolidate.build_consolidated_mapping_set` to
-    *datasource*'s own mapping-set class and metadata -- see that function
-    for what the materialization itself does.
-    """
-    from pysec2pri.parsers.base import IdMappingSet, LabelMappingSet
-
-    config = ALL_DATASOURCES[datasource]
-    cls = LabelMappingSet if mapping_sets == "labels" else IdMappingSet
-    return _consolidate.build_consolidated_mapping_set(
-        records,
-        last_version,
-        mapping_set_class=cls,
-        record_namespace=str(config.mapping_metadata.get("record_id") or ""),
-        mapping_set_metadata=config.mappingset_metadata,
-        cardinality_on="label" if mapping_sets == "labels" else "id",
-    )
-
-
 def _write_consolidated_sssom(
     datasource: str, mapping_sets: str, cache_path: Path, meta_path: Path
 ) -> tuple[Path, Any]:
@@ -380,16 +365,7 @@ def consolidate_mapping_dates(
       seen, records the version/date it first appeared and keeps bumping the
       version/date it was last seen. Slow and network-heavy (~250 releases
       for ChEBI); meant to be run manually/as a one-off.
-    - Datasources **without** one (NCBI, VGNC): a single current parse
-      caching the *full* mapping set — every mapping kept, stamped with its
-      own per-row ``mapping_date`` when the parser provides one and left
-      undated otherwise. Fast, no historical walk.
-
-    Alongside the internal cache file this also writes a companion real SSSOM
-    mapping set (see :func:`_sssom_output_path`) where each row's
-    ``mapping_date`` is its per-row date when present, else its first-seen
-    release date — distinct from the first-seen release version carried in
-    ``subject_source_version``/``object_source_version``.
+    - Datasources without: a single current parse.
 
     Args:
         datasource: One of :data:`SUPPORTED_DATASOURCES`.
@@ -434,7 +410,7 @@ def consolidate_mapping_dates(
                 "ensembl consolidation requires an explicit single species= taxon ID. "
                 "Its config default is species='all', which the per-version "
                 "download/parse step used here (unlike pysec2pri.api's bulk "
-                "generate_ensembl) has no support for."
+                "generate_ids) has no support for."
             )
 
     cache_dir = cache_dir or default_cache_dir()
@@ -572,7 +548,7 @@ def build_label_history(
             "ensembl label history requires an explicit single species= taxon ID. "
             "Its config default is species='all', which the per-version "
             "download/parse step used here (unlike pysec2pri.api's bulk "
-            "generate_ensembl) has no support for."
+            "generate_ids) has no support for."
         )
 
     from pysec2pri.download import download_datasource_with_release, resolve_release_date
@@ -646,3 +622,40 @@ def build_label_history(
     return parser.parse_label_history(
         (rid, prev, curr, date) for rid, prev, curr, date in transition_rows
     )
+
+
+#: Per-(datasource, kind) strategies that recover mappings a source's current
+#: release no longer states, from its past releases. Keyed like
+#: :data:`_LIST_VERSIONS_FNS`: a source without an entry simply has no extra
+#: history to recover for that kind.
+_RECOVERY_FNS: dict[tuple[str, str], Callable[..., BaseMappingSet]] = {
+    ("ensembl", "labels"): build_label_history,
+}
+
+
+def supports_recovery(datasource: str, kind: str) -> bool:
+    """Whether extra mappings can be recovered for *datasource*'s *kind*."""
+    return (datasource, kind) in _RECOVERY_FNS
+
+
+def recover_mapping_set(datasource: str, kind: str, **kwargs: Any) -> BaseMappingSet | None:
+    """Recover mappings *datasource*'s current release no longer states.
+
+    Args:
+        datasource: Datasource config id.
+        kind: Mapping-set kind, e.g. ``"labels"``.
+        **kwargs: Forwarded to the strategy; anything it does not declare is
+            dropped.
+
+    Returns:
+        The recovered mapping set, or ``None`` when this datasource/kind has no
+        extra history to recover.
+    """
+    import inspect
+
+    fn = _RECOVERY_FNS.get((datasource, kind))
+    if fn is None:
+        return None
+    params = inspect.signature(fn).parameters
+    accepted = {k: v for k, v in kwargs.items() if k in params and v is not None}
+    return fn(datasource, **accepted)

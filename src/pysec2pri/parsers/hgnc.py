@@ -88,16 +88,13 @@ class HGNCParser(GeneNomenclatureParser):
         self._resolve_version(input_path)
 
         mappings = self._parse_withdrawn(input_path)
-        mapping_set = self._create_mapping_set(mappings, mapping_type="id")
-
         # Populate the full primary ID set when the complete set is available
-        if complete_set_path is not None:
-            object.__setattr__(
-                mapping_set,
-                "_primary_ids",
-                self._extract_primary_ids(Path(complete_set_path)),
-            )
-        return mapping_set
+        primary_ids = (
+            self._extract_primary_ids(Path(complete_set_path))
+            if complete_set_path is not None
+            else None
+        )
+        return self.create_mapping_set(mappings, mapping_type="id", primary_ids=primary_ids)
 
     def parse_primary_labels(
         self,
@@ -121,13 +118,11 @@ class HGNCParser(GeneNomenclatureParser):
         complete_set_path = Path(complete_set_path)
         self._resolve_version(complete_set_path)
 
-        mapping_set = self._create_mapping_set([], mapping_type="label")
-        object.__setattr__(
-            mapping_set,
-            "_primary_labels",
-            self._extract_primary_labels(complete_set_path),
+        return self.create_mapping_set(
+            [],
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(complete_set_path),
         )
-        return mapping_set
 
     def parse_primary_ids(
         self,
@@ -151,13 +146,11 @@ class HGNCParser(GeneNomenclatureParser):
         complete_set_path = Path(complete_set_path)
         self._resolve_version(complete_set_path)
 
-        mapping_set = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(
-            mapping_set,
-            "_primary_ids",
-            self._extract_primary_ids(complete_set_path),
+        return self.create_mapping_set(
+            [],
+            mapping_type="id",
+            primary_ids=self._extract_primary_ids(complete_set_path),
         )
-        return mapping_set
 
     def parse_labels(
         self,
@@ -180,13 +173,11 @@ class HGNCParser(GeneNomenclatureParser):
         self._resolve_version(complete_set_path)
 
         mappings = self._parse_complete_set(complete_set_path, statuses=statuses)
-        mapping_set = self._create_mapping_set(mappings, mapping_type="label")
-        object.__setattr__(
-            mapping_set,
-            "_primary_labels",
-            self._extract_primary_labels(complete_set_path),
+        return self.create_mapping_set(
+            mappings,
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(complete_set_path),
         )
-        return mapping_set
 
     def parse_all(
         self,

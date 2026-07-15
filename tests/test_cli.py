@@ -26,7 +26,7 @@ class _FakeMappingSet:
         return Path(output_path)
 
 
-def _fake_generate(**_: Any) -> _FakeMappingSet:
+def _fake_generate(*_: Any, **__: Any) -> _FakeMappingSet:
     return _FakeMappingSet(version="115")
 
 
@@ -34,17 +34,15 @@ class TestSpeciesInOutputFilename:
     """A species-aware command's default output filename must include the species code.
 
     Otherwise two runs for different species (e.g. human vs. dog) would
-    silently overwrite the same default file.
+    overwrite the same default file.
     """
 
     def test_species_is_folded_into_default_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """--species 9615 produces a filename containing "9615", not just the version."""
         import pysec2pri.api as api
 
-        monkeypatch.setattr(api, "_fake_generate", _fake_generate, raising=False)
-        cmd_fn = _make_generate_cmd(
-            "ensembl", "ids", "_fake_generate", [click.option("--species", default="9606")]
-        )
+        monkeypatch.setattr(api, "_generate", _fake_generate)
+        cmd_fn = _make_generate_cmd("ensembl", "ids", [click.option("--species", default="9606")])
         cmd = click.command(name="ids")(cmd_fn)
 
         runner = CliRunner()
@@ -57,8 +55,8 @@ class TestSpeciesInOutputFilename:
         """A command with no --species option (e.g. hgnc) keeps the old filename shape."""
         import pysec2pri.api as api
 
-        monkeypatch.setattr(api, "_fake_generate", _fake_generate, raising=False)
-        cmd_fn = _make_generate_cmd("hgnc", "ids", "_fake_generate", [])
+        monkeypatch.setattr(api, "_generate", _fake_generate)
+        cmd_fn = _make_generate_cmd("hgnc", "ids", [])
         cmd = click.command(name="ids")(cmd_fn)
 
         runner = CliRunner()

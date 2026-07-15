@@ -118,10 +118,14 @@ default_output_filename: "hmdb_metabolites_sec2pri.sssom.tsv"
 mapping_sets:
   ids:
     method: parse
-    primary_input: metabolites
-    required_inputs: [metabolites]
+    # download_urls key -> parameter of `method`
+    inputs: { metabolites: input_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
 
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { metabolites: metabolites_path }
+    formats: [pri_ids]
 source: "HMDB"
 homepage: "https://hmdb.ca/"
 data_license: "https://creativecommons.org/licenses/by/4.0/"

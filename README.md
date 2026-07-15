@@ -43,60 +43,56 @@ uv pip install git+https://github.com/jmillanacosta/pysec2pri.git
 
 ### Generating mapping sets
 
-Mapping sets can be generated from bash:
+Most sources have two commands. `ids` maps retired identifiers to current ones,
+`labels` maps old labels to current ones:
 
 ```bash
-# ID mapping sets
-pysec2pri chebi ids (--help)
-pysec2pri ensembl ids (--help)
-pysec2pri hgnc ids (--help)
-pysec2pri vgnc ids (--help)
-pysec2pri ncbi ids (--help)
-pysec2pri hmdb-protein ids (--help)
-pysec2pri hmdb-gene ids (--help)
-pysec2pri uniprot ids (--help)
-# Label mapping sets
-pysec2pri chebi labels (--help)
-pysec2pri hgnc labels (--help)
-pysec2pri ensembl labels (--help)
-pysec2pri vgnc labels (--help)
+pysec2pri hgnc ids
+pysec2pri hgnc labels
 ```
 
-Or python:
-
-```
-from pysec2pri import generate_ensembl_labels, generate_ensembl
-```
-
-Replacing Ensembl by the supported database. These functions return either a
-`IdMappingSet` or `LabelMappingSet`, SSSOM `MappingSet`s.
-
-For more options and help on any command:
+Run `pysec2pri --help` to see every source, and `pysec2pri <source> ids --help`
+for one source's options. Input files are downloaded unless you pass them:
 
 ```bash
-pysec2pri --help
+pysec2pri hgnc ids --withdrawn withdrawn.txt --complete hgnc_complete_set.txt
 ```
 
-The default output is in [SSSOM](https://mapping-commons.github.io/sssom/)
-(Simple Standard for Sharing Ontology Mappings) TSV format.
+In Python there are two functions, one per kind:
+
+```python
+from pysec2pri import generate_ids, generate_labels, sources
+
+sources()          # every source
+sources("labels")  # sources with labels
+
+hgnc = generate_ids("hgnc")
+chebi = generate_labels("chebi", subset="3star", version="350")
+ensembl = generate_ids("ensembl", version="115", species="9606")
+```
+
+Both return an SSSOM `MappingSet`: `IdMappingSet` or `LabelMappingSet`. Subjects
+are secondary, objects are primary. Options that a source does not have are
+ignored, so `species` on HGNC does nothing.
+
+The default output is [SSSOM](https://mapping-commons.github.io/sssom/) TSV.
 
 ### Updating IDs and labels
 
-A generated mapping set can be used to update IDs and labels in Python: ChEBI
-synonyms:
+Use a mapping set to update your own data. Labels:
 
 ```python
-from pysec2pri import generate_chebi_synonyms, resolve_labels
-chebi_ms = generate_chebi_synonyms()
-resolve_labels(["Glucose", "ATP", "Guanine"], cs)
+from pysec2pri import generate_labels, resolve_labels
+chebi = generate_labels("chebi")
+resolve_labels(["Glucose", "ATP", "Guanine"], chebi)
 ```
 
-Ensembl gene identifiers in a dataframe:
+Identifiers in a dataframe:
 
 ```python
-from pysec2pri import update_ids, generate_ensembl
-ens_ms = generate_ensembl(version="115", species="9606")
-df_with_new_column = update_ids(mapping_set=ens_ms, ids = df, at="Ensembl_id")  # `at` is the name of the column
+from pysec2pri import generate_ids, update_ids
+ensembl = generate_ids("ensembl", version="115", species="9606")
+df_with_new_column = update_ids(mapping_set=ensembl, ids=df, at="Ensembl_id")  # `at` is the column name
 ```
 
 Or from the command line, given a TSV file `gene_ex.tsv`:
@@ -129,14 +125,16 @@ pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
 pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
 ```
 
-In Python, `load_<datasource>` reads a written SSSOM file back into the same
-`IdMappingSet`/`LabelMappingSet`:
+In Python, `load_mapping` reads a written SSSOM file back in, so you can
+generate once and reuse the file:
 
 ```python
-from pysec2pri import load_hgnc, update_ids
-hgnc_ms = load_hgnc("hgnc_115_sssom.tsv")
-df_with_new_column = update_ids(mapping_set=hgnc_ms, ids=df, at="gene")
+from pysec2pri import load_mapping, update_ids
+hgnc = load_mapping("hgnc_115_sssom.tsv")
+df_with_new_column = update_ids(mapping_set=hgnc, ids=df, at="gene")
 ```
+
+Use `load_label_mapping` for a label mapping set.
 
 Ambiguous mappings (where a deprecated ID or label serves as a recommended for
 another entity) are not resolved, but flagged for users to solve them manually.
@@ -156,48 +154,72 @@ pysec2pri ambiguous hgnc-labels
 
 ## Mapping types
 
-### Deprecations (IDs)
+Every row is one secondary (`subject`) and one primary (`object`). Which
+predicate joins them says what happened to it.
 
-A deprecated ID is mapped to its replacement via `IAO:0100001` ("term replaced
-by"). Each row is 1-to-1: one secondary `subject_id` : one primary `object_id`.
+### IDs
 
-```mermaid
-flowchart LR
-    D["subject_id (deprecated)"]
-    P["object_id (primary)"]
-    D -->|"term replaced by"| P
-```
-
-**Ambiguity** happens when the same ID appears as both a `subject_id`
-(secondary) and an `object_id` (primary) across different mappings.
+A retired ID either has a replacement or does not:
 
 ```mermaid
 flowchart LR
-    A["A (primary of C and secondary of B)"] -->|term replaced by| B["B (primary)"]
-    C["C (secondary)"] -->|term replaced by| A
+    S["subject_id (retired)"]
+    P["object_id (current)"]
+    N["sssom:NoTermFound"]
+    S -->|"IAO:0100001 (term replaced by)"| P
+    S -->|"oboInOwl:consider (no replacement)"| N
 ```
+
+`mapping_cardinality` says how the two sides line up: `1:1`, `n:1` when several
+retired IDs were merged into one, `1:0` for a withdrawal with no replacement.
 
 ### Labels
 
-The same 1-to-1 pattern applies to label (or symbol) mappings: a previous or
-alias label (`subject_label`) maps to the current label (`object_label`) of the
-same entity via `IAO:0100001`.
-
-**Ambiguity** appears when the same label is both a `subject_label` (previous
-name, secondary) and an `object_label` (current name, primary) across different
-mappings.
-
-### Aliases / synonyms
-
-Alias mappings use `oboInOwl:hasExactSynonym`. The alias is the `subject_label`
-and the primary name is the `object_label`/`object_id`.
+One label mapping set holds both of a source's label changes, told apart by
+predicate:
 
 ```mermaid
 flowchart LR
-    A["subject_label (alias / synonym)"]
-    P["object_label/object_id (primary)"]
-    A -->|"oboInOwl:hasExactSynonym"| P
+    PREV["subject_label (previous symbol)"]
+    ALIAS["subject_label (alias / synonym)"]
+    CUR["object_label / object_id (current)"]
+    PREV -->|"IAO:0100001 (term replaced by)"| CUR
+    ALIAS -->|"oboInOwl:hasExactSynonym"| CUR
 ```
+
+A previous symbol is one the entity used to have. An alias is another name it
+still goes by. Only the first is a rename; the second is what the resolver uses
+as evidence below.
+
+### Looking further back with `--consolidate`
+
+`--consolidate` reads all of the source's past releases, finds mappings the
+current release no longer mentions, and gives every mapping the release it first
+appeared in:
+
+```bash
+pysec2pri hgnc ids --consolidate -o hgnc.sssom.tsv
+```
+
+```python
+from pysec2pri import generate_ids, supports_consolidate
+supports_consolidate("hgnc", "ids")
+generate_ids("hgnc", consolidate=True)
+```
+
+### Ambiguity
+
+A value is ambiguous when it is retired in one row and current in another. This
+is not resolved: the row is flagged and left alone.
+
+```mermaid
+flowchart LR
+    C["C (retired)"] -->|term replaced by| A["A (retired, and current for C)"]
+    A -->|term replaced by| B["B (current)"]
+```
+
+The same holds for labels: a symbol can be a `subject_label` (someone's old
+name) and an `object_label` (someone else's current name).
 
 ### Resolving ambiguity with alias/synonym hints
 
@@ -205,7 +227,7 @@ When a name is ambiguous, alias mappings are used as evidence. For each
 candidate interpretation the resolver checks whether any user-supplied hint
 matches a known alias of that candidate's primary entity. A hit on the secondary
 candidate's target confirms the name is being used as a previous name; a hit on
-the primary candidate's own aliases confirms it is already current.
+the primary candidate's aliases confirms it is already current.
 
 ```mermaid
 flowchart TD
@@ -226,22 +248,21 @@ flowchart TD
 
 Alias hints are one kind of _context_: a per-row piece of independent evidence
 that helps decide which entity an ambiguous name actually means. `update_ids`
-and `update_labels` support three kinds, via `pysec2pri.context.ContextSpec`:
+and `update_labels` support three kinds, via `ContextSpec`:
 
 - **`label`** -- an alias/synonym string (the `synonyms=`/`--synonyms` shown
   above).
 - **`id`** -- a related/foreign identifier string, matched the same way.
 - **`xref`** -- a cross-reference token (e.g. an Ensembl ID) resolved through an
-  independent crosswalk table (`pysec2pri.context.XrefMapping`).
+  independent crosswalk table (`XrefMapping`).
 
 All three only ever touch cells already flagged ambiguous, and every attempt can
 be written to an auditable decision log:
 
 ```python
-from pysec2pri import generate_hgnc_labels, update_labels
-from pysec2pri.context import load_xref_mapping
+from pysec2pri import generate_labels, load_xref_mapping, update_labels
 
-label_ms = generate_hgnc_labels()
+label_ms = generate_labels("hgnc")
 ensembl_to_hgnc = load_xref_mapping("ensembl_to_hgnc.tsv")  # subject_id/object_id/object_label
 
 resolved = update_labels(
@@ -260,43 +281,52 @@ pysec2pri update-labels genes.tsv hgnc --at gene_name \
   --report decisions.tsv
 ```
 
-### `crosswalk`: a direct identifier lookup helper
+### Crosswalk tables
 
-For the common case of "map this one column of identifiers to an HGNC ID (or
-back to a symbol)", `crosswalk` is a thin wrapper over the same machinery:
+`--xref-source` names a table listed in the source's config. `hgnc_custom` is
+HGNC download, one row per gene:
+
+| HGNC ID    | Approved symbol | Status           | Previous symbols            | NCBI Gene ID | Ensembl ID      | UniProt ID |
+| ---------- | --------------- | ---------------- | --------------------------- | ------------ | --------------- | ---------- |
+| HGNC:5     | A1BG            | Approved         |                             | 1            | ENSG00000121410 | P04217     |
+| HGNC:37133 | A1BG-AS1        | Approved         | NCRNA00181, A1BGAS, A1BG-AS | 503538       | ENSG00000268895 |            |
+| HGNC:6     | A1S9T           | Symbol Withdrawn |                             |              |                 |            |
+| HGNC:7     | A2M             | Approved         |                             | 2            | ENSG00000175899 | P01023     |
+
+Two columns of it are already a crosswalk: pick `Ensembl ID` and `HGNC ID` and
+you can map one to the other with
+`--xref ensembl --xref-source hgnc_custom --xref-on ensembl`
+
+#### Bringing your own table
+
+Pass any table with `--xref-file`. It needs three columns: `subject_id` (what
+you key on), `object_id` (this source's identifier), and `object_label` (its
+label):
+
+```text
+subject_id         object_id   object_label
+ENSG00000121410    HGNC:5      A1BG
+ENSG00000175899    HGNC:7      A2M
+```
 
 ```bash
-pysec2pri crosswalk --value TP53 --from symbol --to hgnc_id
-pysec2pri crosswalk genes.tsv --from ensembl --to hgnc_id --at ensembl_id -o out.tsv
+pysec2pri update-ids genes.tsv hgnc --at gene_id --xref ensembl \
+  --xref-file my_crosswalk.tsv
 ```
+
+In Python you can point at the columns instead of renaming them, so a file like
+HGNC download works like:
 
 ```python
-from pysec2pri import crosswalk
-crosswalk("TP53", frm="symbol", to="hgnc_id")          # {'TP53': 'HGNC:11998'}
-crosswalk("ENSG00000141510", frm="ensembl", to="symbol")  # via HGNC's own crosswalk
-```
+from pysec2pri import generate_ids, load_xref_mapping, update_ids
 
-### Consolidating mapping dates across releases
-
-A single release snapshot only presents each mapping's _last-seen_ date.
-`consolidate` builds a first-seen-date index and writes it back out as a real
-SSSOM mapping set whose `mapping_date` is each mapping's true first appearance.
-The path is chosen automatically: datasources with a versioned archive are
-walked release by release, while those without one (NCBI, VGNC) are covered in a
-single fast pass over the current release:
-
-```bash
-pysec2pri chebi consolidate   # walks ~250 ChEBI releases (versioned archive); slow, run as a one-off
-pysec2pri ncbi consolidate    # single fast pass (no versioned archive)
-```
-
-Supported for `chebi`, `ensembl`, `hgnc`, `ncbi`, `uniprot`, and `vgnc`. Ensembl
-additionally supports `label-history`, which derives previous-symbol ->
-current-symbol transitions by diffing each release's labels per stable ID
-(Ensembl has no previous-symbol table of its own):
-
-```bash
-pysec2pri ensembl label-history --species 9606
+xref = load_xref_mapping(
+    "hgnc_custom.tsv",
+    subject_col="Ensembl ID(supplied by Ensembl)",
+    object_col="HGNC ID",
+    object_label_col="Approved symbol",
+)
+update_ids(df, generate_ids("hgnc"), at="gene_id", xref="ensembl", xref_mapping=xref)
 ```
 
 ### Diffing mapping sets

@@ -3,12 +3,19 @@ config_id: "ensembl"
 datasource_id: "ensembl"
 name: "Ensembl"
 parser_class: "EnsemblParser"
+# Splits this source into disjoint datasets: folded into the IRIs.
+products: ["species"]
 prefix: "ENSEMBL"
 curie_base_url: "http://identifiers.org/ensembl/"
 entity_types: ["genes"]
 
 species:
   default: "all"
+  # Appended to --species help. This list is a curated shortlist, not a
+  # restriction: other taxon IDs resolve via Ensembl live species index.
+  note:
+    "Other taxon IDs are resolved via Ensembl live species list; 'all' downloads
+    and combines all ~276 species (slow, network-heavy)."
   available:
     106734:
       {
@@ -467,17 +474,35 @@ default_output_filename: "ensembl_sec2pri.sssom.tsv"
 
 mapping_sets:
   ids:
+    consolidate: true
     method: parse
-    primary_input: stable_id_event
-    required_inputs: [stable_id_event, mapping_session, gene]
+    # download_urls key -> parameter of `method`
+    inputs:
+      {
+        stable_id_event: stable_id_event_path,
+        mapping_session: mapping_session_path,
+        gene: gene_path,
+      }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
   labels:
+    consolidate: true
     method: parse_labels
-    primary_input: external_synonym
-    required_inputs: [gene, xref, external_synonym]
-    formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
+    inputs:
+      {
+        gene: gene_path,
+        xref: xref_path,
+        external_synonym: external_synonym_path,
+      }
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
 
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { gene: gene_path }
+    formats: [pri_ids]
+  primary_labels:
+    method: parse_primary_labels
+    inputs: { gene: gene_path, xref: xref_path }
+    formats: [pri_labels]
 input_file_types:
   - stable_id_event.txt.gz
   - mapping_session.txt.gz

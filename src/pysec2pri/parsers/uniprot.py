@@ -22,6 +22,9 @@ from pysec2pri.parsers.base import (
     BaseParser,
 )
 
+#: UniProtKB accession syntax (https://www.uniprot.org/help/accession_numbers).
+_ACCESSION_PATTERN = r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"
+
 
 class UniProtParser(BaseParser):
     """Parser for UniProt files using Polars.
@@ -73,7 +76,7 @@ class UniProtParser(BaseParser):
         if delac_path is not None:
             mappings.extend(self._parse_delac(Path(delac_path)))
 
-        return self._create_mapping_set(mappings)
+        return self.create_mapping_set(mappings)
 
     def _parse_sec_ac(self, file_path: Path) -> list[Mapping]:
         """Parse sec_ac.txt for secondary -> primary accession mappings.
@@ -139,25 +142,19 @@ class UniProtParser(BaseParser):
         if df.is_empty():
             return []
 
+        subj = df["subject_id"].to_list()
+        obj = df["object_id"].to_list()
         df = df.with_columns(
-            pl.struct(["subject_id", "object_id"])
-            .map_elements(
-                lambda x: self._record_id(
-                    meta_ns,
-                    x["object_id"],
-                    x["subject_id"],
-                ),
-                return_dtype=pl.Utf8,
-                strategy="thread_local",
-            )
-            .alias("record_id"),
-            pl.struct(["subject_id", "object_id"])
-            .map_elements(
-                lambda x: self._pair_hash(x["object_id"], x["subject_id"]),
-                return_dtype=pl.Utf8,
-                strategy="thread_local",
-            )
-            .alias("pair_key"),
+            pl.Series(
+                "record_id",
+                [self._record_id(meta_ns, o, s) for o, s in zip(obj, subj, strict=True)],
+                dtype=pl.Utf8,
+            ),
+            pl.Series(
+                "pair_key",
+                [self._pair_hash(o, s) for o, s in zip(obj, subj, strict=True)],
+                dtype=pl.Utf8,
+            ),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -206,7 +203,7 @@ class UniProtParser(BaseParser):
 
         meta_ns = self._record_namespace()
 
-        df = (
+        accessions = (
             pl.scan_csv(
                 file_path,
                 has_header=False,
@@ -218,40 +215,31 @@ class UniProtParser(BaseParser):
             )
             .with_columns(pl.col("accession").str.strip_chars())
             .filter(pl.col("accession").str.len_chars() > 0)
-            .filter(
-                pl.col("accession").str.contains(
-                    r"^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$"
-                )
-            )
-            .with_columns(
-                pl.concat_str([pl.lit("UniProtKB:"), pl.col("accession")]).alias("object_id")
-            )
-            .select("object_id")
             .collect()
         )
+
+        df = accessions.filter(pl.col("accession").str.contains(_ACCESSION_PATTERN))
+        dropped = accessions.height - df.height
+        if dropped:
+            logger.warning(
+                "%s: dropped %d of %d entries not matching the UniProt accession pattern.",
+                file_path.name,
+                dropped,
+                accessions.height,
+            )
 
         if df.is_empty():
             return []
 
+        df = df.select(
+            pl.concat_str([pl.lit("UniProtKB:"), pl.col("accession")]).alias("object_id")
+        )
+
+        # subject_id == object_id in this dataset
+        obj = df["object_id"].to_list()
         df = df.with_columns(
-            pl.struct(["object_id"])
-            .map_elements(
-                lambda x: self._record_id(
-                    meta_ns,
-                    x["object_id"],
-                    x["object_id"],  # subject_id == object_id in this dataset
-                ),
-                return_dtype=pl.Utf8,
-                strategy="thread_local",
-            )
-            .alias("record_id"),
-            pl.struct(["object_id"])
-            .map_elements(
-                lambda x: self._pair_hash(x["object_id"], x["object_id"]),
-                return_dtype=pl.Utf8,
-                strategy="thread_local",
-            )
-            .alias("pair_key"),
+            pl.Series("record_id", [self._record_id(meta_ns, o, o) for o in obj], dtype=pl.Utf8),
+            pl.Series("pair_key", [self._pair_hash(o, o) for o in obj], dtype=pl.Utf8),
         )
 
         from pysec2pri.consolidate import load_mapping_dates
@@ -276,12 +264,6 @@ class UniProtParser(BaseParser):
             # hash, not the whole record_id.
             row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
-
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Delegate to base class method."""
-        return self.create_mapping_set(mappings, mapping_type)
 
     def parse_primary_ids(
         self,
@@ -317,9 +299,7 @@ class UniProtParser(BaseParser):
         self._resolve_version(acindex_path)
 
         primary_ids = self._extract_primary_ids_from_acindex(acindex_path)
-        ms = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", primary_ids)
-        return ms
+        return self.create_mapping_set([], mapping_type="id", primary_ids=primary_ids)
 
     def _extract_primary_ids_from_acindex(self, file_path: Path) -> set[str]:
         """Parse ``acindex.txt`` and return the set of all AC numbers.

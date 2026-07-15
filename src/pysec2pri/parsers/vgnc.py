@@ -10,7 +10,7 @@ one-URL-per-species layout.
 
 This parser extracts:
 1. ID-to-ID mappings: withdrawn/merged VGNC IDs -> current VGNC IDs. The
-   withdrawn file's own ``taxon_id`` column is not populated upstream, so
+   withdrawn file ``taxon_id`` column is not populated upstream, so
    :meth:`VGNCParser.parse` always parses the *full*, unfiltered withdrawn
    file first; an optional ``species`` then *subsets the output* by
    resolving each mapping's primary (replacement) VGNC ID against the
@@ -47,16 +47,16 @@ from pysec2pri.parsers._nomenclature import (
     SYMBOL,
     GeneNomenclatureParser,
 )
-from pysec2pri.parsers.base import BaseMappingSet, LabelMappingSet
+from pysec2pri.parsers.base import (
+    ALL_SPECIES,
+    BaseMappingSet,
+    LabelMappingSet,
+)
 
 # VGNC column names (case-insensitive matching used)
 VGNC_ID = "vgnc_id"
 WITHDRAWN_SYMBOL = "withdrawn_symbol"
 TAXON_ID = "taxon_id"
-
-#: Sentinel accepted by every species-aware method: skip taxon filtering/
-#: subsetting entirely and process every species together.
-ALL_SPECIES = "all"
 
 
 class VGNCParser(GeneNomenclatureParser):
@@ -88,16 +88,6 @@ class VGNCParser(GeneNomenclatureParser):
             show_progress: Whether to show progress bars during parsing.
         """
         super().__init__(version=version, show_progress=show_progress)
-
-    def _product_slug(self) -> str | None:
-        """Species (NCBI taxon ID) a label-mapping run was filtered to.
-
-        ``None`` for ID mappings (the withdrawn file is never species
-        filtered, see module docstring), so only label-mapping runs fold a
-        taxon ID into ``mapping_set_id``/``record_id`` (see
-        :meth:`~pysec2pri.parsers.base.BaseParser._product_slug`).
-        """
-        return getattr(self, "species", None)
 
     def parse(
         self,
@@ -153,14 +143,12 @@ class VGNCParser(GeneNomenclatureParser):
                 if taxon_by_id.get(str(getattr(m, "object_id", "") or "")) == str(species)
             ]
 
-        mapping_set = self._create_mapping_set(mappings, mapping_type="id")
-
+        primary_ids: set[str] | None = None
         if complete_set_path is not None:
             primary_ids = self._extract_primary_ids(Path(complete_set_path))
             if species not in (None, ALL_SPECIES) and taxon_by_id is not None:
                 primary_ids = {vid for vid in primary_ids if taxon_by_id.get(vid) == str(species)}
-            object.__setattr__(mapping_set, "_primary_ids", primary_ids)
-        return mapping_set
+        return self.create_mapping_set(mappings, mapping_type="id", primary_ids=primary_ids)
 
     def parse_primary_ids(
         self,
@@ -194,9 +182,7 @@ class VGNCParser(GeneNomenclatureParser):
             taxon_by_id = self._taxon_by_vgnc_id(complete_set_path)
             primary_ids = {vid for vid in primary_ids if taxon_by_id.get(vid) == str(species)}
 
-        mapping_set = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(mapping_set, "_primary_ids", primary_ids)
-        return mapping_set
+        return self.create_mapping_set([], mapping_type="id", primary_ids=primary_ids)
 
     def parse_labels(
         self,
@@ -228,13 +214,11 @@ class VGNCParser(GeneNomenclatureParser):
         self.species = species
 
         mappings = self._parse_gene_set(complete_set_path, species, statuses=statuses)
-        mapping_set = self._create_mapping_set(mappings, mapping_type="label")
-        object.__setattr__(
-            mapping_set,
-            "_primary_labels",
-            self._extract_primary_labels(complete_set_path, species),
+        return self.create_mapping_set(
+            mappings,
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(complete_set_path, species),
         )
-        return mapping_set
 
     def parse_primary_labels(
         self,
@@ -262,13 +246,11 @@ class VGNCParser(GeneNomenclatureParser):
         self._resolve_version(complete_set_path)
         self.species = species
 
-        mapping_set = self._create_mapping_set([], mapping_type="label")
-        object.__setattr__(
-            mapping_set,
-            "_primary_labels",
-            self._extract_primary_labels(complete_set_path, species),
+        return self.create_mapping_set(
+            [],
+            mapping_type="label",
+            primary_labels=self._extract_primary_labels(complete_set_path, species),
         )
-        return mapping_set
 
     def parse_all(
         self,
@@ -294,7 +276,7 @@ class VGNCParser(GeneNomenclatureParser):
         """Return ``{vgnc_id: taxon_id}`` for every current gene in the gene-set file.
 
         Used to resolve which species a withdrawn entry's *replacement*
-        gene belongs to, since the withdrawn file's own ``taxon_id``
+        gene belongs to, since the withdrawn file ``taxon_id``
         column is not populated upstream (see module docstring).
 
         Args:

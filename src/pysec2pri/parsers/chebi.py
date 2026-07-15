@@ -45,18 +45,22 @@ class ChEBIParser(BaseParser):
         self,
         version: str | None = None,
         show_progress: bool = True,
-        subset: str = "3star",
+        subset: str | None = None,
     ) -> None:
         """Initialize the ChEBI parser.
 
         Args:
             version: Version/release identifier for the datasource.
             show_progress: Whether to show progress bars during parsing.
-            subset: "3star" or "complete" - which compound subset to use.
-                For TSV format, filters by stars in compounds.tsv.
-                For SDF format, determines which file to download.
+            subset: Which compound subset to use, e.g. ``"3star"`` or
+                ``"complete"`` (see ``chebi.yaml``'s ``subset`` block). For TSV
+                format, filters by stars in compounds.tsv; for SDF format,
+                determines which file to download. Defaults to the config's
+                ``subset.default``.
         """
         super().__init__(version=version, show_progress=show_progress)
+        if subset is None and self._config is not None:
+            subset = self._config.default_subset()
         self.subset = subset
 
     def parse(
@@ -103,11 +107,13 @@ class ChEBIParser(BaseParser):
             raise ValueError("Must provide input_path (SDF or TSV dir) or secondary_ids_path")
 
         mappings = self._build_id_mappings(raw_mappings)
-        ms = self._create_mapping_set(mappings, mapping_type="id")
         # Populate primary IDs when compound data is available
-        if cpd_path is not None and cpd_path.exists():
-            object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(cpd_path))
-        return ms
+        primary_ids = (
+            self._extract_primary_ids(cpd_path)
+            if cpd_path is not None and cpd_path.exists()
+            else None
+        )
+        return self.create_mapping_set(mappings, mapping_type="id", primary_ids=primary_ids)
 
     def parse_synonyms(
         self,
@@ -155,11 +161,15 @@ class ChEBIParser(BaseParser):
             raise ValueError("Must provide input_path (SDF or TSV dir) or names_path")
 
         mappings = self._build_label_mappings(raw_mappings)
-        ms = self._create_mapping_set(mappings, mapping_type="label")
         # Populate primary labels when compound data is available
-        if cpd_path is not None and cpd_path.exists():
-            object.__setattr__(ms, "_primary_labels", self._extract_primary_labels(cpd_path))
-        return ms
+        primary_labels = (
+            self._extract_primary_labels(cpd_path)
+            if cpd_path is not None and cpd_path.exists()
+            else None
+        )
+        return self.create_mapping_set(
+            mappings, mapping_type="label", primary_labels=primary_labels
+        )
 
     def parse_primary_ids(
         self,
@@ -191,9 +201,9 @@ class ChEBIParser(BaseParser):
                 "or compounds_path."
             )
         self._resolve_version(cpd_path)
-        ms = self._create_mapping_set([], mapping_type="id")
-        object.__setattr__(ms, "_primary_ids", self._extract_primary_ids(cpd_path))
-        return ms
+        return self.create_mapping_set(
+            [], mapping_type="id", primary_ids=self._extract_primary_ids(cpd_path)
+        )
 
     def parse_primary_labels(
         self,
@@ -223,9 +233,9 @@ class ChEBIParser(BaseParser):
                 "or compounds_path."
             )
         self._resolve_version(cpd_path)
-        ms = self._create_mapping_set([], mapping_type="label")
-        object.__setattr__(ms, "_primary_labels", self._extract_primary_labels(cpd_path))
-        return ms
+        return self.create_mapping_set(
+            [], mapping_type="label", primary_labels=self._extract_primary_labels(cpd_path)
+        )
 
     # Internal helpers
 
@@ -318,15 +328,6 @@ class ChEBIParser(BaseParser):
                 }
             )
         return self._build_mappings(rows, fixed, desc="Creating synonym mappings", total=len(rows))
-
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Create an IdMappingSet or LabelMappingSet with metadata from config.
-
-        Delegates to BaseParser.create_mapping_set().
-        """
-        return self.create_mapping_set(mappings, mapping_type)
 
     def _resolve_compounds_path(
         self,
@@ -424,7 +425,7 @@ def _get_3star_compound_ids(compounds_path: Path) -> set[int]:
 def _parse_secondary_ids_tsv(
     secondary_ids_path: Path,
     compounds_path: Path | None = None,
-    subset: str = "3star",
+    subset: str | None = None,
     show_progress: bool = True,
 ) -> list[tuple[str, str]]:
     """Parse secondary_ids.tsv into (primary_id, secondary_id) tuples.
@@ -465,7 +466,7 @@ def _parse_secondary_ids_tsv(
 def _parse_names_tsv(
     names_path: Path,
     compounds_path: Path | None = None,
-    subset: str = "3star",
+    subset: str | None = None,
     show_progress: bool = True,
 ) -> list[tuple[str, str, str]]:
     """Parse names.tsv into (subject_id, primary_name, synonym) tuples.

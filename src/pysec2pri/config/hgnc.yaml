@@ -146,16 +146,24 @@ xref_sources:
 
 mapping_sets:
   ids:
+    consolidate: true
     method: parse
-    primary_input: withdrawn
-    required_inputs: [withdrawn, complete]
+    # download_urls key -> parameter of `method`
+    inputs: { withdrawn: input_path, complete: complete_set_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
   labels:
-    method: parse_symbols
-    primary_input: complete
-    required_inputs: [complete]
-    formats:
-      [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
+    consolidate: true
+    method: parse_labels
+    inputs: { complete: complete_set_path }
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
+  primary_ids:
+    method: parse_primary_ids
+    inputs: { complete: complete_set_path }
+    formats: [pri_ids]
+  primary_labels:
+    method: parse_primary_labels
+    inputs: { complete: complete_set_path }
+    formats: [pri_labels]
 input_file_types:
   - hgnc_complete_set.txt
   - withdrawn.txt

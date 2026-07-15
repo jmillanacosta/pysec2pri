@@ -18,7 +18,6 @@ from sssom_schema import Mapping
 from pysec2pri.parsers.base import (
     WITHDRAWN_ENTRY,
     WITHDRAWN_ENTRY_LABEL,
-    BaseMappingSet,
     BaseParser,
 )
 
@@ -42,7 +41,7 @@ class GeneNomenclatureParser(BaseParser):
 
     #: Column holding the primary identifier (e.g. ``"hgnc_id"``).
     id_column: ClassVar[str]
-    #: Column holding a withdrawn entry's own symbol.
+    #: Column holding a withdrawn entry symbol.
     withdrawn_label_column: ClassVar[str]
     #: Naming variants of the merged-info column across file versions.
     merged_patterns: ClassVar[list[str]] = []
@@ -228,15 +227,6 @@ class GeneNomenclatureParser(BaseParser):
         return self._build_mappings(
             rows_data, fixed, desc="Processing symbols", total=len(rows_data)
         )
-
-    def _create_mapping_set(
-        self, mappings: list[Mapping], mapping_type: str = "id"
-    ) -> BaseMappingSet:
-        """Create an IdMappingSet or LabelMappingSet with config metadata.
-
-        Delegates to :meth:`~pysec2pri.parsers.base.BaseParser.create_mapping_set`.
-        """
-        return self.create_mapping_set(mappings, mapping_type)
 
 
 __all__ = [

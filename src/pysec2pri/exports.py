@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from mapkgsutils.exports import write_json, write_owl, write_rdf, write_sssom
 
 if TYPE_CHECKING:
-    from pysec2pri.parsers.base import BaseMappingSet
+    from pysec2pri.parsers.base import BaseMappingSet, IdMappingSet, LabelMappingSet
 
 __all__ = [
     "WRITERS",
@@ -29,7 +29,7 @@ __all__ = [
 
 
 def write_pri_ids(
-    mapping_set: BaseMappingSet,
+    mapping_set: IdMappingSet,
     output_path: Path | str,
 ) -> Path:
     """Write unique primary IDs to a text file, one per line.
@@ -43,32 +43,19 @@ def write_pri_ids(
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Use the authoritative set when available (never appears in other outputs)
-    all_ids: set[str] = set(getattr(mapping_set, "_primary_ids", None) or ())
-
-    if not all_ids:
-        # Fall back to extracting from mappings
-        for m in mapping_set.mappings or []:
-            obj_id = getattr(m, "object_id", None)
-            if obj_id:
-                all_ids.add(str(obj_id))
-
-    with output_path.open("w", encoding="utf-8") as f:
-        for pri_id in sorted(all_ids):
-            f.write(f"{pri_id}\n")
-
+    ids = mapping_set.to_pri_ids()
+    output_path.write_text("\n".join(ids) + "\n", encoding="utf-8")
     return output_path
 
 
 def write_pri_labels(
-    mapping_set: BaseMappingSet,
+    mapping_set: LabelMappingSet,
     output_path: Path | str,
 ) -> Path:
-    """Write unique primary labels to a text file, one per line.
+    """Write unique ``primary_id``/``label`` pairs to a two-column TSV.
 
     Args:
-        mapping_set: The mapping set to read primary IDs from.
+        mapping_set: The mapping set to read primary labels from.
         output_path: Destination file path.
 
     Returns:
@@ -76,21 +63,9 @@ def write_pri_labels(
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Use the authoritative set when available (never appears in other outputs)
-    all_sym: set[str] = set(getattr(mapping_set, "_primary_labels", None) or ())
-
-    if not all_sym:
-        # Fall back to extracting from mappings
-        for m in mapping_set.mappings or []:
-            obj_label = getattr(m, "object_label", None)
-            if obj_label:
-                all_sym.add(str(obj_label))
-
-    with output_path.open("w", encoding="utf-8") as f:
-        for pri_sym in sorted(all_sym):
-            f.write(f"{pri_sym}\n")
-
+    pairs = mapping_set.to_pri_labels()
+    body = "\n".join(f"{pri_id}\t{label}" for pri_id, label in pairs)
+    output_path.write_text("id\tlabel\n" + body + "\n", encoding="utf-8")
     return output_path
 
 

@@ -4,10 +4,10 @@ Applies mod:`mapkgsutils.resolve`.
 
 Takes a single string delimited by ``|``, ``,``, ``;``, or whitespace::
 
-    from pysec2pri import generate_hgnc
+    from pysec2pri import generate_ids
     from pysec2pri.update_ids import update_ids
 
-    ms = generate_hgnc()
+    ms = generate_ids("hgnc")
     update_ids("HGNC:1234|HGNC:5678", ms)
 
 DataFrame, annotating one or more columns::

@@ -17,6 +17,7 @@ from mapkgsutils.parsers.base import (
     _cmp_versions,
     get_datasource_config,
     load_config,
+    product_slug_values,
 )
 from mapkgsutils.parsers.base import BaseDownloader as _MapkgBaseDownloader
 from mapkgsutils.parsers.base import BaseParser as _MapkgBaseParser
@@ -29,6 +30,11 @@ if TYPE_CHECKING:
 # Config directory path
 
 CONFIG_DIR = Path(_importlib_resources.files("pysec2pri.config"))  # type: ignore[arg-type]
+
+
+#: Species selector accepted by every species-aware method: skip taxon
+#: filtering entirely and process every organism in the file together.
+ALL_SPECIES = "all"
 
 
 class BaseDownloader(_MapkgBaseDownloader):
@@ -72,9 +78,9 @@ class IdMappingSet(BaseMappingSet):
             )
 
         if output_path is not None:
-            path = self._resolve_path(output_path, "_pri_ids.txt")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(ids) + "\n", encoding="utf-8")
+            from pysec2pri.exports import write_pri_ids
+
+            write_pri_ids(self, self._resolve_path(output_path, "_pri_ids.txt"))
 
         return ids
 
@@ -110,8 +116,9 @@ class IdMappingSet(BaseMappingSet):
             return write_sec2pri(self, self._resolve_path(output_path, "_sec2pri.tsv"))
 
         if fmt == "pri_ids":
-            self.to_pri_ids(output_path)
-            return self._resolve_path(output_path, "_pri_ids.txt")
+            from pysec2pri.exports import write_pri_ids
+
+            return write_pri_ids(self, self._resolve_path(output_path, "_pri_ids.txt"))
 
         if fmt == "secondary":
             from pysec2pri.exports import write_secondary
@@ -174,9 +181,9 @@ class LabelMappingSet(BaseMappingSet):
         )
 
         if output_path is not None:
-            path = self._resolve_path(output_path, "_label_sec2pri.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
+            from pysec2pri.exports import write_label_sec2pri
+
+            write_label_sec2pri(self, self._resolve_path(output_path, "_label_sec2pri.tsv"))
 
         return df
 
@@ -217,10 +224,9 @@ class LabelMappingSet(BaseMappingSet):
                 - {("", "")}
             )
         if output_path is not None:
-            path = self._resolve_path(output_path, "_pri_labels.txt")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            text = "\n".join(f"{pri_id}\t{label}" for pri_id, label in pairs)
-            path.write_text("id\tlabel\n" + text + "\n", encoding="utf-8")
+            from pysec2pri.exports import write_pri_labels
+
+            write_pri_labels(self, self._resolve_path(output_path, "_pri_labels.txt"))
 
         return pairs
 
@@ -259,9 +265,9 @@ class LabelMappingSet(BaseMappingSet):
         df = pd.DataFrame(rows, columns=["primary_id", "name", "synonym"])
 
         if output_path is not None:
-            path = self._resolve_path(output_path, "_name2synonym.tsv")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(path, sep="\t", index=False)
+            from pysec2pri.exports import write_name2synonym
+
+            write_name2synonym(self, self._resolve_path(output_path, "_name2synonym.tsv"))
 
         return df
 
@@ -298,12 +304,14 @@ class LabelMappingSet(BaseMappingSet):
             return write_label_sec2pri(self, self._resolve_path(output_path, "_label_sec2pri.tsv"))
 
         if fmt == "pri_labels":
-            self.to_pri_labels(output_path)
-            return self._resolve_path(output_path, "_pri_labels.txt")
+            from pysec2pri.exports import write_pri_labels
+
+            return write_pri_labels(self, self._resolve_path(output_path, "_pri_labels.txt"))
 
         if fmt == "name2synonym":
-            self.to_name2synonym(output_path)
-            return self._resolve_path(output_path, "_name2synonym.tsv")
+            from pysec2pri.exports import write_name2synonym
+
+            return write_name2synonym(self, self._resolve_path(output_path, "_name2synonym.tsv"))
 
         raise ValueError(
             f"Unknown format {fmt!r}. Choose from: "
@@ -323,6 +331,7 @@ class BaseParser(_MapkgBaseParser):
 
 
 __all__ = [
+    "ALL_SPECIES",
     "CONFIG_DIR",
     "WITHDRAWN_ENTRY",
     "WITHDRAWN_ENTRY_LABEL",
@@ -338,4 +347,5 @@ __all__ = [
     "_cmp_versions",
     "get_datasource_config",
     "load_config",
+    "product_slug_values",
 ]

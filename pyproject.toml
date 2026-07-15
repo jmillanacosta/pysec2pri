@@ -54,24 +54,24 @@ license-files = [
 
 requires-python = ">=3.10"
 dependencies = [
-    "more_itertools", # missing from itertools in stdlib
-    "tqdm", # progress bars
+    "more_itertools",
+    "tqdm",
     "typing-extensions",
-    "pydantic>=2.0", # data validation and models
+    "pydantic>=2.0",
     "linkml>=1.10.0",
-    "sssom==0.4.21", # SSSOM standard support
-    "curies>=0.7.0", # CURIE handling
-    "httpx>=0.24.0", # HTTP client for downloads
-    "polars>=0.20.0", # Fast dataframe operations for diffs
+    "sssom==0.4.21",
+    "curies>=0.7.0",
+    "httpx>=0.24.0",
+    "polars>=0.20.0",
     "regex==2026.1.15",
-    "lxml", # XML parsing for HMDB
-    "defusedxml", # Secure XML parsing
-    "pandas", # DataFrame support for some workflows
-    "numpy", # Required by pandas and polars
-    "rdkit", # Chemistry toolkit for SDF parsing
-    "polars-runtime-32", # Polars runtime for 32-bit systems
-    "sssom-schema==1.1.0a5", # SSSOM schema for validation
-    "mapkgsutils==0.2.1",
+    "lxml",
+    "defusedxml",
+    "pandas",
+    "numpy",
+    "rdkit",
+    "polars-runtime-32",
+    "sssom-schema==1.1.0a5",
+    "mapkgsutils==0.2.4",
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
@@ -232,8 +232,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Ignore security issues in the version.py, which are inconsistent
 "src/pysec2pri/version.py" = ["S603", "S607"]
-# Startup-cost guard runs the interpreter on a fixed, trusted command string
-"tests/test_startup.py" = ["S603"]
 # Ignore commented out code in Sphinx configuration file
 "docs/source/conf.py" = ["ERA001"]
 # Prints are okay in notebooks
