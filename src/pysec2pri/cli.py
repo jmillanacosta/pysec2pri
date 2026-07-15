@@ -133,7 +133,7 @@ _opt_test_subset = _opt(
 )
 # Hints for update-ids/update-labels. A value is ambiguous when it is both
 # retired and current; these say which one a row means. All optional: without
-# them an ambiguous row is left alone and flagged.
+# them an ambiguous row gets an empty cell.
 _opt_xref = _opt(
     "--xref",
     "xref_cols",
@@ -283,7 +283,7 @@ def _resolve_and_print(
     """Read *input_file* and resolve each (column, synonym_col, xref_col) triple."""
     import pandas as pd
 
-    from pysec2pri.update_ids import update_ids, update_labels
+    from pysec2pri.update import update_ids, update_labels
 
     inferred_sep = "\t" if input_file.suffix.lower() == ".tsv" else ","
     read_sep = sep if sep is not None else inferred_sep
@@ -829,9 +829,10 @@ def update_ids_cmd(
 
     Reads the --at column and writes a new column with each ID's current one.
 
-    An ID that is both retired and still current is ambiguous, and is left
-    alone and flagged. To resolve those, give a hint: another column of the
-    same row saying which entry it means. All hints are optional.
+    An ID that is both retired and still current is ambiguous: there is no
+    safe answer, so the new column is left empty for that row. To resolve
+    those, give a hint: another column of the same row saying which entry it
+    means. All hints are optional.
 
     --synonyms names a column of names for the row. --xref names a column of
     identifiers from another vocabulary, and needs a table to read them
@@ -981,9 +982,10 @@ def update_labels_cmd(
 
     Reads the --at column and writes a new column with each label's current one.
 
-    A label that is both old and still in use for something else is ambiguous,
-    and is left alone and flagged. To resolve those, give a hint: another
-    column of the same row saying which entry it means. All hints are optional.
+    A label that is both old and still in use for something else is
+    ambiguous: there is no safe answer, so the new column is left empty for
+    that row. To resolve those, give a hint: another column of the same row
+    saying which entry it means. All hints are optional.
 
     --synonyms names a column of names for the row. --xref names a column of
     identifiers from another vocabulary, and needs a table to read them

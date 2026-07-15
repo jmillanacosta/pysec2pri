@@ -58,7 +58,7 @@ jobs:
           cache-dependency-glob: "pyproject.toml"
       - name: Install dependencies
         run: |
-          sudo apt-get install graphviz
+          sudo apt-get install graphviz pandoc
       - name: Lint documentation
         run: uvx -p ${{ matrix.python-version }} --with tox-uv tox -e docs-lint
       - name: Check docstring coverage

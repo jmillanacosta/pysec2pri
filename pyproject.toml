@@ -71,7 +71,7 @@ dependencies = [
     "rdkit",
     "polars-runtime-32",
     "sssom-schema==1.1.0a5",
-    "mapkgsutils==0.2.4",
+    "mapkgsutils==0.2.5",
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
@@ -89,6 +89,8 @@ docs = [
     "sphinx>=8,<9",
     "sphinx-rtd-theme>=3.0","sphinx-click", 
     "sphinx_automodapi",
+    "nbsphinx",
+    "ipykernel",
     # Include if your project uses Pydantic:
     # "autodoc_pydantic",
     # To include LaTeX comments easily in your docs.
@@ -235,7 +237,7 @@ ignore = [
 # Ignore commented out code in Sphinx configuration file
 "docs/source/conf.py" = ["ERA001"]
 # Prints are okay in notebooks
-"notebooks/**/*.ipynb" = ["T201"]
+"**/*.ipynb" = ["T201"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"

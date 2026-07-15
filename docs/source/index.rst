@@ -99,6 +99,7 @@ Quick Start
    generate
    update_ids
    exports
+   gtex
 
 .. toctree::
    :maxdepth: 1

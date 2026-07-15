@@ -82,6 +82,7 @@ def _auto_download(
     datasource: str,
     version: str | None = None,
     keys: list[str] | None = None,
+    show_progress: bool = True,
     **options: Any,
 ) -> tuple[dict[str, Path], datetime | None]:
     """Download files for *datasource* into a temp dir.
@@ -91,6 +92,7 @@ def _auto_download(
         version: Optional specific version to download.
         keys: Optional list of file-key names to download. When given, only
             those keys are fetched (e.g. ``["complete"]``).
+        show_progress: Whether to show download/decompression progress bars.
         **options: Forwarded to the datasource's downloader. Some sources pick
             their files by more than version (e.g. a species selector).
 
@@ -105,7 +107,7 @@ def _auto_download(
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_{datasource}_"))
     return download_datasource_with_release(
-        datasource, tmpdir, version=version, keys=keys, **options
+        datasource, tmpdir, version=version, keys=keys, show_progress=show_progress, **options
     )
 
 
@@ -384,7 +386,9 @@ def _generate(
 
     release_date = None
     if missing := [key for key in input_map if key not in supplied]:
-        files, release_date = _auto_download(datasource, version, keys=missing, **options)
+        files, release_date = _auto_download(
+            datasource, version, keys=missing, show_progress=show_progress, **options
+        )
         supplied.update({k: Path(v) for k, v in files.items()})
 
     parser_cls = _resolve_parser_class(datasource)
@@ -826,7 +830,7 @@ def resolve_ids(
         sep: Delimiter for reading the file.  Inferred from the extension
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
         xref: *DataFrame mode only.* Column with a per-row cross-reference
-            token, passed through to :func:`~pysec2pri.update_ids.update_ids`.
+            token, passed through to :func:`~pysec2pri.update.update_ids`.
         xref_mapping: The :class:`~mapkgsutils.context.XrefMapping` crosswalk
             table to resolve *xref* tokens against. Required when *xref* is
             given.
@@ -840,7 +844,7 @@ def resolve_ids(
     """
     import pandas as pd
 
-    from pysec2pri.update_ids import build_lookup, update_ids
+    from pysec2pri.update import build_lookup, update_ids
 
     # list direct-lookup mode
     if isinstance(input_path, list):
@@ -926,7 +930,7 @@ def resolve_labels(
             when ``None`` (``"\\t"`` for ``.tsv``, ``","`` otherwise).
         xref: *DataFrame mode only.* Column with a per-row cross-reference
             token, passed through to
-            :func:`~pysec2pri.update_ids.update_labels`.
+            :func:`~pysec2pri.update.update_labels`.
         xref_mapping: The :class:`~mapkgsutils.context.XrefMapping` crosswalk
             table to resolve *xref* tokens against. Required when *xref* is
             given.
@@ -940,7 +944,7 @@ def resolve_labels(
     """
     import pandas as pd
 
-    from pysec2pri.update_ids import build_label_lookup, update_labels
+    from pysec2pri.update import build_label_lookup, update_labels
 
     # list direct-lookup mode
     if isinstance(input_path, list):

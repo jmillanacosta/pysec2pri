@@ -905,3 +905,5 @@ scratch/
 test_data_generation/*
 wayback*
 notes/*
+# Written by docs/source/gtex.ipynb when it runs
+docs/source/*_decisions.tsv

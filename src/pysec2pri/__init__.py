@@ -30,13 +30,13 @@ _LAZY_EXPORTS: dict[str, str] = {
     "IdMappingSet": "pysec2pri.parsers.base",
     "LabelMappingSet": "pysec2pri.parsers.base",
     # ID resolution
-    "build_alias_index": "pysec2pri.update_ids",
-    "build_label_lookup": "pysec2pri.update_ids",
-    "build_lookup": "pysec2pri.update_ids",
-    "build_primary_token_to_id": "pysec2pri.update_ids",
-    "resolve_ambiguous_with_hints": "pysec2pri.update_ids",
-    "update_ids": "pysec2pri.update_ids",
-    "update_labels": "pysec2pri.update_ids",
+    "build_alias_index": "pysec2pri.update",
+    "build_label_lookup": "pysec2pri.update",
+    "build_lookup": "pysec2pri.update",
+    "build_primary_token_to_id": "pysec2pri.update",
+    "resolve_ambiguous_with_hints": "pysec2pri.update",
+    "update_ids": "pysec2pri.update",
+    "update_labels": "pysec2pri.update",
     # High-level API (generate_*/load_*/write_*/resolve_*)
     "find_ambiguous": "pysec2pri.api",
     "list_versions": "pysec2pri.api",
@@ -116,7 +116,7 @@ if TYPE_CHECKING:
         IdMappingSet,
         LabelMappingSet,
     )
-    from pysec2pri.update_ids import (
+    from pysec2pri.update import (
         build_alias_index,
         build_label_lookup,
         build_lookup,

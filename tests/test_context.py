@@ -1,4 +1,4 @@
-"""Edge-case tests for label/id/xref disambiguation in pysec2pri.update_ids."""
+"""Edge-case tests for label/id/xref disambiguation in pysec2pri.update."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from mapkgsutils.context import ContextSpec, XrefMapping, XrefRecord
 from sssom_schema import Mapping
 
 from pysec2pri.parsers.base import LabelMappingSet
-from pysec2pri.update_ids import update_labels
+from pysec2pri.update import update_labels
 
 _MJ = "semapv:BackgroundKnowledgeBasedMatching"
 
