@@ -2,7 +2,7 @@
  Generate mapping sets
 ######################
 
-A mapping set contains identifier or label mappings between secondaries (withdrawn, split, merged, redirected, aliased) and primaries. 
+A mapping set contains identifier or label mappings between secondaries (withdrawn, split, merged, redirected, aliased) and primaries.
 
 .. list-table::
    :header-rows: 1
@@ -87,7 +87,7 @@ You can also provide the needed input files:
 Consolidated mapping sets
 =========================
 
-A mapping set generated for a specific release of a database is limited to the deprecation information that can be extracted from that release. 
+A mapping set generated for a specific release of a database is limited to the deprecation information that can be extracted from that release.
 
 ``--consolidate`` reads the source's past releases too: it finds
 mappings the current release might no longer mention, and gives every mapping the

@@ -224,7 +224,7 @@ Also add the import of the submodule and the downloader class at the top of
 **********
 
 Put a small sample of the real upstream files in ``tests/data/`` and write a
-test that correctly parses them into mapping sets. The config tests in 
+test that correctly parses them into mapping sets. The config tests in
 ``tests/test_config.py`` already verify automatically that ``parser_class``,
 every ``method``, and every ``inputs`` argument named in the config are real attributes on the parser class, and that each ``inputs`` key corresponds to a downloadable file.
 

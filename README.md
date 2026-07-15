@@ -25,7 +25,8 @@ Create and use mapping files for secondary (retired/withdrawn) biological
 database identifiers and labels to primary (current) identifiers and labels.
 
 Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subject
-ids and labels (`subject_id`, `subject_label`) are secondary, objects are primary.
+ids and labels (`subject_id`, `subject_label`) are secondary, objects are
+primary.
 
 ## Installation
 
