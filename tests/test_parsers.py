@@ -434,10 +434,11 @@ class TestEnsemblParser:
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        # mock file has 6 rows: 1 identity (skip), 1 retirement, 1 scored
-        # rename, 1 new-gene with no old id (skip), 1 plain rename, 1
-        # transcript-type row (skip) -> exactly 3 mappings survive.
-        assert len(result.mappings) == 3
+        # mock file has 8 rows: 1 identity (skip), 1 retirement, 1 null row
+        # beside two successors (skip, the successors say what it became), 2
+        # scored renames, 1 new-gene with no old id (skip), 1 plain rename, 1
+        # transcript-type row (skip) -> exactly 4 mappings survive.
+        assert len(result.mappings) == 4
         subject_ids = {m.subject_id for m in result.mappings}
         assert "ENSEMBL:ENSG00000000003" not in subject_ids  # identity row
 
@@ -457,6 +458,26 @@ class TestEnsemblParser:
         assert withdrawn[0].object_id == "sssom:NoTermFound"
         assert withdrawn[0].mapping_date == "2002-09-05"
 
+    def test_parse_does_not_withdraw_an_id_that_has_successors(
+        self,
+        ensembl_stable_id_event_path: Path,
+        ensembl_mapping_session_path: Path,
+    ) -> None:
+        """A retirement writes a null row beside its successors; only they count.
+
+        ``ENSG00000007565`` retires in session 361 with a null-successor row
+        and two successor rows. Reporting the null row as well would claim the
+        ID both was and was not replaced.
+        """
+        result = EnsemblParser(version="115", show_progress=False).parse(
+            ensembl_stable_id_event_path,
+            mapping_session_path=ensembl_mapping_session_path,
+        )
+        objects = {
+            m.object_id for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"
+        }
+        assert objects == {"ENSEMBL:ENSG00000206171", "ENSEMBL:ENSG00000206235"}
+
     def test_parse_rename_uses_replaced_by_predicate_and_confidence(
         self,
         ensembl_stable_id_event_path: Path,
@@ -467,11 +488,11 @@ class TestEnsemblParser:
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        scored = [m for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"]
+        scored = [m for m in result.mappings if m.object_id == "ENSEMBL:ENSG00000206171"]
         assert len(scored) == 1
+        assert scored[0].subject_id == "ENSEMBL:ENSG00000007565"
         assert scored[0].predicate_id == "IAO:0100001"
         assert scored[0].predicate_label == "term replaced by"
-        assert scored[0].object_id == "ENSEMBL:ENSG00000206171"
         assert scored[0].confidence == pytest.approx(0.973291)
         assert scored[0].mapping_date == "2006-03-10"
 
@@ -487,10 +508,12 @@ class TestEnsemblParser:
         )
         by_subject = {m.subject_id: m for m in result.mappings}
         # session 361: NCBI35 (old) -> NCBI36 (new): a real assembly change.
-        scored = by_subject["ENSEMBL:ENSG00000007565"]
-        assert scored.comment == "Assembly changed from NCBI35 to NCBI36."
-        assert scored.subject_source_version is None
-        assert scored.object_source_version is None
+        # Both of this subject's successors come from that session.
+        scored = [m for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"]
+        assert len(scored) == 2
+        assert all(m.comment == "Assembly changed from NCBI35 to NCBI36." for m in scored)
+        assert all(m.subject_source_version is None for m in scored)
+        assert all(m.object_source_version is None for m in scored)
         # session 388: GRCh37 -> GRCh37 (assembly-patch rename within one build): no comment.
         patched = by_subject["ENSEMBL:ASMPATCHG00000000170"]
         assert patched.comment is None
@@ -533,7 +556,7 @@ class TestEnsemblParser:
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path
         )
-        assert len(result.mappings) == 3
+        assert len(result.mappings) == 4
         assert all(m.mapping_date is None for m in result.mappings)
 
     def test_parse_with_gene_path_populates_primary_ids(

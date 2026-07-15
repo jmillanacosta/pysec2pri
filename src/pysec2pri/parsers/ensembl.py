@@ -409,6 +409,19 @@ class EnsemblParser(BaseParser):
         }
 
         record_ns = self._record_namespace()
+
+        # A retirement writes a null-successor row, and one row per successor
+        # beside it. The null row says the ID is gone, not that nothing
+        # replaced it, so only the IDs that never gained a successor are
+        # withdrawals.
+        replaced: set[str] = set(
+            df.filter(
+                pl.col("old_stable_id").is_not_null()
+                & pl.col("new_stable_id").is_not_null()
+                & (pl.col("old_stable_id") != pl.col("new_stable_id"))
+            )["old_stable_id"].to_list()
+        )
+
         rows_data: list[dict[str, Any]] = []
         for row in df.iter_rows(named=True):
             old_id = row.get("old_stable_id")
@@ -417,6 +430,9 @@ class EnsemblParser(BaseParser):
             # No old (secondary) ID: a brand-new gene, not a sec->pri mapping.
             # old == new: an annotation-only version bump, not an ID change.
             if not old_id or old_id == new_id:
+                continue
+
+            if not new_id and old_id in replaced:
                 continue
 
             session_id = str(row.get("mapping_session_id") or "")
