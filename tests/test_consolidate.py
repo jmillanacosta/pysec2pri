@@ -373,10 +373,14 @@ class TestGenerateUsesConsolidatedSet:
         """Stub out download+parse, and the walk, leaving only _generate's wiring."""
 
         class _FakeParser:
+            """Fake parser."""
+
             def __init__(self, **kwargs: Any) -> None:
+                """Initialize fake parser."""
                 self.release_date = None
 
             def parse(self, **kwargs: Any) -> Any:
+                """Fake parse."""
                 return _FakeMappingSet(["current"])
 
         def _fake_consolidate(

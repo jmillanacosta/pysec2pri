@@ -265,8 +265,6 @@ todo_emit_warnings = True
 # Output SVG inheritance diagrams
 graphviz_output_format = "svg"
 
-# Run the notebooks on every docs build, so a change that breaks them fails the
-# build instead of shipping stale output. They download real data, so give them
-# room; the stored outputs are only a fallback for a build without network.
-nbsphinx_execute = "always"
+# Run the notebooks only for READTHEDOCS
+nbsphinx_execute = "always" if os.environ.get("READTHEDOCS", "") == "True" else "never"
 nbsphinx_timeout = 900

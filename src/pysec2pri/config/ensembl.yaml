@@ -422,7 +422,6 @@ mapping:
   reviewer_label: null
   creator_id: null
   creator_label: null
-  license: "https://www.apache.org/licenses/LICENSE-2.0"
   subject_type: null
   subject_source: "ensembl:"
   subject_source_version: null

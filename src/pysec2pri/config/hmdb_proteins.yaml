@@ -75,7 +75,6 @@ mapping:
   reviewer_label: null
   creator_id: null
   creator_label: null
-  license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: null
   subject_source: "hmdbca:"
   subject_source_version: null
