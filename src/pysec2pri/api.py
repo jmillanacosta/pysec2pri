@@ -183,17 +183,18 @@ def _refresh_consolidated(
     cache_dir: Path | None = None,
     force: bool = False,
     **options: Any,
-) -> None:
-    """Build/refresh the cross-release index the parser reads mapping dates from."""
+) -> BaseMappingSet:
+    """Build/refresh the cross-release index and return it as a mapping set."""
     from pysec2pri.consolidate import consolidate_mapping_dates
 
-    consolidate_mapping_dates(
+    _, mapping_set = consolidate_mapping_dates(
         datasource,
         cache_dir=cache_dir,
         mapping_sets=kind,
         force=force,
         **_accepted(consolidate_mapping_dates, **options),
     )
+    return mapping_set
 
 
 def _process_one_ensembl_species(
@@ -363,13 +364,16 @@ def _generate(
             f"Available: {sorted(cfg.mapping_sets)}"
         )
 
+    consolidated = None
     if consolidate:
         if not spec.get("consolidate"):
             raise ValueError(
                 f"{datasource!r} {kind!r} cannot be consolidated: its releases carry no "
                 "extra history to recover. See `supports_consolidate`."
             )
-        _refresh_consolidated(datasource, kind, cache_dir=cache_dir, force=force, **options)
+        consolidated = _refresh_consolidated(
+            datasource, kind, cache_dir=cache_dir, force=force, **options
+        )
 
     # A source may publish one dataset per species rather than one per release;
     # "every species" then means downloading and combining each in turn.
@@ -401,6 +405,17 @@ def _generate(
     call_kwargs = {param: supplied[key] for key, param in input_map.items() if key in supplied}
     call_kwargs.update(_accepted(method, **options))
     result: BaseMappingSet = method(**call_kwargs)
+
+    if consolidated is not None:
+        # Every mapping seen in any release, superseding the current release's
+        # view. Kept on the parsed set so its `_primary_ids`/`_primary_labels`
+        # stores survive for the pri_ids/pri_labels formats.
+        result = copy.copy(result)
+        result.mappings = consolidated.mappings
+        # A consolidated walk is a distinct data product at the same release,
+        # so it gets its own IRI segment -- appended here rather than taken
+        # from `consolidated`, whose own id drops the product slug.
+        result.mapping_set_id = f"{result.mapping_set_id}/consolidate"
 
     if consolidate:
         from pysec2pri.consolidate import recover_mapping_set
@@ -608,13 +623,17 @@ _FORMAT_EXTENSIONS: dict[str, str] = {
     "rdf": ".ttl",
     "owl": "_owl.ttl",
     "json": ".json",
+    "sssom": ".sssom.tsv",
 }
+
+#: Formats whose extension already names the format.
+_SELF_NAMING_FORMATS = ("owl", "sssom")
 
 
 def _output_filename(base_name: str, fmt: str) -> Path:
     """Return the default filename for *base_name* in format *fmt*."""
     ext = _FORMAT_EXTENSIONS.get(fmt, ".tsv")
-    if fmt == "owl":
+    if fmt in _SELF_NAMING_FORMATS:
         return Path(f"{base_name}{ext}")
     return Path(f"{base_name}_{fmt}{ext}")
 
@@ -682,7 +701,7 @@ def write_all_formats(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    write_sssom(mapping_set, output_dir / f"{base_name}_sssom.tsv")
+    write_sssom(mapping_set, output_dir / _output_filename(base_name, "sssom"))
 
     if isinstance(mapping_set, IdMappingSet):
         write_sec2pri(mapping_set, output_dir / f"{base_name}_sec2pri.tsv")

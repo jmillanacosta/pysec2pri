@@ -63,7 +63,7 @@ Quick Start
     pysec2pri update-ids data.tsv hgnc --at gene_id -o data_primary.tsv
     pysec2pri update-labels data.tsv hgnc --at label
     # reuse a saved mapping file
-    pysec2pri update-ids data.tsv hgnc --at gene_id --mapping hgnc_sssom.tsv
+    pysec2pri update-ids data.tsv hgnc --at gene_id --mapping hgnc_ids.sssom.tsv
 
 **Python API:**
 
@@ -82,8 +82,8 @@ Quick Start
     resolve_labels("BRCA1_OLD", lms)         # : "BRCA1"
 
     # read back a saved SSSOM file
-    ms = load_mapping("hgnc_sssom.tsv")
-    lms = load_label_mapping("hgnc_labels_sssom.tsv")
+    ms = load_mapping("hgnc_ids.sssom.tsv")
+    lms = load_label_mapping("hgnc_labels.sssom.tsv")
 
 .. toctree::
    :maxdepth: 1

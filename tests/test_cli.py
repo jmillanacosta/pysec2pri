@@ -49,7 +49,7 @@ class TestSpeciesInOutputFilename:
         with runner.isolated_filesystem():
             result = runner.invoke(cmd, ["--species", "9615"])
             assert result.exit_code == 0, result.output
-            assert Path("ensembl_ids_9615_115_sssom.tsv").exists()
+            assert Path("ensembl_ids_9615_115.sssom.tsv").exists()
 
     def test_no_species_option_omits_species_segment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A command with no --species option (e.g. hgnc) keeps the old filename shape."""
@@ -63,4 +63,25 @@ class TestSpeciesInOutputFilename:
         with runner.isolated_filesystem():
             result = runner.invoke(cmd, [])
             assert result.exit_code == 0, result.output
-            assert Path("hgnc_ids_115_sssom.tsv").exists()
+            assert Path("hgnc_ids_115.sssom.tsv").exists()
+
+
+class TestConsolidateInOutputFilename:
+    """A consolidated run is a distinct product and must not overwrite the plain run."""
+
+    def test_consolidate_is_folded_into_default_filename(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--consolidate produces its own file, leaving the plain default untouched."""
+        import pysec2pri.api as api
+
+        monkeypatch.setattr(api, "_generate", _fake_generate)
+        cmd_fn = _make_generate_cmd("hgnc", "ids", [])
+        cmd = click.command(name="ids")(cmd_fn)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cmd, ["--consolidate"])
+            assert result.exit_code == 0, result.output
+            assert Path("hgnc_ids_115_consolidate.sssom.tsv").exists()
+            assert not Path("hgnc_ids_115.sssom.tsv").exists()

@@ -122,8 +122,8 @@ pysec2pri update-ids data.tsv hgnc --at gene_id --at related_gene_id
 To skip regenerating the mapping set, pass a pre-built mapping file:
 
 ```bash
-pysec2pri hgnc ids  # outputs hgnc_{version}_sssom.tsv
-pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_{version}_sssom.tsv
+pysec2pri hgnc ids  # outputs hgnc_ids_{version}.sssom.tsv
+pysec2pri update-ids gene_ex.tsv hgnc --at gene --mapping hgnc_ids_{version}.sssom.tsv
 ```
 
 In Python, `load_mapping` reads a written SSSOM file back in, so you can
@@ -131,7 +131,7 @@ generate once and reuse the file:
 
 ```python
 from pysec2pri import load_mapping, update_ids
-hgnc = load_mapping("hgnc_115_sssom.tsv")
+hgnc = load_mapping("hgnc_ids_115.sssom.tsv")
 df_with_new_column = update_ids(mapping_set=hgnc, ids=df, at="gene")
 ```
 

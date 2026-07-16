@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 
 import pytest
 
+from pysec2pri import api
 from pysec2pri import consolidate as consolidate_module
 from pysec2pri.consolidate import (
     SUPPORTED_DATASOURCES,
@@ -126,6 +127,7 @@ class _FakeMappingSet:
             SimpleNamespace(record_id=rid, mapping_date=dates.get(rid)) for rid in record_ids
         ]
         self.mapping_set_version = mapping_set_version
+        self.mapping_set_id = "https://sec2pri.github.io/hgnc/v1"
 
 
 class _FakeDownloader:
@@ -361,3 +363,71 @@ class TestBuildLabelHistory:
         seen.clear()
         build_label_history(species=9606, cache_dir=tmp_path, show_progress=False, force=True)
         assert seen == ["113", "114"]
+
+
+class TestGenerateUsesConsolidatedSet:
+    """``--consolidate`` must change what ``_generate`` returns, not just warm a cache."""
+
+    @staticmethod
+    def _patch_generate(monkeypatch: pytest.MonkeyPatch, consolidated: list[str]) -> None:
+        """Stub out download+parse, and the walk, leaving only _generate's wiring."""
+
+        class _FakeParser:
+            def __init__(self, **kwargs: Any) -> None:
+                self.release_date = None
+
+            def parse(self, **kwargs: Any) -> Any:
+                return _FakeMappingSet(["current"])
+
+        def _fake_consolidate(
+            datasource: str,
+            *,
+            cache_dir: Path | None = None,
+            mapping_sets: str = "ids",
+            show_progress: bool = True,
+            force: bool = False,
+            output: Path | None = None,
+        ) -> tuple[Path, Any]:
+            return Path("cache.tsv"), _FakeMappingSet(consolidated)
+
+        monkeypatch.setattr(api, "_resolve_parser_class", lambda datasource: _FakeParser)
+        monkeypatch.setattr(
+            api,
+            "_auto_download",
+            lambda datasource, version, keys, show_progress, **kw: (
+                {k: Path(f"{k}.txt") for k in keys},
+                None,
+            ),
+        )
+        monkeypatch.setattr(consolidate_module, "consolidate_mapping_dates", _fake_consolidate)
+
+    def test_consolidate_recovers_mappings_the_current_release_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The walk's extra rows reach the output, not just the on-disk cache."""
+        self._patch_generate(monkeypatch, ["current", "dropped"])
+
+        result = api._generate("hgnc", "ids", consolidate=True, show_progress=False)
+
+        assert {m.record_id for m in result.mappings} == {"current", "dropped"}
+
+    def test_consolidated_set_gets_its_own_version_iri(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The consolidated walk is a distinct product, so the IRI says so."""
+        self._patch_generate(monkeypatch, ["current", "dropped"])
+
+        plain = api._generate("hgnc", "ids", consolidate=False, show_progress=False)
+        consolidated = api._generate("hgnc", "ids", consolidate=True, show_progress=False)
+
+        assert consolidated.mapping_set_id == f"{plain.mapping_set_id}/consolidate"
+
+    def test_without_consolidate_only_the_current_release_is_returned(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The plain path is unchanged: no walk, no recovered rows."""
+        self._patch_generate(monkeypatch, ["current", "dropped"])
+
+        result = api._generate("hgnc", "ids", consolidate=False, show_progress=False)
+
+        assert {m.record_id for m in result.mappings} == {"current"}

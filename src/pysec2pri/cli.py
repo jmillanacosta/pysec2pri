@@ -427,6 +427,10 @@ def _make_generate_cmd(
         if species is not None:
             prefix = f"{prefix}_{species}"
         _, base = _version_base(ms, data_version, prefix)
+        if extra_kwargs.get("consolidate"):
+            # A consolidated walk is a distinct data product at the same
+            # release, so it must not overwrite the plain run's output.
+            base = f"{base}_consolidate"
         _emit(ms, output_format, output, base)
 
     # Apply Click decorators
