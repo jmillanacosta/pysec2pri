@@ -121,7 +121,10 @@ def _accepted(fn: Any, **candidates: Any) -> dict[str, Any]:
     import inspect
 
     params = inspect.signature(fn).parameters
-    return {k: v for k, v in candidates.items() if k in params and v is not None}
+    has_var_keyword = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    return {
+        k: v for k, v in candidates.items() if v is not None and (has_var_keyword or k in params)
+    }
 
 
 def _resolve_parser_class(config_id: str) -> type[BaseParser]:
