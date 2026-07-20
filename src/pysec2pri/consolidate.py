@@ -316,7 +316,9 @@ def _run_one_version(
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_consolidate_{datasource}_"))
     try:
-        files, _ = download_datasource_with_release(datasource, tmpdir, version=version, **kwargs)
+        files, version, _ = download_datasource_with_release(
+            datasource, tmpdir, version=version, **kwargs
+        )
         return _parse_mapping_set(datasource, files, version, mapping_sets, **kwargs)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -583,7 +585,7 @@ def build_label_history(
     for v in iterator:
         tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_labelhistory_{datasource}_"))
         try:
-            files, _ = download_datasource_with_release(
+            files, _, _ = download_datasource_with_release(
                 datasource, tmpdir, version=v, species=species, keys=["gene", "xref"]
             )
             parser = EnsemblParser(version=v, show_progress=False, species=species)

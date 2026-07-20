@@ -84,12 +84,14 @@ def _auto_download(
     keys: list[str] | None = None,
     show_progress: bool = True,
     **options: Any,
-) -> tuple[dict[str, Path], datetime | None]:
+) -> tuple[dict[str, Path], str | None, datetime | None]:
     """Download files for *datasource* into a temp dir.
 
     Args:
         datasource: Datasource name (e.g. ``"hgnc"``).
-        version: Optional specific version to download.
+        version: Optional specific version to download. ``None`` means
+            "latest", resolved to a real release identifier by
+            :func:`~pysec2pri.download.download_datasource_with_release`.
         keys: Optional list of file-key names to download. When given, only
             those keys are fetched (e.g. ``["complete"]``).
         show_progress: Whether to show download/decompression progress bars.
@@ -97,9 +99,10 @@ def _auto_download(
             their files by more than version (e.g. a species selector).
 
     Returns:
-        Tuple of (file-key -> downloaded path mapping, source release date or
-        None). The release date is set on the parser so the generated mapping
-        set's ``mapping_date`` reflects the upstream release.
+        Tuple of (file-key -> downloaded path mapping, resolved version,
+        source release date or None). The version feeds the parser's
+        ``subject_source_version``/``object_source_version``; the release
+        date is set on the parser for the ``mapping_date`` field.
     """
     import tempfile
 
@@ -393,7 +396,7 @@ def _generate(
 
     release_date = None
     if missing := [key for key in input_map if key not in supplied]:
-        files, release_date = _auto_download(
+        files, version, release_date = _auto_download(
             datasource, version, keys=missing, show_progress=show_progress, **options
         )
         supplied.update({k: Path(v) for k, v in files.items()})

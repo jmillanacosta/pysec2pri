@@ -280,8 +280,9 @@ class TestBuildLabelHistory:
             species: object = None,
             keys: list[str] | None = None,
             **kwargs: object,
-        ) -> tuple[dict[str, Path], None]:
-            return {"gene": Path(f"gene_{version}.txt"), "xref": Path(f"xref_{version}.txt")}, None
+        ) -> tuple[dict[str, Path], str | None, None]:
+            files = {"gene": Path(f"gene_{version}.txt"), "xref": Path(f"xref_{version}.txt")}
+            return files, version, None
 
         monkeypatch.setattr("pysec2pri.download.download_datasource_with_release", _fake_download)
 
@@ -400,6 +401,7 @@ class TestGenerateUsesConsolidatedSet:
             "_auto_download",
             lambda datasource, version, keys, show_progress, **kw: (
                 {k: Path(f"{k}.txt") for k in keys},
+                version,
                 None,
             ),
         )

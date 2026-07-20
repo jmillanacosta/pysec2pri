@@ -292,8 +292,9 @@ class UniProtParser(BaseParser):
         if acindex_path is None:
             from pysec2pri.api import _auto_download
 
-            files, release_date = _auto_download("uniprot", None, keys=["acindex"])
+            files, version, release_date = _auto_download("uniprot", None, keys=["acindex"])
             acindex_path = files["acindex"]
+            self.version = version
             self.release_date = release_date
         acindex_path = Path(str(acindex_path))
         self._resolve_version(acindex_path)
