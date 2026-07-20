@@ -245,13 +245,7 @@ class NCBIParser(BaseParser):
             return []
 
         m_meta = self.get_mapping_metadata()
-        fixed_base = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        fixed_base = self._fixed_mapping_fields()
 
         rows_data: list[dict[str, str | None]] = []
         for row in df.iter_rows(named=True):
@@ -333,14 +327,7 @@ class NCBIParser(BaseParser):
         if df.is_empty():
             return []
 
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        fixed = self._fixed_mapping_fields()
 
         rows_data: list[dict[str, str | None]] = []
         for row in df.iter_rows(named=True):

@@ -400,13 +400,7 @@ class EnsemblParser(BaseParser):
         date_by_session, assembly_by_session = _load_session_meta(mapping_session_path)
 
         m_meta = self.get_mapping_metadata()
-        fixed_base = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        fixed_base = self._fixed_mapping_fields()
 
         record_ns = self._record_namespace()
 
@@ -553,14 +547,7 @@ class EnsemblParser(BaseParser):
         if df.is_empty():
             return []
 
-        m_meta = self.get_mapping_metadata()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        fixed = self._fixed_mapping_fields()
 
         record_ns = self._record_namespace()
         rows_data: list[dict[str, Any]] = []
@@ -680,14 +667,7 @@ class EnsemblParser(BaseParser):
         """
         self._is_label_history = True
         try:
-            m_meta = self.get_mapping_metadata()
-            fixed = {
-                "mapping_justification": m_meta["mapping_justification"],
-                "subject_source": m_meta.get("subject_source"),
-                "object_source": m_meta.get("object_source"),
-                "mapping_tool": m_meta.get("mapping_tool"),
-                "license": m_meta.get("license"),
-            }
+            fixed = self._fixed_mapping_fields()
 
             record_ns = self._record_namespace()
             rows_data: list[dict[str, Any]] = []

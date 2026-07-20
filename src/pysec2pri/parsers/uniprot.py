@@ -163,13 +163,9 @@ class UniProtParser(BaseParser):
 
         m_meta = self.get_mapping_metadata()
         fixed = {
+            **self._fixed_mapping_fields(),
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
         }
         rows = df.select(["subject_id", "object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
@@ -246,16 +242,11 @@ class UniProtParser(BaseParser):
 
         consolidated = load_mapping_dates("uniprot", mapping_sets="ids")
 
-        m_meta = self.get_mapping_metadata()
         fixed = {
+            **self._fixed_mapping_fields(),
             "subject_id": WITHDRAWN_ENTRY,
             "subject_label": WITHDRAWN_ENTRY_LABEL,
             "predicate_id": "oboInOwl:consider",
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
             "comment": "Deleted accession with no replacement.",
         }
         rows = df.select(["object_id", "record_id", "pair_key"]).to_dicts()

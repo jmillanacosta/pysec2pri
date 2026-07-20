@@ -104,13 +104,9 @@ class HMDBParser(BaseParser):
         self._resolve_version(file_path)
         m_meta = self.get_mapping_metadata()
         fixed: dict[str, str | None] = {
+            **self._fixed_mapping_fields(),
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
         }
         rows_data: list[dict[str, str]] = []
         primary_ids_found: set[str] = set()
