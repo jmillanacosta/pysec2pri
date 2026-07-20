@@ -71,7 +71,7 @@ dependencies = [
     "rdkit",
     "polars-runtime-32",
     "sssom-schema==1.1.0a5",
-    "mapkgsutils==0.2.5",
+    "mapkgsutils==0.2.6",
 ]
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups

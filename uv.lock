@@ -1759,7 +1759,7 @@ wheels = [
 
 [[package]]
 name = "mapkgsutils"
-version = "0.2.5"
+version = "0.2.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1781,9 +1781,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/90/8f6d5ee5f3cda8f382f8ae27c2a07c3466cac5d0e154379b558fdc64dd27/mapkgsutils-0.2.5.tar.gz", hash = "sha256:164e75b817fb15a2dfb3e0e8fe47f8b6a4da781bea0bd5585183f37827bf93df", size = 45445 }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/76/fcea6ed0f56dae2edfc0e995ab25557a1aff2ec53ce2a4f158a4f0b80612/mapkgsutils-0.2.6.tar.gz", hash = "sha256:e6908cc036a800d2b0f980dcdc046fcbc93ec2d199e27cce6050ea937ea8028a", size = 46313 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/2f/295b4da7ebf1c15d6a2bf5eaf64d18c7d4771c4e5f31067740572e59b92a/mapkgsutils-0.2.5-py3-none-any.whl", hash = "sha256:ec6e3769cb34372ffede9875f33ad7ad30b5ac5e8377a53ca1efd3039740b87b", size = 50671 },
+    { url = "https://files.pythonhosted.org/packages/c1/8c/6a2962ae2f35806654ada8876d0af68c25897991dc0e16b3873c71659904/mapkgsutils-0.2.6-py3-none-any.whl", hash = "sha256:426f31e48f4f07c97c288801a7a9859e192ac6db940f234d17ab022f3a56245e", size = 51792 },
 ]
 
 [[package]]
@@ -2911,7 +2911,7 @@ wheels = [
 
 [[package]]
 name = "pysec2pri"
-version = "0.3.4"
+version = "0.3.5"
 source = { editable = "." }
 dependencies = [
     { name = "curies" },
@@ -3018,7 +3018,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "linkml", specifier = ">=1.10.0" },
     { name = "lxml" },
-    { name = "mapkgsutils", specifier = "==0.2.5" },
+    { name = "mapkgsutils", specifier = "==0.2.6" },
     { name = "more-itertools" },
     { name = "numpy" },
     { name = "pandas" },

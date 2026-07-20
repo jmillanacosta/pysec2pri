@@ -273,14 +273,9 @@ class ChEBIParser(BaseParser):
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="ids")
         record_ns = self._record_namespace()
         fixed = {
+            **self._fixed_mapping_fields(),
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "confidence": m_meta.get("confidence"),
-            "license": m_meta.get("license"),
         }
         rows = []
         for pri, sec in raw_id_mappings:
@@ -300,16 +295,9 @@ class ChEBIParser(BaseParser):
         """Build Mapping objects for label/synonym mappings."""
         from pysec2pri.consolidate import load_mapping_dates
 
-        m_meta = self.get_mapping_metadata()
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="labels")
         record_ns = self._record_namespace()
-        fixed = {
-            "mapping_justification": m_meta["mapping_justification"],
-            "subject_source": m_meta.get("subject_source"),
-            "object_source": m_meta.get("object_source"),
-            "mapping_tool": m_meta.get("mapping_tool"),
-            "license": m_meta.get("license"),
-        }
+        fixed = self._fixed_mapping_fields()
         rows = []
         for sid, pname, syn in raw_name_mappings:
             if not syn:

@@ -316,7 +316,9 @@ def _run_one_version(
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_consolidate_{datasource}_"))
     try:
-        files, _ = download_datasource_with_release(datasource, tmpdir, version=version, **kwargs)
+        files, version, _ = download_datasource_with_release(
+            datasource, tmpdir, version=version, **kwargs
+        )
         return _parse_mapping_set(datasource, files, version, mapping_sets, **kwargs)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -402,15 +404,12 @@ def consolidate_mapping_dates(
             f"{datasource!r} does not support mapping_sets={mapping_sets!r}. "
             f"Supported: {_SUPPORTED_MAPPING_SETS[datasource]}"
         )
-    if datasource == "ensembl":
-        config = ALL_DATASOURCES["ensembl"]
+    config = ALL_DATASOURCES.get(datasource)
+    if config is not None and "species" in config.products:
         species = kwargs.get("species") or config.default_species()
         if species == "all":
             raise ValueError(
-                "ensembl consolidation requires an explicit single species= taxon ID. "
-                "Its config default is species='all', which the per-version "
-                "download/parse step used here (unlike pysec2pri.api's bulk "
-                "generate_ids) has no support for."
+                f"{datasource} consolidation requires an explicit single species= taxon ID."
             )
 
     cache_dir = cache_dir or default_cache_dir()
@@ -583,7 +582,7 @@ def build_label_history(
     for v in iterator:
         tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_labelhistory_{datasource}_"))
         try:
-            files, _ = download_datasource_with_release(
+            files, _, _ = download_datasource_with_release(
                 datasource, tmpdir, version=v, species=species, keys=["gene", "xref"]
             )
             parser = EnsemblParser(version=v, show_progress=False, species=species)

@@ -111,6 +111,14 @@ mapping:
 
 download_urls: {}
 sparql_endpoint: "https://qlever.dev/api/wikidata"
+version_query: |
+  PREFIX wikibase: <http://wikiba.se/ontology#>
+  PREFIX schema: <http://schema.org/>
+  SELECT ?date WHERE {
+    wikibase:Dump schema:dateModified ?date
+  }
+  ORDER BY DESC(?date)
+  LIMIT 1
 archive_url: null
 id_pattern: "^Q\\d+$"
 default_output_filename: "wikidata_sec2pri.sssom.tsv"

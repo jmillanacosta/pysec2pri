@@ -216,25 +216,30 @@ def download_datasource_with_release(
     version: str | None = None,
     keys: list[str] | None = None,
     **kwargs: Any,
-) -> tuple[dict[str, Path], datetime | None]:
-    """Download all files for a datasource and report its release date.
-
-    Same as :func:`download_datasource`, but also returns the resolved source
-    release date (used for the SSSOM ``mapping_date``).
+) -> tuple[dict[str, Path], str | None, datetime | None]:
+    """Download all files for a datasource; report its resolved version and release date.
 
     Args:
         datasource: Name of the datasource.
         output_dir: Directory to save files.
         decompress: Whether to decompress .gz files.
-        version: Specific version to download. Format depends on datasource.
+        version: Specific version to download, or ``None`` for latest.
         keys: Optional list of file-key names to download.
         **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
             for Ensembl); see :func:`get_download_urls`.
 
     Returns:
-        Tuple of (file-key -> downloaded path mapping, release date or None).
+        Tuple of (file-key -> downloaded path mapping, resolved version,
+        release date). ``None`` for a datasource with no release checker.
     """
-    return _download_datasource_with_release(
+    release_date = None
+    if version is None:
+        checker = CHECK_RELEASE.get(datasource)
+        if checker is not None:
+            release_info = checker()
+            version, release_date = release_info.version, release_info.release_date
+
+    files, dl_release_date = _download_datasource_with_release(
         datasource,
         output_dir,
         all_datasources=ALL_DATASOURCES,
@@ -245,3 +250,4 @@ def download_datasource_with_release(
         tar_extractors=TAR_EXTRACTORS,
         **kwargs,
     )
+    return files, version, release_date or dl_release_date

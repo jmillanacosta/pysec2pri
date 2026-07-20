@@ -213,7 +213,9 @@ class TestConsolidateDispatch:
             ),
         )
 
-        cache_path, _ = consolidate_mapping_dates("ncbi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates(
+            "ncbi", cache_dir=tmp_path, show_progress=False, species="9606"
+        )
         records = consolidate_module._read_cache(cache_path)
         assert set(records) == {"dated", "undated"}  # undated row kept, not dropped
         assert records["dated"]["first_seen_date"] == "2010-05-12"
@@ -280,8 +282,9 @@ class TestBuildLabelHistory:
             species: object = None,
             keys: list[str] | None = None,
             **kwargs: object,
-        ) -> tuple[dict[str, Path], None]:
-            return {"gene": Path(f"gene_{version}.txt"), "xref": Path(f"xref_{version}.txt")}, None
+        ) -> tuple[dict[str, Path], str | None, None]:
+            files = {"gene": Path(f"gene_{version}.txt"), "xref": Path(f"xref_{version}.txt")}
+            return files, version, None
 
         monkeypatch.setattr("pysec2pri.download.download_datasource_with_release", _fake_download)
 
@@ -400,6 +403,7 @@ class TestGenerateUsesConsolidatedSet:
             "_auto_download",
             lambda datasource, version, keys, show_progress, **kw: (
                 {k: Path(f"{k}.txt") for k in keys},
+                version,
                 None,
             ),
         )
