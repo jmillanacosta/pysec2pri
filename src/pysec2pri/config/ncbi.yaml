@@ -12,12 +12,134 @@ curie_base_url: "http://identifiers.org/ncbigene/"
 entity_types: ["genes"]
 
 species:
-  default: "all"
+  default: "9606"
   available:
-    9606: { token: "9606", label: Human }
-    10090: { token: "10090", label: Mouse }
-    10116: { token: "10116", label: Rat }
-    7955: { token: "7955", label: Zebrafish }
+    210: { token: "210", label: "Helicobacter pylori" }
+    287: { token: "287", label: "Pseudomonas aeruginosa" }
+    562: { token: "562", label: "E. coli" }
+    666: { token: "666", label: "Vibrio cholerae" }
+    1280: { token: "1280", label: "Staphylococcus aureus" }
+    1313: { token: "1313", label: "Streptococcus pneumoniae" }
+    1423: { token: "1423", label: "Bacillus subtilis" }
+    1773: { token: "1773", label: "Mycobacterium tuberculosis" }
+    2190: { token: "2190", label: "Methanocaldococcus jannaschii" }
+    3635: { token: "3635", label: "Cotton" }
+    3641: { token: "3641", label: "Cacao" }
+    3659: { token: "3659", label: "Cucumber" }
+    3694: { token: "3694", label: "Black cottonwood" }
+    3702: { token: "3702", label: "Thale cress" }
+    3708: { token: "3708", label: "Rape" }
+    3847: { token: "3847", label: "Soybean" }
+    3880: { token: "3880", label: "Barrel medic" }
+    3983: { token: "3983", label: "Cassava" }
+    4081: { token: "4081", label: "Tomato" }
+    4113: { token: "4113", label: "Potato" }
+    4513: { token: "4513", label: "Barley" }
+    4530: { token: "4530", label: "Asian cultivated rice" }
+    4558: { token: "4558", label: "Sorghum" }
+    4565: { token: "4565", label: "Bread wheat" }
+    4577: { token: "4577", label: "Maize" }
+    4896: { token: "4896", label: "Fission yeast" }
+    4932: { token: "4932", label: "Brewer's yeast" }
+    5061: { token: "5061", label: "Aspergillus niger" }
+    5141: { token: "5141", label: "Neurospora crassa" }
+    5207: { token: "5207", label: "Cryptococcus neoformans serotype A" }
+    5270: { token: "5270", label: "Corn smut" }
+    5476: { token: "5476", label: "Candida albicans" }
+    5664: { token: "5664", label: "Leishmania major" }
+    5691: { token: "5691", label: "Trypanosoma brucei" }
+    5741: { token: "5741", label: "Giardia duodenalis" }
+    5759: { token: "5759", label: "Entamoeba histolytica" }
+    5811: { token: "5811", label: "Toxoplasma gondii" }
+    5833: { token: "5833", label: "Malaria parasite P. falciparum" }
+    6183: { token: "6183", label: "Schistosoma mansoni" }
+    6238: { token: "6238", label: "Caenorhabditis briggsae" }
+    6239: { token: "6239", label: "Caenorhabditis elegans" }
+    6279: { token: "6279", label: "Agent of lymphatic filariasis" }
+    7070: { token: "7070", label: "Red flour beetle" }
+    7091: { token: "7091", label: "Domestic silkworm" }
+    7159: { token: "7159", label: "Yellow fever mosquito" }
+    7160: { token: "7160", label: "Asian tiger mosquito" }
+    7165: { token: "7165", label: "African malaria mosquito" }
+    7176: { token: "7176", label: "Southern house mosquito" }
+    7227: { token: "7227", label: "Fruit fly" }
+    7425: { token: "7425", label: "Jewel wasp" }
+    7460: { token: "7460", label: "Honey bee" }
+    7757: { token: "7757", label: "Sea lamprey" }
+    7897: { token: "7897", label: "Coelacanth" }
+    7918: { token: "7918", label: "Spotted gar" }
+    7955: { token: "7955", label: "Zebrafish" }
+    7998: { token: "7998", label: "Channel catfish" }
+    8022: { token: "8022", label: "Rainbow trout" }
+    8030: { token: "8030", label: "Atlantic salmon" }
+    8090: { token: "8090", label: "Japanese medaka" }
+    8128: { token: "8128", label: "Nile tilapia" }
+    8355: { token: "8355", label: "African clawed frog" }
+    8364: { token: "8364", label: "Tropical clawed frog" }
+    8469: { token: "8469", label: "Green sea turtle" }
+    8496: { token: "8496", label: "American alligator" }
+    8839: { token: "8839", label: "Mallard" }
+    8932: { token: "8932", label: "Rock pigeon" }
+    8962: { token: "8962", label: "Golden eagle" }
+    9031: { token: "9031", label: "Chicken" }
+    9103: { token: "9103", label: "Turkey" }
+    9258: { token: "9258", label: "Platypus" }
+    9305: { token: "9305", label: "Tasmanian devil" }
+    9483: { token: "9483", label: "White-tufted-ear marmoset" }
+    9541: { token: "9541", label: "Crab-eating macaque" }
+    9544: { token: "9544", label: "Rhesus monkey" }
+    9555: { token: "9555", label: "Olive baboon" }
+    9593: { token: "9593", label: "Western gorilla" }
+    9597: { token: "9597", label: "Pygmy chimpanzee" }
+    9598: { token: "9598", label: "Chimpanzee" }
+    9601: { token: "9601", label: "Sumatran orangutan" }
+    9606: { token: "9606", label: "Human" }
+    9615: { token: "9615", label: "Dog" }
+    9644: { token: "9644", label: "Brown bear" }
+    9646: { token: "9646", label: "Giant panda" }
+    9669: { token: "9669", label: "Domestic ferret" }
+    9685: { token: "9685", label: "Domestic cat" }
+    9733: { token: "9733", label: "Killer whale" }
+    9739: { token: "9739", label: "Common bottlenose dolphin" }
+    9785: { token: "9785", label: "African savanna elephant" }
+    9793: { token: "9793", label: "Donkey" }
+    9796: { token: "9796", label: "Horse" }
+    9823: { token: "9823", label: "Pig" }
+    9825: { token: "9825", label: "Domestic pig" }
+    9838: { token: "9838", label: "Arabian camel" }
+    9844: { token: "9844", label: "Llama" }
+    9913: { token: "9913", label: "Domestic cattle" }
+    9925: { token: "9925", label: "Goat" }
+    9940: { token: "9940", label: "Sheep" }
+    9986: { token: "9986", label: "Rabbit" }
+    10029: { token: "10029", label: "Chinese hamster" }
+    10036: { token: "10036", label: "Golden hamster" }
+    10090: { token: "10090", label: "House mouse" }
+    10116: { token: "10116", label: "Norway rat" }
+    10141: { token: "10141", label: "Domestic guinea pig" }
+    10181: { token: "10181", label: "Naked mole-rat" }
+    11320: { token: "11320", label: "Influenza A virus" }
+    11676: { token: "11676", label: "Human immunodeficiency virus 1" }
+    13616: { token: "13616", label: "Gray short-tailed opossum" }
+    15368: { token: "15368", label: "Stiff brome" }
+    27679: { token: "27679", label: "Bolivian squirrel monkey" }
+    28377: { token: "28377", label: "Green anole" }
+    28901: { token: "28901", label: "Salmonella enterica" }
+    29760: { token: "29760", label: "Wine grape" }
+    30538: { token: "30538", label: "Alpaca" }
+    31033: { token: "31033", label: "Torafugu" }
+    44689: { token: "44689", label: "Dictyostelium discoideum" }
+    49390: { token: "49390", label: "Robusta coffee" }
+    59463: { token: "59463", label: "Little brown bat" }
+    59729: { token: "59729", label: "Zebra finch" }
+    60711: { token: "60711", label: "Green monkey" }
+    69293: { token: "69293", label: "Three-spined stickleback" }
+    89462: { token: "89462", label: "Water buffalo" }
+    93934: { token: "93934", label: "Japanese quail" }
+    99883: { token: "99883", label: "Spotted green pufferfish" }
+    109461: { token: "109461", label: "Honeybee mite" }
+    746128: { token: "746128", label: "Aspergillus fumigatus" }
+    2697049: { token: "2697049", label: "Severe acute respiratory syndrome coronavirus 2" }
 
 mappingset:
   sssom_version: null

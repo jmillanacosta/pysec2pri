@@ -213,7 +213,9 @@ class TestConsolidateDispatch:
             ),
         )
 
-        cache_path, _ = consolidate_mapping_dates("ncbi", cache_dir=tmp_path, show_progress=False)
+        cache_path, _ = consolidate_mapping_dates(
+            "ncbi", cache_dir=tmp_path, show_progress=False, species="9606"
+        )
         records = consolidate_module._read_cache(cache_path)
         assert set(records) == {"dated", "undated"}  # undated row kept, not dropped
         assert records["dated"]["first_seen_date"] == "2010-05-12"

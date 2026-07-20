@@ -372,3 +372,19 @@ class TestGenerateEnsemblAllSpecies:
 
         with pytest.raises(ValueError, match="No Ensembl species could be processed"):
             api_module._generate_ensembl_all_species("ids", None, show_progress=False)
+
+
+class TestDiscoverNcbiSpecies:
+    """``discover_ncbi_species`` reads the species actually present in a gene_info file."""
+
+    def test_returns_distinct_taxon_ids_sorted_numerically(self, tmp_path: Any) -> None:
+        """Distinct #tax_id values come back sorted as numbers, not strings."""
+        from pysec2pri.downloads.ncbi import discover_ncbi_species
+
+        gene_info = tmp_path / "gene_info"
+        gene_info.write_text(
+            "#tax_id\tGeneID\tSymbol\n9606\t1\tA1BG\n10090\t2\tPzp\n9606\t3\tA2M\n10116\t4\tA1i3\n",
+            encoding="utf-8",
+        )
+
+        assert discover_ncbi_species(gene_info) == ["9606", "10090", "10116"]
