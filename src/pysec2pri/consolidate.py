@@ -305,20 +305,27 @@ def _run_one_version(
     datasource: str,
     version: str | None,
     mapping_sets: str,
+    inputs: dict[str, Path | str] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Download one release into a scratch tmpdir, parse it, then clean up.
 
-    The tmpdir is always removed afterwards: walking ~250 releases must not
-    accumulate downloaded files on disk.
+    The tmpdir is always removed afterwards.
     """
     from pysec2pri.download import download_datasource_with_release
 
+    supplied = {k: Path(v) for k, v in (inputs or {}).items()}
+    input_map = (ALL_DATASOURCES[datasource].mapping_sets.get(mapping_sets) or {}).get(
+        "inputs"
+    ) or {}
+    missing = [key for key in input_map if key not in supplied]
+
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_consolidate_{datasource}_"))
     try:
-        files, version, _ = download_datasource_with_release(
-            datasource, tmpdir, version=version, **kwargs
+        downloaded, version, _ = download_datasource_with_release(
+            datasource, tmpdir, version=version, keys=missing, **kwargs
         )
+        files = {**supplied, **downloaded}
         return _parse_mapping_set(datasource, files, version, mapping_sets, **kwargs)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -354,6 +361,7 @@ def consolidate_mapping_dates(
     show_progress: bool = True,
     force: bool = False,
     output: Path | None = None,
+    inputs: dict[str, Path | str] | None = None,
     **kwargs: Any,
 ) -> tuple[Path, BaseMappingSet]:
     """Build/update the first-seen-date index for *datasource*.
@@ -380,6 +388,12 @@ def consolidate_mapping_dates(
             set to. The internal cache-adjacent copy (see
             :func:`_sssom_output_path`) is always written; when *output* is
             given, the same full mapping set is additionally saved there.
+        inputs: Local files (keyed as in the datasource's ``download_urls``)
+            to use for the current release instead of downloading. Only
+            applies to datasources with no versioned archive (NCBI, VGNC),
+            whose consolidate walk is a single current-release parse;
+            ignored for the multi-release walk, where *version* is never
+            the current release.
         **kwargs: Datasource-specific knobs (``subset`` for ChEBI, ``species``
             for NCBI/Ensembl); ignored for datasources with no such config
             block.
@@ -414,10 +428,12 @@ def consolidate_mapping_dates(
     cache_path = _cache_path(cache_dir, datasource, mapping_sets, **kwargs)
     meta_path = _meta_path(cache_dir, datasource, mapping_sets, **kwargs)
 
-    def _run(version: str | None) -> Any:
-        return _run_one_version(datasource, version, mapping_sets, **kwargs)
-
     list_versions_fn = _LIST_VERSIONS_FNS.get(datasource)
+    run_inputs = inputs if list_versions_fn is None else None
+
+    def _run(version: str | None) -> Any:
+        return _run_one_version(datasource, version, mapping_sets, inputs=run_inputs, **kwargs)
+
     if list_versions_fn is None:
         # No versioned archive (NCBI, VGNC): single current parse, full set.
         _consolidate.consolidate(
