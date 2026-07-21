@@ -216,13 +216,16 @@ class EnsemblParser(BaseParser):
         super().__init__(version=version, show_progress=show_progress)
         self.species = species
 
-    def _product_slug(self) -> str | None:
+    def _product_slug(self, **overrides: Any) -> str | None:
         """Species slug, suffixed with ``consolidate`` for label-history runs.
 
         Label history is a distinct data product at the same release/species,
         so it gets an IRI segment.
+
+        Args:
+            **overrides: Forwarded to the base implementation.
         """
-        base = super()._product_slug()
+        base = super()._product_slug(**overrides)
         species_slug = str(base) if base is not None else None
         if getattr(self, "_is_label_history", False):
             return f"{species_slug}/consolidate" if species_slug else "consolidate"

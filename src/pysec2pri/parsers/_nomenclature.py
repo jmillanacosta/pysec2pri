@@ -68,11 +68,14 @@ class GeneNomenclatureParser(BaseParser):
             result.setdefault(str(label), set()).add(str(id_))
         return result
 
-    def _parse_withdrawn(self, file_path: Path) -> list[Mapping]:
+    def _parse_withdrawn(
+        self, file_path: Path, *, taxon_by_id: dict[str, str] | None = None
+    ) -> list[Mapping]:
         """Parse a withdrawn file into ID-to-ID mappings.
 
         Args:
             file_path: Path to the withdrawn TSV file.
+            taxon_by_id: Optional ``{identifier: taxon_id}`` map.
 
         Returns:
             List of SSSOM Mapping objects.
@@ -127,6 +130,12 @@ class GeneNomenclatureParser(BaseParser):
                 if parsed:
                     target_id, target_label = parsed
                     m_meta = self.get_mapping_metadata()
+                    row_taxon = taxon_by_id.get(target_id) if taxon_by_id else None
+                    record_ns = (
+                        self._record_namespace(species=row_taxon)
+                        if row_taxon is not None
+                        else self._record_namespace()
+                    )
                     rows_data.append(
                         {
                             "subject_id": identifier,
@@ -135,11 +144,7 @@ class GeneNomenclatureParser(BaseParser):
                             "object_label": target_label or "",
                             "predicate_id": m_meta["predicate_id"],
                             "predicate_label": m_meta.get("predicate_label"),
-                            "record_id": self._record_id(
-                                self._record_namespace(),
-                                target_id,
-                                identifier,
-                            ),
+                            "record_id": self._record_id(record_ns, target_id, identifier),
                         }
                     )
 
@@ -156,6 +161,7 @@ class GeneNomenclatureParser(BaseParser):
         alias_col: str | None,
         prev_col: str | None,
         date_changed_col: str | None,
+        taxon_col: str | None = None,
     ) -> list[Mapping]:
         """Build alias/previous symbol label mappings from a filtered gene-set frame.
 
@@ -166,6 +172,7 @@ class GeneNomenclatureParser(BaseParser):
             alias_col: Resolved alias-symbol column, or ``None``.
             prev_col: Resolved previous-symbol column, or ``None``.
             date_changed_col: Resolved symbol-changed-date column, or ``None``.
+            taxon_col: Optional resolved per-row taxon column name.
 
         Returns:
             List of SSSOM Mapping objects for label mappings.
@@ -188,6 +195,12 @@ class GeneNomenclatureParser(BaseParser):
             # recorded, so with multiple prev_symbol entries this date applies
             # exactly to the latest rename and approximately to earlier ones.
             symbol_changed_date = row.get(date_changed_col) if date_changed_col else None
+            row_taxon = row.get(taxon_col) if taxon_col else None
+            record_ns = (
+                self._record_namespace(species=str(row_taxon))
+                if row_taxon is not None
+                else self._record_namespace()
+            )
 
             for alias in aliases:
                 rows_data.append(
@@ -198,11 +211,7 @@ class GeneNomenclatureParser(BaseParser):
                         "object_label": label,
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            identifier,
-                            alias,
-                        ),
+                        "record_id": self._record_id(record_ns, identifier, alias),
                     }
                 )
 
@@ -216,11 +225,7 @@ class GeneNomenclatureParser(BaseParser):
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
                         "mapping_date": symbol_changed_date,
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            identifier,
-                            prev,
-                        ),
+                        "record_id": self._record_id(record_ns, identifier, prev),
                     }
                 )
 

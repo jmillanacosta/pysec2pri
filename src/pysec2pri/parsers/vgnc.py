@@ -130,11 +130,11 @@ class VGNCParser(GeneNomenclatureParser):
         if species not in (None, ALL_SPECIES):
             self.species = species
 
-        mappings = self._parse_withdrawn(input_path)
-
         taxon_by_id: dict[str, str] | None = None
         if complete_set_path is not None:
             taxon_by_id = self._taxon_by_vgnc_id(Path(complete_set_path))
+
+        mappings = self._parse_withdrawn(input_path, taxon_by_id=taxon_by_id)
 
         if species not in (None, ALL_SPECIES) and taxon_by_id is not None:
             mappings = [
@@ -376,6 +376,7 @@ class VGNCParser(GeneNomenclatureParser):
             alias_col=alias_col,
             prev_col=prev_col,
             date_changed_col=date_changed_col,
+            taxon_col=taxon_col,
         )
 
 

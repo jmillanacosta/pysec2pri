@@ -253,6 +253,12 @@ class NCBIParser(BaseParser):
             sec_label = row.get("Discontinued_Symbol")
             disc_date = row.get("Discontinue_Date")
             mapping_date = _ncbi_date_to_iso(disc_date)
+            row_taxon = row.get("#tax_id")
+            record_ns = (
+                self._record_namespace(species=str(row_taxon))
+                if row_taxon is not None
+                else self._record_namespace()
+            )
 
             if not object_id:
                 continue
@@ -269,11 +275,7 @@ class NCBIParser(BaseParser):
                         "predicate_id": "oboInOwl:consider",
                         "comment": f"Withdrawn on {disc_date}." if disc_date else None,
                         "mapping_date": mapping_date,
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            object_id,
-                            subject_id,
-                        ),
+                        "record_id": self._record_id(record_ns, object_id, subject_id),
                     }
                 )
             else:
@@ -286,11 +288,7 @@ class NCBIParser(BaseParser):
                         "predicate_label": m_meta.get("predicate_label"),
                         "comment": f"Discontinued on {disc_date}." if disc_date else None,
                         "mapping_date": mapping_date,
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            object_id,
-                            subject_id,
-                        ),
+                        "record_id": self._record_id(record_ns, object_id, subject_id),
                     }
                 )
 
@@ -339,6 +337,12 @@ class NCBIParser(BaseParser):
 
             pri_label_str = str(pri_label)
             curie_id = f"NCBIGene:{gene_id}"
+            row_taxon = row.get("#tax_id")
+            record_ns = (
+                self._record_namespace(species=str(row_taxon))
+                if row_taxon is not None
+                else self._record_namespace()
+            )
 
             if synonyms:
                 for syn in str(synonyms).split("|"):
@@ -352,11 +356,7 @@ class NCBIParser(BaseParser):
                                 "object_label": pri_label_str,  # current label = primary : object
                                 "_label_type": "alias",
                                 "comment": "Gene symbol synonym.",
-                                "record_id": self._record_id(
-                                    self._record_namespace(),
-                                    curie_id,
-                                    syn,
-                                ),
+                                "record_id": self._record_id(record_ns, curie_id, syn),
                             }
                         )
 
