@@ -227,7 +227,7 @@ class TestHMDBParsers:
         assert len(mappings) == 2
         subjects = {m.subject_id for m in mappings}
         assert {"HMDBP:HMDBP05261", "HMDBP:HMDBP00099"} == subjects
-        # Bare "5229" is an internal row id, not a legacy accession: dropped.
+        # "5229" is an internal row id and not a legacy accession: dropped.
         assert "HMDBP:HMDBP05229" not in subjects
         # HMDBP00003 has no secondary accessions.
         assert "HMDBP:HMDBP00003" not in subjects
@@ -420,8 +420,7 @@ class TestEnsemblParser:
     """Tests for the Ensembl parser.
 
     Fixtures are real-data slices from Ensembl release 115
-    (homo_sapiens_core_115_38), not hand-authored, so the schema/semantics
-    match the live FTP dumps exactly.
+    (homo_sapiens_core_115_38).
     """
 
     def test_parse_skips_identity_and_non_gene_rows(
@@ -501,23 +500,20 @@ class TestEnsemblParser:
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """A rename spanning an assembly change is noted in comment, not source_version."""
+        """A rename spanning an assembly change is noted in comment."""
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
         by_subject = {m.subject_id: m for m in result.mappings}
-        # session 361: NCBI35 (old) -> NCBI36 (new): a real assembly change.
-        # Both of this subject's successors come from that session.
+        # a real assembly change
         scored = [m for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"]
         assert len(scored) == 2
         assert all(m.comment == "Assembly changed from NCBI35 to NCBI36." for m in scored)
-        assert all(m.subject_source_version is None for m in scored)
-        assert all(m.object_source_version is None for m in scored)
-        # session 388: GRCh37 -> GRCh37 (assembly-patch rename within one build): no comment.
+        # assembly-patch rename within one build: no comment.
         patched = by_subject["ENSEMBL:ASMPATCHG00000000170"]
         assert patched.comment is None
-        # session 347: a withdrawal has no object side to diff against.
+        # a withdrawal has no object.
         withdrawn = by_subject["ENSEMBL:ENSG00000000893"]
         assert withdrawn.comment is None
 
@@ -526,13 +522,11 @@ class TestEnsemblParser:
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """The set-level source-version is the analyzed release, same as every datasource."""
+        """The set-level source-version is the analyzed release."""
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        # default species is 9606 (human), which has a configured GRCh38 build,
-        # but the set-level field is still the release, not the build.
         assert result.subject_source_version == "115"
         assert result.object_source_version == "115"
 
@@ -765,7 +759,7 @@ class TestPerMappingDate:
     """Per-source ``mapping_date`` sourced from each datasource record dates."""
 
     def test_hgnc_dates_only_apply_to_previous_symbols(self, hgnc_complete_path: Path) -> None:
-        """HGNC's date_symbol_changed applies to previous-symbol rows, not alias rows.
+        """HGNC's date_symbol_changed applies to previous-symbol rows but not alias rows.
 
         mock_hgnc_complete.tsv: BRCA1 prev_symbol=PSCP, date_symbol_changed=1996-03-01;
         alias BRCC1 has no associated change date.

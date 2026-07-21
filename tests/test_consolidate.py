@@ -23,7 +23,7 @@ from pysec2pri.consolidate import (
 
 
 class TestDefaultCacheDir:
-    """The cache goes where each OS keeps caches, not always ``~/.cache``."""
+    """The cache goes where each OS keeps caches."""
 
     def test_uses_env_var_when_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """``$PYSEC2PRI_CACHE_DIR`` takes priority over the default."""
@@ -80,7 +80,7 @@ class TestLoadMappingDates:
         assert result == {"sec2pri:chebi/aaa": "2013-02-15"}
 
     def test_excludes_records_with_no_resolved_date(self, tmp_path: Path) -> None:
-        """A record walked but never assigned a real date is omitted, not '' or 'None'."""
+        """A record walked but never assigned a real date is omitted."""
         consolidate_module._write_cache(
             consolidate_module._cache_path(tmp_path, "chebi", "ids"),
             {
@@ -112,7 +112,7 @@ class TestLoadMappingDates:
 
 
 class _FakeMappingSet:
-    """Stand-in for a BaseMappingSet exposing just what consolidate needs."""
+    """Stand-in for a BaseMappingSet."""
 
     def __init__(
         self,
@@ -131,7 +131,7 @@ class _FakeMappingSet:
 
 
 class _FakeDownloader:
-    """Stand-in for a *Downloader class: fixed version list, no real network."""
+    """Stand-in for a *Downloader class."""
 
     versions: ClassVar[list[str]] = []
 
@@ -173,12 +173,7 @@ class TestConsolidateMappingDatesValidation:
 
 
 class TestConsolidateDispatch:
-    """consolidate_mapping_dates picks its path by data availability, not a mode flag.
-
-    The walk/single-parse mechanics themselves live in (and are tested by)
-    mapkgsutils; here we only assert pysec2pri routes each datasource to the
-    right one and wires the arguments through.
-    """
+    """Ensure consolidate_mapping_dates picks its path by data availability."""
 
     def test_versioned_datasource_walks_releases(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -217,7 +212,7 @@ class TestConsolidateDispatch:
             "ncbi", cache_dir=tmp_path, show_progress=False, species="9606"
         )
         records = consolidate_module._read_cache(cache_path)
-        assert set(records) == {"dated", "undated"}  # undated row kept, not dropped
+        assert set(records) == {"dated", "undated"}  # undated row kept
         assert records["dated"]["first_seen_date"] == "2010-05-12"
         assert records["undated"]["first_seen_date"] == ""
 
@@ -369,7 +364,7 @@ class TestBuildLabelHistory:
 
 
 class TestGenerateUsesConsolidatedSet:
-    """``--consolidate`` must change what ``_generate`` returns, not just warm a cache."""
+    """Test ``--consolidate`` ."""
 
     @staticmethod
     def _patch_generate(monkeypatch: pytest.MonkeyPatch, consolidated: list[str]) -> None:
@@ -412,7 +407,7 @@ class TestGenerateUsesConsolidatedSet:
     def test_consolidate_recovers_mappings_the_current_release_dropped(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The walk's extra rows reach the output, not just the on-disk cache."""
+        """The walk's extra rows reach the output."""
         self._patch_generate(monkeypatch, ["current", "dropped"])
 
         result = api._generate("hgnc", "ids", consolidate=True, show_progress=False)

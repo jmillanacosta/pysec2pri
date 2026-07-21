@@ -68,7 +68,6 @@ class ExampleParser(BaseParser):
 
         # Fields shared by every row (license, sources, justification ...).
         fixed = self._fixed_mapping_fields()
-        namespace = self._record_namespace()
         m_meta = self.get_mapping_metadata()
 
         rows: list[dict[str, str | None]] = []
@@ -86,7 +85,6 @@ class ExampleParser(BaseParser):
                         "object_id": replacement,
                         "predicate_id": m_meta["predicate_id"],
                         "predicate_label": m_meta.get("predicate_label"),
-                        "record_id": self._record_id(namespace, replacement, retired),
                     }
                 )
             elif "withdrawn" in status.lower():
@@ -98,7 +96,6 @@ class ExampleParser(BaseParser):
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
-                        "record_id": self._record_id(namespace, WITHDRAWN_ENTRY, retired),
                     }
                 )
 
@@ -138,7 +135,6 @@ class ExampleParser(BaseParser):
         alias_col = self._find_column(df.columns, ALIAS_SYMBOLS)
 
         fixed = self._fixed_mapping_fields()
-        namespace = self._record_namespace()
 
         rows: list[dict[str, str | None]] = []
         for row in df.iter_rows(named=True):
@@ -154,7 +150,6 @@ class ExampleParser(BaseParser):
                             "object_id": current_id,
                             "object_label": current,
                             "_label_type": label_type,
-                            "record_id": self._record_id(namespace, current_id, old),
                         }
                     )
 

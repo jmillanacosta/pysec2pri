@@ -93,7 +93,7 @@ def test_example_parses_ids(example_parser_cls: Any, example_files: tuple[Path, 
         ("EX:102", "IAO:0100001", "EX:900"),
         ("EX:103", "oboInOwl:consider", "sssom:NoTermFound"),
     }
-    # The complete set gives the full current list, not just the merge targets.
+    # The complete set gives the full current list.
     assert object.__getattribute__(ms, "_primary_ids") == {"EX:900", "EX:901"}
 
 

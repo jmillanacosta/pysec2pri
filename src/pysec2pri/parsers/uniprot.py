@@ -169,8 +169,7 @@ class UniProtParser(BaseParser):
         }
         rows = df.select(["subject_id", "object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            # The consolidated index is keyed by the version-independent pair
-            # hash, not the whole record_id.
+            # The consolidated index is keyed by the pair hash
             row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing sec_ac", total=len(rows))
 
@@ -251,8 +250,7 @@ class UniProtParser(BaseParser):
         }
         rows = df.select(["object_id", "record_id", "pair_key"]).to_dicts()
         for row in rows:
-            # The consolidated index is keyed by the version-independent pair
-            # hash, not the whole record_id.
+            # The consolidated index is keyed by the pair hash.
             row["mapping_date"] = consolidated.get(row.pop("pair_key"))
         return self._build_mappings(rows, fixed, desc="Processing delac", total=len(rows))
 
