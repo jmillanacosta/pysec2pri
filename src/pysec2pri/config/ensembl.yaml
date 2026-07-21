@@ -468,6 +468,7 @@ download_urls:
 
 primary_file_key: "stable_id_event"
 archive_url: "https://ftp.ensembl.org/pub/"
+version_iri: "https://ftp.ensembl.org/pub/release-{version}/"
 id_pattern: "^ENSEMBL:ENS[A-Z]*G\\d+"
 default_output_filename: "ensembl_sec2pri.sssom.tsv"
 

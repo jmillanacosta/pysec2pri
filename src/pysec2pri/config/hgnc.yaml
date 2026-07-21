@@ -123,6 +123,7 @@ distribution_eras:
 
 primary_file_key: "withdrawn"
 archive_url: "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/"
+version_iri: "https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_{version}.txt"
 id_pattern: "^HGNC:\\d+$"
 default_output_filename: "hgnc_sec2pri.sssom.tsv"
 
