@@ -121,6 +121,7 @@ mapping:
   comment: "Generated with pysec2pri"
 # Archive URL for finding releases (current, TSV-era archive)
 archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+version_iri: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/"
 
 # Download URLs for TSV flat files (releases >= 245, the current/latest era).
 # Use {version} as placeholder for release number.
@@ -137,6 +138,7 @@ distribution_eras:
     to_version: "244"
     format: sdf
     archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/"
+    version_iri: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/"
     download_urls:
       sdf_3star: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete_3star.sdf.gz"
       sdf_complete: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete.sdf.gz"
@@ -144,6 +146,7 @@ distribution_eras:
     from_version: "245"
     format: tsv
     archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
+    version_iri: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/"
     download_urls:
       secondary_ids: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/secondary_ids.tsv.gz"
       names: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/flat_files/names.tsv.gz"

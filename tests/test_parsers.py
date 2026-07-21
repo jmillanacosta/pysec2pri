@@ -522,13 +522,13 @@ class TestEnsemblParser:
         ensembl_stable_id_event_path: Path,
         ensembl_mapping_session_path: Path,
     ) -> None:
-        """The set-level source-version is the analyzed release."""
+        """The set-level source-version is the analyzed release, as a resolvable IRI."""
         result = EnsemblParser(version="115", show_progress=False).parse(
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        assert result.subject_source_version == "115"
-        assert result.object_source_version == "115"
+        assert result.subject_source_version == "https://ftp.ensembl.org/pub/release-115/"
+        assert result.object_source_version == "https://ftp.ensembl.org/pub/release-115/"
 
     def test_set_level_source_version_is_the_release_for_uncurated_species_too(
         self,
@@ -540,8 +540,8 @@ class TestEnsemblParser:
             ensembl_stable_id_event_path,
             mapping_session_path=ensembl_mapping_session_path,
         )
-        assert result.subject_source_version == "115"
-        assert result.object_source_version == "115"
+        assert result.subject_source_version == "https://ftp.ensembl.org/pub/release-115/"
+        assert result.object_source_version == "https://ftp.ensembl.org/pub/release-115/"
 
     def test_parse_without_mapping_session_has_no_per_row_date(
         self, ensembl_stable_id_event_path: Path

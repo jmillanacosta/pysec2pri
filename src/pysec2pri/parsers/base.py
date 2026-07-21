@@ -329,6 +329,19 @@ class BaseParser(_MapkgBaseParser):
     }
     mapping_tool_version = VERSION
 
+    def _source_version(self) -> str | None:
+        """Return the source_version."""
+        version = super()._source_version()
+        if not version or self._config is None:
+            return version
+        era = self._config.era_for(str(version))
+        template = (getattr(era, "version_iri", None) if era else None) or getattr(
+            self._config, "version_iri", None
+        )
+        if not template:
+            return version
+        return str(template).replace("{version}", str(version))
+
 
 __all__ = [
     "ALL_SPECIES",
