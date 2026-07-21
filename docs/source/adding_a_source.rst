@@ -28,6 +28,23 @@ and/or a ``LabelMappingSet``\s:
      - ``TMEM8`` → ``TMEM8A``
 
 
+************
+0. Checklist
+************
+
+* ``src/pysec2pri/config/example.yaml``: ``parser_class``, ``download_urls``,
+  ``mapping_sets``
+* ``src/pysec2pri/parsers/example.py``: ``ExampleParser`` with every method
+  the config names
+* ``src/pysec2pri/parsers/__init__.py``: parser class in ``_LAZY_EXPORTS``,
+  the ``TYPE_CHECKING`` block, and ``__all__``
+* ``src/pysec2pri/downloads/example.py``: only if URLs are not fixed
+* ``src/pysec2pri/downloads/__init__.py``: downloader in ``CHECK_RELEASE``,
+  ``DOWNLOADERS``, ``URLS_AND_DATE``, and ``__all__`` (only if a downloader was
+  written)
+* ``tests/data/`` + ``tests/test_example.py``: sample file and a parsing test
+
+
 ****************************
 1. ``config/example.yaml``
 ****************************
@@ -77,6 +94,8 @@ Means that each subset of release 245 gets its own IRI pattern:
      - ``sec2pri:chebi/245/complete/<hash>``
 
 Each name in ``products`` also becomes a CLI option (e.g. ``--subset``).
+``record_id`` is built automatically from each row's ``subject_id``/
+``object_id``; a row can include its own ``subset`` (or ``species``, etc.).
 
 
 **************************
@@ -105,7 +124,7 @@ Copy ``docs/source/example/example.py`` to
 
 
 *****************************
-1. ``parsers/__init__.py``
+3. ``parsers/__init__.py``
 *****************************
 
 The parser package uses **lazy imports** (PEP 562): the heavy dependencies
@@ -220,27 +239,10 @@ Also add the import of the submodule and the downloader class at the top of
 
 
 **********
-1. Tests
+5. Tests
 **********
 
 Put a small sample of the real upstream files in ``tests/data/`` and write a
 test that correctly parses them into mapping sets. The config tests in
 ``tests/test_config.py`` already verify automatically that ``parser_class``,
 every ``method``, and every ``inputs`` argument named in the config are real attributes on the parser class, and that each ``inputs`` key corresponds to a downloadable file.
-
-
-************
-Checklist
-************
-
-* ``src/pysec2pri/config/example.yaml`` — ``parser_class``, ``download_urls``,
-  ``mapping_sets``
-* ``src/pysec2pri/parsers/example.py`` — ``ExampleParser`` with every method
-  the config names
-* ``src/pysec2pri/parsers/__init__.py`` — parser class in ``_LAZY_EXPORTS``,
-  the ``TYPE_CHECKING`` block, and ``__all__``
-* ``src/pysec2pri/downloads/example.py`` — only if URLs are not fixed
-* ``src/pysec2pri/downloads/__init__.py`` — downloader in ``CHECK_RELEASE``,
-  ``DOWNLOADERS``, ``URLS_AND_DATE``, and ``__all__`` (only if a downloader was
-  written)
-* ``tests/data/`` + ``tests/test_example.py`` — sample file and a parsing test

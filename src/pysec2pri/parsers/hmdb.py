@@ -180,11 +180,6 @@ class HMDBParser(BaseParser):
                     "subject_label": "",
                     "object_id": primary_id,
                     "object_label": primary_label,
-                    "record_id": self._record_id(
-                        self._record_namespace(),
-                        primary_id,
-                        secondary_id,
-                    ),
                 }
             )
         return rows

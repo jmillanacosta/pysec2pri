@@ -405,12 +405,6 @@ class EnsemblParser(BaseParser):
         m_meta = self.get_mapping_metadata()
         fixed_base = self._fixed_mapping_fields()
 
-        record_ns = self._record_namespace()
-
-        # A retirement writes a null-successor row, and one row per successor
-        # beside it. The null row says the ID is gone, not that nothing
-        # replaced it, so only the IDs that never gained a successor are
-        # withdrawals.
         replaced: set[str] = set(
             df.filter(
                 pl.col("old_stable_id").is_not_null()
@@ -425,7 +419,7 @@ class EnsemblParser(BaseParser):
             new_id = row.get("new_stable_id")
 
             # No old (secondary) ID: a brand-new gene, not a sec->pri mapping.
-            # old == new: an annotation-only version bump, not an ID change.
+            # old == new: not an ID change.
             if not old_id or old_id == new_id:
                 continue
 
@@ -442,7 +436,6 @@ class EnsemblParser(BaseParser):
                     mapping_date=date_by_session.get(session_id),
                     old_assembly=old_assembly,
                     new_assembly=new_assembly,
-                    record_ns=record_ns,
                     m_meta=m_meta,
                 )
             )
@@ -460,7 +453,6 @@ class EnsemblParser(BaseParser):
         mapping_date: str | None,
         old_assembly: str | None,
         new_assembly: str | None,
-        record_ns: str,
         m_meta: dict[str, Any],
     ) -> dict[str, Any]:
         """Build one ``stable_id_event`` mapping row (a retirement or a rename).
@@ -478,11 +470,11 @@ class EnsemblParser(BaseParser):
             mapping_date: Resolved per-row mapping date, if any.
             old_assembly: Build the old ID belonged to, if known.
             new_assembly: Build the new ID belongs to, if known.
-            record_ns: This run's ``record_id`` namespace.
             m_meta: Mapping-level config metadata.
 
         Returns:
-            A row dict for :meth:`_build_mappings`.
+            A row dict for :meth:`_build_mappings` (which fills in
+            ``record_id`` from ``subject_id``/``object_id``).
         """
         if not new_id:
             return {
@@ -491,7 +483,6 @@ class EnsemblParser(BaseParser):
                 "object_label": WITHDRAWN_ENTRY_LABEL,
                 "predicate_id": "oboInOwl:consider",
                 "mapping_date": mapping_date,
-                "record_id": self._record_id(record_ns, WITHDRAWN_ENTRY, old_id),
             }
 
         fields: dict[str, Any] = {
@@ -500,7 +491,6 @@ class EnsemblParser(BaseParser):
             "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
             "mapping_date": mapping_date,
-            "record_id": self._record_id(record_ns, new_id, old_id),
         }
         if score and float(score) > 0:  # type: ignore
             fields["confidence"] = float(score)  # type: ignore
@@ -552,7 +542,6 @@ class EnsemblParser(BaseParser):
 
         fixed = self._fixed_mapping_fields()
 
-        record_ns = self._record_namespace()
         rows_data: list[dict[str, Any]] = []
         for stable_id, display_label, synonym in df.rows():
             curie_id = f"ENSEMBL:{stable_id}"
@@ -564,7 +553,6 @@ class EnsemblParser(BaseParser):
                     "object_label": display_label,
                     "_label_type": "alias",
                     "comment": "Ensembl gene external synonym.",
-                    "record_id": self._record_id(record_ns, curie_id, synonym),
                 }
             )
 
@@ -672,7 +660,6 @@ class EnsemblParser(BaseParser):
         try:
             fixed = self._fixed_mapping_fields()
 
-            record_ns = self._record_namespace()
             rows_data: list[dict[str, Any]] = []
             for stable_id, prev_label, curr_label, mapping_date in transitions:
                 curie_id = f"ENSEMBL:{stable_id}"
@@ -685,7 +672,6 @@ class EnsemblParser(BaseParser):
                         "_label_type": "previous",
                         "mapping_date": mapping_date,
                         "comment": "Derived from snapshots across releases.",
-                        "record_id": self._record_id(record_ns, curie_id, prev_label),
                     }
                 )
 

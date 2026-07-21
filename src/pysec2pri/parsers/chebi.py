@@ -271,7 +271,6 @@ class ChEBIParser(BaseParser):
 
         m_meta = self.get_mapping_metadata()
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="ids")
-        record_ns = self._record_namespace()
         fixed = {
             **self._fixed_mapping_fields(),
             "predicate_id": m_meta["predicate_id"],
@@ -284,7 +283,6 @@ class ChEBIParser(BaseParser):
                 {
                     "subject_id": sec,
                     "object_id": pri,
-                    "record_id": self._record_id(record_ns, pri, sec),
                     "mapping_date": consolidated.get(self._pair_hash(pri, sec)),
                 }
             )
@@ -295,7 +293,6 @@ class ChEBIParser(BaseParser):
         from pysec2pri.consolidate import load_mapping_dates
 
         consolidated = load_mapping_dates("chebi", subset=self.subset, mapping_sets="labels")
-        record_ns = self._record_namespace()
         fixed = self._fixed_mapping_fields()
         rows = []
         for sid, pname, syn in raw_name_mappings:
@@ -304,7 +301,6 @@ class ChEBIParser(BaseParser):
             # The consolidated index is keyed by pair hash.
             rows.append(
                 {
-                    "record_id": self._record_id(record_ns, sid, syn),
                     "object_id": sid,
                     "subject_label": syn,  # synonym = secondary : subject
                     "subject_type": "rdfs literal",

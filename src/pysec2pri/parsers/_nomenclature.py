@@ -1,16 +1,14 @@
 """Shared base for gene-nomenclature parsers (HGNC, VGNC, PGNC?).
 
-Both committees publish the same two-file shape, a withdrawn file of
+Both publish the same two-file shape, a withdrawn file of
 retired/merged identifiers and a complete gene-set file with the current
 symbols with their alias and previous symbols. This base holds the parsing
-they have in common; each subclass will specify the identifier column,
-withdrawn-symbol column, and merged-info column patterns, and adds whatever
-is specific to it e.g. VGNC taxons.
+they have in common.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import polars as pl
 from sssom_schema import Mapping
@@ -115,11 +113,6 @@ class GeneNomenclatureParser(BaseParser):
                         "object_label": WITHDRAWN_ENTRY_LABEL,
                         "predicate_id": "oboInOwl:consider",
                         "comment": "Withdrawn entry with no replacement.",
-                        "record_id": self._record_id(
-                            self._record_namespace(),
-                            WITHDRAWN_ENTRY,
-                            identifier,
-                        ),
                     }
                 )
                 continue
@@ -130,23 +123,17 @@ class GeneNomenclatureParser(BaseParser):
                 if parsed:
                     target_id, target_label = parsed
                     m_meta = self.get_mapping_metadata()
-                    row_taxon = taxon_by_id.get(target_id) if taxon_by_id else None
-                    record_ns = (
-                        self._record_namespace(species=row_taxon)
-                        if row_taxon is not None
-                        else self._record_namespace()
-                    )
-                    rows_data.append(
-                        {
-                            "subject_id": identifier,
-                            "object_id": target_id,
-                            "subject_label": label or "",
-                            "object_label": target_label or "",
-                            "predicate_id": m_meta["predicate_id"],
-                            "predicate_label": m_meta.get("predicate_label"),
-                            "record_id": self._record_id(record_ns, target_id, identifier),
-                        }
-                    )
+                    out_row: dict[str, Any] = {
+                        "subject_id": identifier,
+                        "object_id": target_id,
+                        "subject_label": label or "",
+                        "object_label": target_label or "",
+                        "predicate_id": m_meta["predicate_id"],
+                        "predicate_label": m_meta.get("predicate_label"),
+                    }
+                    if taxon_by_id is not None:
+                        out_row["species"] = taxon_by_id.get(target_id)
+                    rows_data.append(out_row)
 
         return self._build_mappings(
             rows_data, fixed, desc="Processing withdrawn", total=len(rows_data)
@@ -195,12 +182,7 @@ class GeneNomenclatureParser(BaseParser):
             # recorded, so with multiple prev_symbol entries this date applies
             # exactly to the latest rename and approximately to earlier ones.
             symbol_changed_date = row.get(date_changed_col) if date_changed_col else None
-            row_taxon = row.get(taxon_col) if taxon_col else None
-            record_ns = (
-                self._record_namespace(species=str(row_taxon))
-                if row_taxon is not None
-                else self._record_namespace()
-            )
+            species: dict[str, Any] = {"species": row.get(taxon_col)} if taxon_col else {}
 
             for alias in aliases:
                 rows_data.append(
@@ -211,7 +193,7 @@ class GeneNomenclatureParser(BaseParser):
                         "object_label": label,
                         "_label_type": "alias",
                         "comment": "Alias symbol mapping.",
-                        "record_id": self._record_id(record_ns, identifier, alias),
+                        **species,
                     }
                 )
 
@@ -225,7 +207,7 @@ class GeneNomenclatureParser(BaseParser):
                         "_label_type": "previous",
                         "comment": "Previous symbol mapping.",
                         "mapping_date": symbol_changed_date,
-                        "record_id": self._record_id(record_ns, identifier, prev),
+                        **species,
                     }
                 )
 
