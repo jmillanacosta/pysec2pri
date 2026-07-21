@@ -231,7 +231,7 @@ a given version.
 
     URLS_AND_DATE = {
         ...
-        "example": example.urls_and_date,   # ← add this
+        "example": example.urls_and_date,   # add this
     }
 
 Also add the import of the submodule and the downloader class at the top of

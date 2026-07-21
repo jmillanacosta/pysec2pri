@@ -188,6 +188,7 @@ def _refresh_consolidated(
     *,
     cache_dir: Path | None = None,
     force: bool = False,
+    inputs: dict[str, Path | str] | None = None,
     **options: Any,
 ) -> BaseMappingSet:
     """Build/refresh the cross-release index and return it as a mapping set."""
@@ -198,6 +199,7 @@ def _refresh_consolidated(
         cache_dir=cache_dir,
         mapping_sets=kind,
         force=force,
+        inputs=inputs,
         **_accepted(consolidate_mapping_dates, **options),
     )
     return mapping_set
@@ -378,7 +380,7 @@ def _generate(
                 "extra history to recover. See `supports_consolidate`."
             )
         consolidated = _refresh_consolidated(
-            datasource, kind, cache_dir=cache_dir, force=force, **options
+            datasource, kind, cache_dir=cache_dir, force=force, inputs=inputs, **options
         )
 
     # A source may publish one dataset per species rather than one per release;

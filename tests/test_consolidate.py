@@ -389,6 +389,7 @@ class TestGenerateUsesConsolidatedSet:
             show_progress: bool = True,
             force: bool = False,
             output: Path | None = None,
+            inputs: dict[str, Path] | None = None,
         ) -> tuple[Path, Any]:
             return Path("cache.tsv"), _FakeMappingSet(consolidated)
 
