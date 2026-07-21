@@ -131,7 +131,6 @@ mapping_sets:
   labels:
     method: parse_labels
     inputs: {}
-    # name2synonym excluded: Wikidata uses oboInOwl:consider, not hasExactSynonym
     formats: [sssom, label_sec2pri, pri_labels, rdf, json, all]
 input_file_types:
   - sparql

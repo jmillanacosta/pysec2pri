@@ -359,14 +359,12 @@ def consolidate_mapping_dates(
     """Build/update the first-seen-date index for *datasource*.
 
     Collects every mapping using all available provenance. The walk shape is
-    chosen automatically by data availability, not by a requested mode:
+    chosen automatically by data availability:
 
-    - Datasources **with** a versioned archive (ChEBI, Ensembl, HGNC,
-      UniProt): walk every historical release once (oldest first, resuming
-      from the last completed version unless *force*). For every mapping
-      seen, records the version/date it first appeared and keeps bumping the
-      version/date it was last seen. Slow and network-heavy (~250 releases
-      for ChEBI); meant to be run manually/as a one-off.
+    - Datasources with a versioned archive (e.g., ChEBI, Ensembl, HGNC,
+      UniProt): walk every historical release once (oldest first).
+      For every mapping seen, records the version/date it first appeared
+      and keeps bumping the version/date it was last seen.
     - Datasources without: a single current parse.
 
     Args:

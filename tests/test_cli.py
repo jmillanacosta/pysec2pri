@@ -37,8 +37,8 @@ class TestSpeciesInOutputFilename:
     overwrite the same default file.
     """
 
-    def test_species_is_folded_into_default_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """--species 9615 produces a filename containing "9615", not just the version."""
+    def test_species_in_default_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--species 9615 produces a filename containing "9615"."""
         import pysec2pri.api as api
 
         monkeypatch.setattr(api, "_generate", _fake_generate)

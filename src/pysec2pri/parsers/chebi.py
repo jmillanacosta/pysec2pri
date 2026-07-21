@@ -279,8 +279,7 @@ class ChEBIParser(BaseParser):
         }
         rows = []
         for pri, sec in raw_id_mappings:
-            # The consolidated index is keyed by the version-independent pair
-            # hash, not the whole record_id.
+            # Consolidated index is keyed by the pair hash
             rows.append(
                 {
                     "subject_id": sec,
@@ -302,8 +301,7 @@ class ChEBIParser(BaseParser):
         for sid, pname, syn in raw_name_mappings:
             if not syn:
                 continue
-            # The consolidated index is keyed by the version-independent pair
-            # hash, not the whole record_id.
+            # The consolidated index is keyed by pair hash.
             rows.append(
                 {
                     "record_id": self._record_id(record_ns, sid, syn),

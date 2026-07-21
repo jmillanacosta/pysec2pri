@@ -80,8 +80,7 @@ class NCBIParser(BaseParser):
             gene_info_path: Optional path to the gene_info file.  When
                 supplied, ``_primary_ids`` on the returned mapping set is
                 populated with every current ``NCBIGene:<id>`` CURIE for the
-                given taxonomy, not just those that appear as ``object_id`` in
-                a discontinued-to-primary mapping.
+                given taxonomy.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
