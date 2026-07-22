@@ -127,7 +127,7 @@ class _FakeMappingSet:
             SimpleNamespace(record_id=rid, mapping_date=dates.get(rid)) for rid in record_ids
         ]
         self.mapping_set_version = mapping_set_version
-        self.mapping_set_id = "https://sec2pri.github.io/hgnc/v1"
+        self.mapping_set_id = "https://sec2pri.bigcat-bioinformatics.org/hgnc/v1"
 
 
 class _FakeDownloader:

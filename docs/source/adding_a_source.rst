@@ -65,7 +65,7 @@ Datasets within a release
 Most sources publish one dataset per release. HGNC is one, so the source and
 the version name it completely::
 
-    https://sec2pri.github.io/hgnc/2024-01-01
+    https://sec2pri.bigcat-bioinformatics.org/hgnc/2024-01-01
 
 Some publish several. ChEBI release 245 is both a ``3star`` subset and a
 ``complete`` one. Ensembl release 115 is a different set of mappings for every
@@ -87,10 +87,10 @@ Means that each subset of release 245 gets its own IRI pattern:
      - ``mapping_set_id``
      - ``record_id``
    * - ``3star``
-     - ``https://sec2pri.github.io/chebi/245/3star``
+     - ``https://sec2pri.bigcat-bioinformatics.org/chebi/245/3star``
      - ``sec2pri:chebi/245/3star/<hash>``
    * - ``complete``
-     - ``https://sec2pri.github.io/chebi/245/complete``
+     - ``https://sec2pri.bigcat-bioinformatics.org/chebi/245/complete``
      - ``sec2pri:chebi/245/complete/<hash>``
 
 Each name in ``products`` also becomes a CLI option (e.g. ``--subset``).

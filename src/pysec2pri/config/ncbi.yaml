@@ -151,10 +151,10 @@ mappingset:
     semapv: "https://w3id.org/semapv/vocab/"
     skos: "http://www.w3.org/2004/02/skos/core#"
     sssom: "https://w3id.org/sssom/"
-    sec2pri: "https://sec2pri.github.io/" # TODO set namespace
+    sec2pri: "https://sec2pri.bigcat-bioinformatics.org/" # TODO set namespace
     orcid: "https://orcid.org/"
   mappings: []
-  mapping_set_id: "https://sec2pri.github.io/ncbigene"
+  mapping_set_id: "https://sec2pri.bigcat-bioinformatics.org/ncbigene"
   mapping_set_version: null
   mapping_set_title: "NCBI Gene Secondary to Primary Mapping"
   mapping_set_description:

@@ -14,7 +14,7 @@ parser_class: "ExampleParser" # the class in parsers/example.py
 # the version alone is not enough. Example publishes one dataset per release,
 # so it declares none, and its IRIs stop at the version. If it also published a
 # "3star" and a "complete" subset, `products: ["subset"]` would give:
-#   mapping_set_id  https://sec2pri.github.io/example/2024-01-01/3star
+#   mapping_set_id  https://sec2pri.bigcat-bioinformatics.org/example/2024-01-01/3star
 #   record_id       sec2pri:example/2024-01-01/3star/<hash>
 # products: ["subset"]
 prefix: "EX"
@@ -51,7 +51,7 @@ mappingset:
     sssom: "https://w3id.org/sssom/"
     orcid: "https://orcid.org/"
   mappings: []
-  mapping_set_id: "https://sec2pri.github.io/example"
+  mapping_set_id: "https://sec2pri.bigcat-bioinformatics.org/example"
   mapping_set_title: "Example Secondary to Primary Mapping"
   mapping_set_description: "Mappings from retired to current Example IDs."
   creator_id: ["orcid:0000-0000-0000-0000"]
