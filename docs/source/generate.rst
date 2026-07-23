@@ -39,9 +39,33 @@ The same from the command line, one command for IDs and another for labels:
 Both return a SSSOM mapping set: an ``IdMappingSet`` or a ``LabelMappingSet``
 where the secondary identifier or label is the subject of a statement about its relationship to the primary that replaces it, if any.
 
-See :doc:`exports` for the available output formats, and :doc:`update_ids` for
-instructions on to check and update the identifiers and labels in your own data
-against a generated mapping set.
+See :doc:`update` for instructions on how to check and update the
+identifiers and labels in your own data against a generated mapping set.
+
+Output format
+=============
+
+SSSOM is the default output, but other formats can be specified
+(e.g. a plain secondary-to-primary TSV, or a bare list of current IDs).
+``--format`` picks one; ``--format all`` writes every format the mapping set
+supports to a directory:
+
+.. code-block:: bash
+
+    pysec2pri hgnc ids --format sec2pri -o hgnc_sec2pri.tsv
+    pysec2pri hgnc ids --format all -o hgnc_2026-04-07/
+
+From Python, the same mapping set can be saved with
+:meth:`~pysec2pri.parsers.base.BaseMappingSet.save`, or read into memory
+without writing anything via its ``to_<format>()`` methods:
+
+.. code-block:: python
+
+    hgnc.save("sec2pri", "hgnc_sec2pri.tsv")
+    df = hgnc.to_sec2pri()  # same table, no file written
+
+See :doc:`exports` for the full list of formats per mapping-set kind, and how
+to discover which ones a given source supports.
 
 
 Source options

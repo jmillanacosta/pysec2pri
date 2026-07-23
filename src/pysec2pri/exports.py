@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from mapkgsutils.exports import write_json, write_owl, write_rdf, write_sssom
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from pysec2pri.parsers.base import BaseMappingSet, IdMappingSet, LabelMappingSet
 
 __all__ = [
@@ -69,6 +71,132 @@ def write_pri_labels(
     return output_path
 
 
+def _write_tsv(df: pd.DataFrame, output_path: Path | str, *, header: bool = True) -> Path:
+    """Write *df* to *output_path* as a TSV, creating parent directories as needed.
+
+    Shared by every ``write_*``/``to_*`` pair below, so a mapping set's tabular
+    formats are built once (as a DataFrame) and written the same way whether
+    the caller wants the in-memory object or the file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, sep="\t", index=False, header=header)
+    return output_path
+
+
+def _sec2pri_frame(mapping_set: BaseMappingSet) -> pd.DataFrame:
+    """Build the secondary-to-primary ID table for ``write_sec2pri``/``to_sec2pri``.
+
+    Columns: ``primary_id`` (object_id), ``secondary_id`` (subject_id),
+    ``predicate_id``, ``mapping_cardinality``.
+    """
+    import pandas as pd
+
+    rows = [
+        {
+            "primary_id": str(getattr(m, "object_id", "") or ""),
+            "secondary_id": str(getattr(m, "subject_id", "") or ""),
+            "predicate_id": str(getattr(m, "predicate_id", "") or ""),
+            "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+        }
+        for m in (mapping_set.mappings or [])
+    ]
+    return pd.DataFrame(
+        rows, columns=["primary_id", "secondary_id", "predicate_id", "mapping_cardinality"]
+    )
+
+
+def _label_sec2pri_frame(mapping_set: BaseMappingSet) -> pd.DataFrame:
+    """Build the full label sec2pri table for ``write_label_sec2pri``/``to_label_sec2pri``.
+
+    Every mapping row is included (both deprecation and synonym predicates).
+    Columns: ``secondary_id``, ``secondary_label``, ``primary_id``,
+    ``primary_label``, ``predicate_id``, ``mapping_cardinality``.
+    """
+    import pandas as pd
+
+    rows = [
+        {
+            "secondary_id": str(getattr(m, "subject_id", "") or ""),
+            "secondary_label": str(getattr(m, "subject_label", "") or ""),
+            "primary_id": str(getattr(m, "object_id", "") or ""),
+            "primary_label": str(getattr(m, "object_label", "") or ""),
+            "predicate_id": str(getattr(m, "predicate_id", "") or ""),
+            "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+        }
+        for m in (mapping_set.mappings or [])
+    ]
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "secondary_id",
+            "secondary_label",
+            "primary_id",
+            "primary_label",
+            "predicate_id",
+            "mapping_cardinality",
+        ],
+    )
+
+
+def _name2synonym_frame(mapping_set: BaseMappingSet) -> pd.DataFrame:
+    """Build the name-to-synonym table for ``write_name2synonym``/``to_name2synonym``.
+
+    Only ``oboInOwl:hasExactSynonym`` rows are included; deprecation rows
+    (``IAO:0100001``) belong in ``label_sec2pri``/``label2prev``, not here.
+    Columns: ``primary_id``, ``name``, ``synonym``.
+    """
+    import pandas as pd
+
+    rows = [
+        {
+            "primary_id": str(getattr(m, "object_id", "") or ""),
+            "name": str(getattr(m, "object_label", "") or ""),
+            "synonym": str(getattr(m, "subject_label", "") or ""),
+        }
+        for m in (mapping_set.mappings or [])
+        if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym"
+        and (getattr(m, "subject_label", None) or getattr(m, "object_label", None))
+    ]
+    return pd.DataFrame(rows, columns=["primary_id", "name", "synonym"])
+
+
+def _label2prev_frame(mapping_set: BaseMappingSet) -> pd.DataFrame:
+    """Build the label-to-previous-label table for ``write_label2prev``/``to_label2prev``.
+
+    Only ``IAO:0100001`` (``"term replaced by"``) rows are included; synonym
+    rows (``oboInOwl:hasExactSynonym``) belong in ``name2synonym``, not here.
+    Columns: ``primary_id``, ``primary_label``, ``previous_label``,
+    ``mapping_cardinality``.
+    """
+    import pandas as pd
+
+    rows = [
+        {
+            "primary_id": str(getattr(m, "object_id", "") or ""),
+            "primary_label": str(getattr(m, "object_label", "") or ""),
+            "previous_label": str(getattr(m, "subject_label", "") or ""),
+            "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
+        }
+        for m in (mapping_set.mappings or [])
+        if getattr(m, "predicate_id", None) != "oboInOwl:hasExactSynonym"
+        and (getattr(m, "subject_label", None) or getattr(m, "object_label", None))
+    ]
+    return pd.DataFrame(
+        rows, columns=["primary_id", "primary_label", "previous_label", "mapping_cardinality"]
+    )
+
+
+def _secondary_frame(mapping_set: BaseMappingSet) -> pd.DataFrame:
+    """Build the unique-secondary-ID table for ``write_secondary``/``to_secondary``."""
+    import pandas as pd
+
+    ids = sorted(
+        {str(getattr(m, "subject_id", None) or "") for m in (mapping_set.mappings or [])} - {""}
+    )
+    return pd.DataFrame({"secondary_id": ids})
+
+
 def write_sec2pri(
     mapping_set: BaseMappingSet,
     output_path: Path | str,
@@ -85,23 +213,7 @@ def write_sec2pri(
     Returns:
         Path to the written file.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    columns = ["primary_id", "secondary_id", "predicate_id", "mapping_cardinality"]
-
-    with output_path.open("w", encoding="utf-8") as f:
-        f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
-            values = [
-                str(getattr(m, "object_id", "") or ""),
-                str(getattr(m, "subject_id", "") or ""),
-                str(getattr(m, "predicate_id", "") or ""),
-                str(getattr(m, "mapping_cardinality", "") or ""),
-            ]
-            f.write("\t".join(values) + "\n")
-
-    return output_path
+    return _write_tsv(_sec2pri_frame(mapping_set), output_path)
 
 
 def write_label_sec2pri(
@@ -121,32 +233,7 @@ def write_label_sec2pri(
     Returns:
         Path to the written file.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    columns = [
-        "secondary_id",
-        "secondary_label",
-        "primary_id",
-        "primary_label",
-        "predicate_id",
-        "mapping_cardinality",
-    ]
-
-    with output_path.open("w", encoding="utf-8") as f:
-        f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
-            values = [
-                str(getattr(m, "subject_id", "") or ""),
-                str(getattr(m, "subject_label", "") or ""),
-                str(getattr(m, "object_id", "") or ""),
-                str(getattr(m, "object_label", "") or ""),
-                str(getattr(m, "predicate_id", "") or ""),
-                str(getattr(m, "mapping_cardinality", "") or ""),
-            ]
-            f.write("\t".join(values) + "\n")
-
-    return output_path
+    return _write_tsv(_label_sec2pri_frame(mapping_set), output_path)
 
 
 def write_name2synonym(
@@ -166,30 +253,7 @@ def write_name2synonym(
     Returns:
         Path to the written file.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Columns: primary_id (object), name (object_label/primary), synonym (subject_label)
-    columns = ["primary_id", "name", "synonym"]
-
-    with output_path.open("w", encoding="utf-8") as f:
-        f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
-            # Only emit synonym rows; skip deprecation (IAO:0100001) rows
-            if getattr(m, "predicate_id", None) != "oboInOwl:hasExactSynonym":
-                continue
-            subject_label = getattr(m, "subject_label", None)
-            object_label = getattr(m, "object_label", None)
-            if subject_label or object_label:
-                # object_label is the primary (name), subject_label is the synonym
-                values = [
-                    str(getattr(m, "object_id", "") or ""),
-                    str(object_label or ""),
-                    str(subject_label or ""),
-                ]
-                f.write("\t".join(values) + "\n")
-
-    return output_path
+    return _write_tsv(_name2synonym_frame(mapping_set), output_path)
 
 
 def write_label2prev(
@@ -210,31 +274,7 @@ def write_label2prev(
     Returns:
         Path to the written file.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Columns: primary_id (object), primary_label (object_label), previous_label (subject_label)
-    columns = ["primary_id", "primary_label", "previous_label", "mapping_cardinality"]
-
-    with output_path.open("w", encoding="utf-8") as f:
-        f.write("\t".join(columns) + "\n")
-        for m in mapping_set.mappings or []:
-            # Only emit deprecation rows; skip synonym (hasExactSynonym) rows
-            if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym":
-                continue
-            subject_label = getattr(m, "subject_label", None)
-            object_label = getattr(m, "object_label", None)
-            if subject_label or object_label:
-                # object_label is the primary label, subject_label is the previous label
-                values = [
-                    str(getattr(m, "object_id", "") or ""),
-                    str(object_label or ""),
-                    str(subject_label or ""),
-                    str(getattr(m, "mapping_cardinality", "") or ""),
-                ]
-                f.write("\t".join(values) + "\n")
-
-    return output_path
+    return _write_tsv(_label2prev_frame(mapping_set), output_path)
 
 
 def write_secondary(
@@ -250,20 +290,7 @@ def write_secondary(
     Returns:
         Path to the written file.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    sec_ids: set[str] = set()
-    for m in mapping_set.mappings or []:
-        subj_id = getattr(m, "subject_id", None)
-        if subj_id:
-            sec_ids.add(str(subj_id))
-
-    with output_path.open("w", encoding="utf-8") as f:
-        for sec_id in sorted(sec_ids):
-            f.write(f"{sec_id}\n")
-
-    return output_path
+    return _write_tsv(_secondary_frame(mapping_set), output_path, header=False)
 
 
 # Registry mapping config output names to writer functions.

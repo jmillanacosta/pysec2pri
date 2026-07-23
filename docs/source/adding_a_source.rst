@@ -114,9 +114,9 @@ Copy ``docs/source/example/example.py`` to
 ``src/pysec2pri/parsers/<source>.py``. Name the class to match the
 ``parser_class`` value in the config YAML.
 
-:func:`~pysec2pri.Example.ExampleParser.parse` must return the
+:func:`~pysec2pri.parsers.example.ExampleParser.parse` must return the
 ``IdMappingSet`` and
-:func:`~pysec2pri.Example.ExampleParser.parse_labels` the
+:func:`~pysec2pri.parsers.example.ExampleParser.parse_labels` the
 ``LabelMappingSet``.
 
 .. literalinclude:: example/example.py

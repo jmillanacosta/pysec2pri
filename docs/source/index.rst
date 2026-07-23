@@ -97,7 +97,7 @@ Quick Start
    :caption: Features
 
    generate
-   update_ids
+   update
    exports
    gtex
 

@@ -84,6 +84,42 @@ class IdMappingSet(BaseMappingSet):
 
         return ids
 
+    def to_sec2pri(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of secondary to primary ID mappings.
+
+        Columns: ``primary_id`` (object_id), ``secondary_id`` (subject_id),
+        ``predicate_id``, ``mapping_cardinality``.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with one row per ID mapping.
+        """
+        from pysec2pri.exports import _sec2pri_frame, _write_tsv
+
+        df = _sec2pri_frame(self)
+        if output_path is not None:
+            _write_tsv(df, self._resolve_path(output_path, "_sec2pri.tsv"))
+        return df
+
+    def to_secondary(self, output_path: Path | str | None = None) -> list[str]:
+        """Return a sorted list of unique secondary IDs, optionally writing to TXT.
+
+        Args:
+            output_path: If given, the IDs are also written one-per-line to a
+                text file.
+
+        Returns:
+            Sorted list of unique secondary ID strings.
+        """
+        from pysec2pri.exports import _secondary_frame, _write_tsv
+
+        df = _secondary_frame(self)
+        if output_path is not None:
+            _write_tsv(df, self._resolve_path(output_path, "_secondary_ids.txt"), header=False)
+        return [x for x in df["secondary_id"] if isinstance(x, str)]
+
     def save(
         self,
         fmt: str,
@@ -93,7 +129,7 @@ class IdMappingSet(BaseMappingSet):
         """Write to any supported format by name.
 
         Formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``,
-        ``"sec2pri"``, ``"pri_ids"``.
+        ``"sec2pri"``, ``"pri_ids"``, ``"secondary"``.
 
         Args:
             fmt: Format key (see above).
@@ -155,36 +191,34 @@ class LabelMappingSet(BaseMappingSet):
         Returns:
             :class:`pandas.DataFrame` with one row per label mapping.
         """
-        import pandas as pd
+        from pysec2pri.exports import _label_sec2pri_frame, _write_tsv
 
-        rows = [
-            {
-                "secondary_id": str(getattr(m, "subject_id", "") or ""),
-                "secondary_label": str(getattr(m, "subject_label", "") or ""),
-                "primary_id": str(getattr(m, "object_id", "") or ""),
-                "primary_label": str(getattr(m, "object_label", "") or ""),
-                "predicate_id": str(getattr(m, "predicate_id", "") or ""),
-                "mapping_cardinality": str(getattr(m, "mapping_cardinality", "") or ""),
-            }
-            for m in (self.mappings or [])
-        ]
-        df = pd.DataFrame(
-            rows,
-            columns=[
-                "secondary_id",
-                "secondary_label",
-                "primary_id",
-                "primary_label",
-                "predicate_id",
-                "mapping_cardinality",
-            ],
-        )
-
+        df = _label_sec2pri_frame(self)
         if output_path is not None:
-            from pysec2pri.exports import write_label_sec2pri
+            _write_tsv(df, self._resolve_path(output_path, "_label_sec2pri.tsv"))
+        return df
 
-            write_label_sec2pri(self, self._resolve_path(output_path, "_label_sec2pri.tsv"))
+    def to_label2prev(self, output_path: Path | str | None = None) -> pd.DataFrame:
+        """Return a ``DataFrame`` of label to previous (deprecated) label mappings.
 
+        Columns: ``primary_id``, ``primary_label``, ``previous_label``,
+        ``mapping_cardinality``.
+
+        Only ``IAO:0100001`` (``"term replaced by"``) rows are included;
+        synonym rows (``oboInOwl:hasExactSynonym``) belong in
+        :meth:`to_name2synonym`, not here.
+
+        Args:
+            output_path: If given, the DataFrame is also written as a TSV file.
+
+        Returns:
+            :class:`pandas.DataFrame` with deprecation-only label mapping rows.
+        """
+        from pysec2pri.exports import _label2prev_frame, _write_tsv
+
+        df = _label2prev_frame(self)
+        if output_path is not None:
+            _write_tsv(df, self._resolve_path(output_path, "_label2prev.tsv"))
         return df
 
     def to_pri_labels(self, output_path: Path | str | None = None) -> list[tuple[str, str]]:
@@ -250,25 +284,11 @@ class LabelMappingSet(BaseMappingSet):
         Returns:
             :class:`pandas.DataFrame` with synonym-only label mapping rows.
         """
-        import pandas as pd
+        from pysec2pri.exports import _name2synonym_frame, _write_tsv
 
-        rows = [
-            {
-                "primary_id": str(getattr(m, "object_id", "") or ""),
-                "name": str(getattr(m, "object_label", "") or ""),
-                "synonym": str(getattr(m, "subject_label", "") or ""),
-            }
-            for m in (self.mappings or [])
-            if getattr(m, "predicate_id", None) == "oboInOwl:hasExactSynonym"
-            and (getattr(m, "subject_label", None) or getattr(m, "object_label", None))
-        ]
-        df = pd.DataFrame(rows, columns=["primary_id", "name", "synonym"])
-
+        df = _name2synonym_frame(self)
         if output_path is not None:
-            from pysec2pri.exports import write_name2synonym
-
-            write_name2synonym(self, self._resolve_path(output_path, "_name2synonym.tsv"))
-
+            _write_tsv(df, self._resolve_path(output_path, "_name2synonym.tsv"))
         return df
 
     def save(
@@ -280,8 +300,8 @@ class LabelMappingSet(BaseMappingSet):
         """Write to any supported format by name.
 
         Formats: ``"sssom"``, ``"rdf"``, ``"json"``, ``"owl"``,
-        ``"label_sec2pri"`` (``"label2prev"`` is a deprecated alias),
-        ``"pri_labels"``, ``"name2synonym"``.
+        ``"label_sec2pri"``, ``"label2prev"``, ``"pri_labels"``,
+        ``"name2synonym"``.
 
         Args:
             fmt: Format key (see above).
@@ -298,10 +318,15 @@ class LabelMappingSet(BaseMappingSet):
         if shared is not None:
             return shared
 
-        if fmt in ("label_sec2pri", "label2prev"):
+        if fmt == "label_sec2pri":
             from pysec2pri.exports import write_label_sec2pri
 
             return write_label_sec2pri(self, self._resolve_path(output_path, "_label_sec2pri.tsv"))
+
+        if fmt == "label2prev":
+            from pysec2pri.exports import write_label2prev
+
+            return write_label2prev(self, self._resolve_path(output_path, "_label2prev.tsv"))
 
         if fmt == "pri_labels":
             from pysec2pri.exports import write_pri_labels
@@ -315,7 +340,7 @@ class LabelMappingSet(BaseMappingSet):
 
         raise ValueError(
             f"Unknown format {fmt!r}. Choose from: "
-            "json, name2synonym, owl, pri_labels, rdf, sssom, label_sec2pri"
+            "json, label2prev, name2synonym, owl, pri_labels, rdf, sssom, label_sec2pri"
         )
 
 

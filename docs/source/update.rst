@@ -27,32 +27,32 @@ Every row keeps its original value, and the new column shows the solved value:
 .. list-table::
    :header-rows: 1
 
-   * - the value is
-     - the new column holds
-   * - retired
-     - what it retired into
-   * - current
+   * - ``column_name``
+     - ``column_name_primary``
+   * - secondary
+     - its primary
+   * - primary
      - itself
    * - not from this source
      - itself
-   * - both retired and current
+   * - both retired and current (ambiguous)
      - nothing: an empty cell
+
+(``update_labels`` is identical, but writes ``column_name_current`` by default.)
 
 Ambiguity
 =========
 
-Ambiguity: ``HGNC:2`` can be a retired ID that
-became ``HGNC:3``, *and* the current ID of a different gene. One row says
-``HGNC:2`` and both readings are correct.
-
-pysec2pri does not guess. The cell is left empty, and an empty cell is how you
-find the rows worth looking at:
+Ambiguity: ``ABC`` can be a retired symbol that
+became ``DEF``, *and* the current symbol of another gene.
 
 .. code-block:: python
 
-    out[out["gene_id_primary"] == ""]
+    df[df["gene_sym_primary"] == ""]
 
-To resolve them, you can give a hint: another column of the same row that says which
+Would return all ambiguous cases that could not be solved when updating `df["gene_sym"]`, so ``ABC`` becomes `None`.
+
+To resolve these cases, you can give a hint: another column value of the same row that says which
 entry it means.
 
 Hints from a crosswalk
@@ -62,7 +62,7 @@ Hints from a crosswalk
 identifiers from another vocabulary, such as an Ensembl gene ID next to
 the HGNC to be solved.
 
-An xref hint needs a table saying which entry each of those identifiers belongs
+An xref hint needs a table stating which entry each of those identifiers belongs
 to. Bring your own with :func:`~mapkgsutils.context.load_xref_mapping`. Any
 SSSOM file works, and so does a plain TSV of ``subject_id`` and ``object_id``:
 
@@ -84,9 +84,8 @@ SSSOM file works, and so does a plain TSV of ``subject_id`` and ``object_id``:
         xref_mapping=load_xref_mapping("ensembl_to_hgnc.tsv"),
     )
 
-Now an ambiguous ``gene_id`` is decided by that row's ``ensembl`` value: the
-crosswalk says which gene it is, and that gene's ID is the answer. Hints are
-only consulted for ambiguous rows, so a wrong one cannot spoil a row that was
+Now an ambiguous ``gene_id`` is decided by that row's ``ensembl``. Hints are
+only consulted for ambiguous rows, so a wrong one can't mess a row value that was
 already clear.
 
 Using a hint also adds a ``gene_id_primary_id`` column, holding the ID the row
