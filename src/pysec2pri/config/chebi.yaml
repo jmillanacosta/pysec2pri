@@ -3,7 +3,7 @@ config_id: "chebi"
 datasource_id: "chebi"
 name: "ChEBI"
 parser_class: "ChEBIParser"
-# Splits this source into disjoint datasets: folded into the IRIs.
+# Splits this source into diffeent datasets
 products: ["subset"]
 prefix: "CHEBI"
 curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
@@ -142,6 +142,9 @@ distribution_eras:
     download_urls:
       sdf_3star: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete_3star.sdf.gz"
       sdf_complete: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/chebi_legacy/archive/rel{version}/SDF/ChEBI_complete.sdf.gz"
+    inputs:
+      ids: { sdf: input_path }
+      labels: { sdf: input_path }
   - id: tsv
     from_version: "245"
     format: tsv

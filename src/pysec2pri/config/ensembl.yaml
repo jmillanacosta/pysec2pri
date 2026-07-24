@@ -3,7 +3,7 @@ config_id: "ensembl"
 datasource_id: "ensembl"
 name: "Ensembl"
 parser_class: "EnsemblParser"
-# Splits this source into disjoint datasets: folded into the IRIs.
+# Splits this source into different datasets
 products: ["species"]
 prefix: "ENSEMBL"
 curie_base_url: "http://identifiers.org/ensembl/"
