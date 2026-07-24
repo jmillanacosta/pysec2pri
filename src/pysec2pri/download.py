@@ -28,7 +28,13 @@ from mapkgsutils.download import list_versions as _list_versions
 from mapkgsutils.download import resolve_release_date as _resolve_release_date
 
 from pysec2pri.constants import ALL_DATASOURCES
-from pysec2pri.downloads import CHECK_RELEASE, DOWNLOADERS, TAR_EXTRACTORS, URLS_AND_DATE
+from pysec2pri.downloads import (
+    CHECK_RELEASE,
+    DOWNLOAD_KEYS,
+    DOWNLOADERS,
+    TAR_EXTRACTORS,
+    URLS_AND_DATE,
+)
 from pysec2pri.downloads.chebi import check_chebi_release
 from pysec2pri.downloads.ensembl import check_ensembl_release
 from pysec2pri.downloads.hgnc import check_hgnc_release
@@ -240,6 +246,9 @@ def download_datasource_with_release(
             release_info = checker()
             resolved_version, release_date = release_info.version, release_info.release_date
 
+    remap_keys = DOWNLOAD_KEYS.get(datasource)
+    effective_keys = remap_keys(version, keys) if remap_keys is not None else keys
+
     files, dl_release_date = _download_datasource_with_release(
         datasource,
         output_dir,
@@ -247,7 +256,7 @@ def download_datasource_with_release(
         urls_and_date=URLS_AND_DATE,
         decompress=decompress,
         version=version,
-        keys=keys,
+        keys=effective_keys,
         tar_extractors=TAR_EXTRACTORS,
         **kwargs,
     )

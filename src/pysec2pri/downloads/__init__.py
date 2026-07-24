@@ -56,9 +56,14 @@ TAR_EXTRACTORS = {
     "uniprot": uniprot.extract_tar,
 }
 
+DOWNLOAD_KEYS = {
+    "uniprot": uniprot.resolve_download_keys,
+}
+
 __all__ = [
     "CHECK_RELEASE",
     "DOWNLOADERS",
+    "DOWNLOAD_KEYS",
     "TAR_EXTRACTORS",
     "URLS_AND_DATE",
     "ChEBIDownloader",
