@@ -3,7 +3,7 @@ config_id: "wikidata"
 datasource_id: "wikidata"
 name: "Wikidata"
 parser_class: "WikidataParser"
-# Splits this source into disjoint datasets: folded into the IRIs.
+# Splits this source into different datasets
 products: ["entity_type"]
 prefix: "WD"
 curie_base_url: "http://www.wikidata.org/entity/"

@@ -315,9 +315,8 @@ def _run_one_version(
     from pysec2pri.download import download_datasource_with_release
 
     supplied = {k: Path(v) for k, v in (inputs or {}).items()}
-    input_map = (ALL_DATASOURCES[datasource].mapping_sets.get(mapping_sets) or {}).get(
-        "inputs"
-    ) or {}
+    # Era-aware
+    input_map = ALL_DATASOURCES[datasource].inputs_for(mapping_sets, version)
     missing = [key for key in input_map if key not in supplied]
 
     tmpdir = Path(tempfile.mkdtemp(prefix=f"pysec2pri_consolidate_{datasource}_"))

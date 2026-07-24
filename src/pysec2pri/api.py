@@ -393,7 +393,8 @@ def _generate(
     ):
         return _generate_ensembl_all_species(kind, version, show_progress)
 
-    input_map: dict[str, str] = spec.get("inputs") or {}
+    # Era-aware
+    input_map: dict[str, str] = cfg.inputs_for(kind, version)
     supplied = {k: Path(v) for k, v in (inputs or {}).items()}
 
     release_date = None
