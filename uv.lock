@@ -2911,7 +2911,7 @@ wheels = [
 
 [[package]]
 name = "pysec2pri"
-version = "0.3.9"
+version = "0.3.10"
 source = { editable = "." }
 dependencies = [
     { name = "curies" },

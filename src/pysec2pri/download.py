@@ -232,12 +232,13 @@ def download_datasource_with_release(
         Tuple of (file-key -> downloaded path mapping, resolved version,
         release date). ``None`` for a datasource with no release checker.
     """
+    resolved_version = version
     release_date = None
     if version is None:
         checker = CHECK_RELEASE.get(datasource)
         if checker is not None:
             release_info = checker()
-            version, release_date = release_info.version, release_info.release_date
+            resolved_version, release_date = release_info.version, release_info.release_date
 
     files, dl_release_date = _download_datasource_with_release(
         datasource,
@@ -250,4 +251,4 @@ def download_datasource_with_release(
         tar_extractors=TAR_EXTRACTORS,
         **kwargs,
     )
-    return files, version, release_date or dl_release_date
+    return files, resolved_version, release_date or dl_release_date
