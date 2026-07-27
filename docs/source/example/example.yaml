@@ -51,7 +51,7 @@ mappingset:
     sssom: "https://w3id.org/sssom/"
     orcid: "https://orcid.org/"
   mappings: []
-  mapping_set_id: "https://sec2pri.bigcat-bioinformatics.org/example"
+  mapping_set_id: "https://sec2pri.tgx-bioinformatics.org/example"
   mapping_set_title: "Example Secondary to Primary Mapping"
   mapping_set_description: "Mappings from retired to current Example IDs."
   creator_id: ["orcid:0000-0000-0000-0000"]
