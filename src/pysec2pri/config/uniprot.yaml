@@ -3,13 +3,13 @@ config_id: "uniprot"
 datasource_id: "uniprot"
 name: "UniProt"
 parser_class: "UniProtParser"
-prefix: "UniProtKB"
+prefix: "uniprot"
 curie_base_url: "http://identifiers.org/uniprot/"
 entity_types: ["proteins"]
 mappingset:
   sssom_version: null
   curie_map:
-    UniProtKB: "http://identifiers.org/uniprot/"
+    UniProtKB: "http://identifiers.org/uniprot:"
     IAO: "http://purl.obolibrary.org/obo/IAO_"
     uniprotweb: "https://www.uniprot.org/"
     oboInOwl: "http://www.geneontology.org/formats/oboInOwl#"
@@ -78,14 +78,14 @@ mapping:
   creator_id: null
   creator_label: null
   subject_type: null
-  subject_source: "uniprotweb:uniprotkb"
+  subject_source: "uniprot" #to be in line with identifiers.org
   subject_source_version: null
   object_type: null
-  object_source: "uniprotweb:uniprotkb"
+  object_source: "uniprot"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "uniprotweb:uniprotkb"
+  mapping_source: "uniprot
   mapping_cardinality: null
   cardinality_scope: null
   mapping_tool: "pysec2pri"
@@ -149,7 +149,7 @@ xref_sources:
     url: "https://www.genenames.org/cgi-bin/download/custom?col=gd_hgnc_id&col=gd_app_sym&col=gd_app_name&col=gd_status&col=gd_prev_sym&col=gd_pub_refseq_ids&col=md_eg_id&col=md_ensembl_id&col=md_mim_id&col=md_vega_id&col=md_refseq_id&col=md_ucsc_id&col=md_prot_id&status=Approved&status=Entry%20Withdrawn&hgnc_dbtag=on&order_by=gd_app_sym_sort&format=text&submit=submit"
     format: tsv
     object_id_col: "HGNC ID"
-    object_label_col: "Approved symbol"
+    object_label_col: "Approved HGNC symbol"
     subject_id_cols:
       ensembl: "Ensembl ID(supplied by Ensembl)"
       entrez: "NCBI Gene ID(supplied by NCBI)"
