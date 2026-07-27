@@ -79,14 +79,14 @@ mapping:
   creator_id: null
   creator_label: null
   subject_type: null
-  subject_source: "wikidata:wiki"
+  subject_source: "wikidata:"
   subject_source_version: null
   object_type: null
-  object_source: "wikidata:wiki"
+  object_source: "wikidata:"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "wikidata:wiki"
+  mapping_source: "wikidata:"
   mapping_cardinality: null
   cardinality_scope: null
   mapping_tool: "pysec2pri"
