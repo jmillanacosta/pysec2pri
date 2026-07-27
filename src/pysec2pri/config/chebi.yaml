@@ -36,13 +36,13 @@ mappingset:
   mapping_set_description: "Mappings from current to deprecated ChEBI IDs."
   mapping_set_confidence: 1.0
   creator_id:
-    - "orcid:0000-0002-4166-7093"
     - "orcid:0000-0002-4904-3269"
+    - "orcid:0000-0002-4166-7093"    
   creator_label:
-    - "Javier Millán Acosta"
     - "Tooba Abbassi-Daloii"
+    - "Javier Millán Acosta"    
   comment: "Generated with pysec2pri"
-  license: "https://creativecommons.org/publicdomain/zero/1.0/"
+  license: "https://creativecommons.org/publicdomain/zero/1.0/" ##Check licence!
   subject_type: "CHEBI:24431"
   subject_source: "chebi:"
   subject_source_version: null
@@ -97,7 +97,7 @@ mapping:
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "ChEBI"
+  mapping_source: "chebi"
   mapping_cardinality: null
   cardinality_scope: null
   mapping_tool: "pysec2pri"
