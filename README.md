@@ -28,6 +28,45 @@ Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subject
 ids and labels (`subject_id`, `subject_label`) are secondary, objects are
 primary.
 
+## Prerequisites
+
+The commands below use [`uv`](https://docs.astral.sh/uv/), a fast Python
+package manager. `uv` can install Python for you, so you do not need Python
+or `pip` installed beforehand.
+
+1. Install `uv`:
+
+   ```console
+   # macOS / Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+   ```powershell
+   # Windows (PowerShell)
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
+   for other options (e.g. `pipx`, `winget`, `brew`).
+
+2. Create and activate a virtual environment. This keeps pysec2pri and its
+   dependencies isolated from other Python projects and your system Python,
+   avoiding version conflicts:
+
+   ```console
+   uv venv
+   ```
+
+   ```console
+   # macOS / Linux
+   source .venv/bin/activate
+   ```
+
+   ```powershell
+   # Windows (PowerShell)
+   .venv\Scripts\Activate.ps1
+   ```
+
 ## Installation for Users
 
 ```console
