@@ -44,6 +44,7 @@ or `pip` installed beforehand.
    ```powershell
    # Windows (PowerShell)
    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine"); uv --version
    ```
 
    See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
@@ -54,18 +55,25 @@ or `pip` installed beforehand.
    avoiding version conflicts:
 
    ```console
-   uv venv
-   ```
-
-   ```console
    # macOS / Linux
+   uv venv
    source .venv/bin/activate
    ```
 
    ```powershell
    # Windows (PowerShell)
-   .venv\Scripts\Activate.ps1
+   uv venv
+   .\.venv\Scripts\Activate.ps1
    ```
+
+   > If this fails with "running scripts is disabled on this system", PowerShell's
+   > default execution policy is blocking local scripts. Allow it for the
+   > current session only (no admin rights required), then retry:
+   >
+   > ```powershell
+   > Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   > .\.venv\Scripts\Activate.ps1
+   > ```
 
 ## Installation for Users
 
