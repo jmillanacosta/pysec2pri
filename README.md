@@ -28,16 +28,16 @@ Outputs mappings in [SSSOM format](https://w3id.org/sssom) by default. Subject
 ids and labels (`subject_id`, `subject_label`) are secondary, objects are
 primary.
 
-## Installation
+## Installation for Users
 
 ```console
 uv pip install pysec2pri
 ```
 
-Or install from source:
+## Installation for Developers
 
 ```console
-uv pip install git+https://github.com/jmillanacosta/pysec2pri.git
+uv pip install git+https://github.com/sec2pri/pysec2pri.git
 ```
 
 ## Quick Start
