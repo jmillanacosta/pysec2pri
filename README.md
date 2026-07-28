@@ -84,7 +84,10 @@ uv pip install pysec2pri
 ## Installation for Developers
 
 ```console
+# If you're new to this project:
 uv pip install git+https://github.com/sec2pri/pysec2pri.git
+# If you have cloned this repo before:
+uv pip install -e .
 ```
 
 ## Quick Start
