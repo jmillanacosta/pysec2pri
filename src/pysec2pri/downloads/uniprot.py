@@ -18,7 +18,13 @@ if TYPE_CHECKING:
 
     from pysec2pri.parsers.base import DatasourceConfig
 
-__all__ = ["UniProtDownloader", "check_uniprot_release", "extract_tar", "urls_and_date"]
+__all__ = [
+    "UniProtDownloader",
+    "check_uniprot_release",
+    "extract_tar",
+    "resolve_download_keys",
+    "urls_and_date",
+]
 
 METALINK_URL = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/RELEASE.metalink"
 _NS = {"m": "http://www.metalinker.org/"}
@@ -152,6 +158,22 @@ def urls_and_date(
         logger.info("UniProt version %s: %s", version, urls)
         return urls, None
     return dict(config.download_urls), None
+
+
+def resolve_download_keys(version: str | None, keys: list[str] | None) -> list[str] | None:
+    """Resolve download keys.
+
+    Args:
+        version: The version being downloaded, or ``None`` for latest.
+        keys: The keys needed for the parser or ``None`` for "all".
+
+    Returns:
+        *keys* unchanged for the latest release; ``None`` (no filtering) for
+        any explicit version.
+    """
+    if version is not None and keys is not None:
+        return None
+    return keys
 
 
 def extract_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:

@@ -3,7 +3,7 @@ config_id: "ncbigene"
 datasource_id: "ncbigene"
 name: "NCBI Gene"
 parser_class: "NCBIParser"
-# Splits this source into disjoint datasets: folded into the IRIs.
+# Splits this source into different datasets
 products: ["species"]
 parse_options:
   default_taxonomy_id: 9606
