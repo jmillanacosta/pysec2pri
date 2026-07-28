@@ -217,7 +217,7 @@ download_urls:
 
 primary_file_key: "withdrawn"
 archive_url: null
-id_pattern: "^((VGNC|vgnc):)?\d{1,9}$" ##Updated regex from identifiers.org "^VGNC:\\d+$"
+id_pattern: "^((VGNC|vgnc):)?\\d{1,9}$" ##Updated regex from identifiers.org "^VGNC:\\d+$"
 default_output_filename: "vgnc_sec2pri.sssom.tsv"
 
 mapping_sets:
