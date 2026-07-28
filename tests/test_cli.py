@@ -49,7 +49,7 @@ class TestSpeciesInOutputFilename:
         with runner.isolated_filesystem():
             result = runner.invoke(cmd, ["--species", "9615"])
             assert result.exit_code == 0, result.output
-            assert Path("ensembl_ids_9615_115.sssom.tsv").exists()
+            assert (api.DEFAULT_OUTPUT_DIR / "ensembl_ids_9615_115.sssom.tsv").exists()
 
     def test_no_species_option_omits_species_segment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A command with no --species option (e.g. hgnc) keeps the old filename shape."""
@@ -63,7 +63,7 @@ class TestSpeciesInOutputFilename:
         with runner.isolated_filesystem():
             result = runner.invoke(cmd, [])
             assert result.exit_code == 0, result.output
-            assert Path("hgnc_ids_115.sssom.tsv").exists()
+            assert (api.DEFAULT_OUTPUT_DIR / "hgnc_ids_115.sssom.tsv").exists()
 
 
 class TestConsolidateInOutputFilename:
@@ -83,5 +83,5 @@ class TestConsolidateInOutputFilename:
         with runner.isolated_filesystem():
             result = runner.invoke(cmd, ["--consolidate"])
             assert result.exit_code == 0, result.output
-            assert Path("hgnc_ids_115_consolidate.sssom.tsv").exists()
-            assert not Path("hgnc_ids_115.sssom.tsv").exists()
+            assert (api.DEFAULT_OUTPUT_DIR / "hgnc_ids_115_consolidate.sssom.tsv").exists()
+            assert not (api.DEFAULT_OUTPUT_DIR / "hgnc_ids_115.sssom.tsv").exists()
