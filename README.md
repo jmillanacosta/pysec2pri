@@ -53,7 +53,10 @@ pysec2pri hgnc labels
 ```
 
 #### Data output:
-The created mapping files are automatically added to anew folder (called target) if not specified by users. Use the `-o` flag to write to a different location, e.g. `pysec2pri hgnc ids -o out.sssom.tsv` or `-o some_dir/`.
+
+The created mapping files are automatically added to a new folder (called
+`target`) if not specified by users. Use the `-o` flag to write to a different
+location, e.g. `pysec2pri hgnc ids -o out.sssom.tsv` or `-o some_dir/`.
 
 Run `pysec2pri --help` to see every source, and `pysec2pri <source> ids --help`
 for one source's options. Input files are downloaded unless you pass them:
