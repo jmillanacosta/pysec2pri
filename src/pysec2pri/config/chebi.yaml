@@ -44,10 +44,10 @@ mappingset:
   comment: "Generated with pysec2pri"
   license: "https://creativecommons.org/publicdomain/zero/1.0/"
   subject_type: "CHEBI:24431"
-  subject_source: "chebi:"
+  subject_source: "https://www.ebi.ac.uk/chebi/"
   subject_source_version: null
   object_type: "CHEBI:24431"
-  object_source: "chebi:"
+  object_source: "https://www.ebi.ac.uk/chebi/"
   object_source_version: null
   predicate_type: null
   mapping_provider: "http://github.com/sec2pri/pysec2pri"
@@ -90,17 +90,17 @@ mapping:
   creator_id: null
   creator_label: null
   subject_type: null
-  subject_source: "chebi:"
+  subject_source: "https://www.ebi.ac.uk/chebi/"
   subject_source_version: null
   object_type: null
-  object_source: "chebi:"
+  object_source: "https://www.ebi.ac.uk/chebi/"
   object_source_version: null
   predicate_type: null
   mapping_provider: null
-  mapping_source: "ChEBI"
+  mapping_source: "https://www.ebi.ac.uk/chebi/"
   mapping_cardinality: null
   cardinality_scope: null
-  mapping_tool: "pysec2pri"
+  mapping_tool: "https://pypi.org/project/pysec2pri"
   mapping_tool_id: null
   mapping_tool_version: null
   mapping_date: null
