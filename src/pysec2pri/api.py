@@ -628,9 +628,6 @@ def combine_mapping_sets(
 
 # Output helpers
 
-#: Directory used for generated files when no explicit output path is given.
-DEFAULT_OUTPUT_DIR = Path("target")
-
 _FORMAT_EXTENSIONS: dict[str, str] = {
     "rdf": ".ttl",
     "owl": "_owl.ttl",
@@ -668,8 +665,7 @@ def save(
             ``name2synonym``, ``label_sec2pri``, ``pri_labels``,
             ``rdf``, ``json``, ``owl``, or ``all``.
         output: Explicit output path or directory.  When ``None``, a
-            default name derived from *base_name* is written under
-            :data:`DEFAULT_OUTPUT_DIR`.
+            default name derived from *base_name* is used.
         base_name: Stem used to derive file names, e.g. ``"hgnc_2026-04-07"``.
 
     Returns:
@@ -679,7 +675,7 @@ def save(
 
     if output_format == "all":
         if out is None:
-            out_dir = DEFAULT_OUTPUT_DIR / base_name
+            out_dir = Path(base_name)
         elif out.suffix:
             out_dir = out.parent / base_name
         else:
@@ -689,13 +685,12 @@ def save(
 
     # Resolve output path, then delegate to the mapping-set method
     if out is None:
-        out_path = DEFAULT_OUTPUT_DIR / _output_filename(base_name, output_format)
+        out_path = _output_filename(base_name, output_format)
     elif out.is_dir():
         out_path = out / _output_filename(base_name, output_format).name
     else:
         out_path = out
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     return mapping_set.save(output_format, out_path)
 
 

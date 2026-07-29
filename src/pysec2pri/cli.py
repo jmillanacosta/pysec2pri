@@ -747,7 +747,7 @@ def ambiguous_cmd(
     cfg_id, kind = match
     ms = api._generate(cfg_id, kind, version=data_version, show_progress=not no_progress)
 
-    from pysec2pri.api import DEFAULT_OUTPUT_DIR, find_ambiguous
+    from pysec2pri.api import find_ambiguous
 
     click.echo("Detecting ambiguous identifiers...")
     amb = find_ambiguous(ms)
@@ -756,7 +756,7 @@ def ambiguous_cmd(
         click.echo("No ambiguous identifiers found.")
         return
     click.echo(f"Found {count} ambiguous identifier(s).")
-    dest = output or (DEFAULT_OUTPUT_DIR / f"{datasource}_ambiguous.sssom.tsv")
+    dest = output or Path(f"{datasource}_ambiguous.sssom.tsv")
     amb.save("sssom", dest)
     click.echo(f"Wrote ambiguous mappings -> {dest}")
 
