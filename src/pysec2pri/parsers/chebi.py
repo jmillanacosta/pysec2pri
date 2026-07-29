@@ -365,7 +365,7 @@ class ChEBIParser(BaseParser):
         Returns:
             ``dict[name, set[CHEBI:<id>]]``
         """
-        cols = ["id", "name", "stars"] if self.subset == "3star" else ["id", "name"]
+        cols = ["id", "ascii_name", "stars"] if self.subset == "3star" else ["id", "ascii_name"]
         df = pl.read_csv(
             compounds_path,
             separator="\t",
@@ -375,7 +375,7 @@ class ChEBIParser(BaseParser):
         if self.subset == "3star" and "stars" in df.columns:
             df = df.filter(pl.col("stars") == 3)
         result: dict[str, set[str]] = {}
-        for chebi_id, name in df.select(["id", "name"]).drop_nulls().rows():
+        for chebi_id, name in df.select(["id", "ascii_name"]).drop_nulls().rows():
             result.setdefault(str(name), set()).add(f"CHEBI:{chebi_id}")
         return result
 
@@ -485,33 +485,34 @@ def _parse_names_tsv(
             "Pass the path to compounds.tsv."
         )
 
-    # Load canonical names from compounds.tsv (ChEBI primary label)
-    cpd_cols = ["id", "name", "stars"] if subset == "3star" else ["id", "name"]
+    # Load canonical names from compounds.tsv (ChEBI primary label). Use
+    # ascii_name.
+    cpd_cols = ["id", "ascii_name", "stars"] if subset == "3star" else ["id", "ascii_name"]
     cpd_df = pl.read_csv(
         compounds_path,
         separator="\t",
         columns=cpd_cols,
-        schema_overrides={"id": pl.Int64, "name": pl.Utf8},
+        schema_overrides={"id": pl.Int64, "ascii_name": pl.Utf8},
         null_values=[""],
     )
     if subset == "3star" and "stars" in cpd_df.columns:
         cpd_df = cpd_df.filter(pl.col("stars") == 3)
 
-    # Rename for the join: compounds.id : compound_id, compounds.name : primary_name
+    # Rename for the join: compounds.id : compound_id, compounds.ascii_name : primary_name
     cpd_df = cpd_df.select(
         [
             pl.col("id").alias("compound_id"),
-            pl.col("name").alias("primary_name"),
+            pl.col("ascii_name").alias("primary_name"),
         ]
     ).drop_nulls()
 
-    # Load all alternative name entries from names.tsv
+    # Load all alternative name entries from names.tsv (ascii_name)
     df = pl.read_csv(
         names_path,
         separator="\t",
-        columns=["compound_id", "name"],
-        schema_overrides={"compound_id": pl.Int64, "name": pl.Utf8},
-    )
+        columns=["compound_id", "ascii_name"],
+        schema_overrides={"compound_id": pl.Int64, "ascii_name": pl.Utf8},
+    ).rename({"ascii_name": "name"})
 
     # Restrict to 3-star compounds (those present in cpd_df after star filtering)
     if subset == "3star":
