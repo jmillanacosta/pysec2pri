@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources as _importlib_resources
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from mapkgsutils.parsers.base import (
     WITHDRAWN_ENTRY,
@@ -366,6 +366,34 @@ class BaseParser(_MapkgBaseParser):
         if not template:
             return version
         return str(template).replace("{version}", str(version))
+
+    def create_mapping_set(self, *args: Any, **kwargs: Any) -> BaseMappingSet:
+        """Create a mapping set, supplying the taxon value for organism-scoped runs.
+
+        The ``taxon``/``dcterms:subject`` extension slot itself is declared
+        statically in each organism-scoped datasource's
+        ``mappingset.extension_definitions`` config and picked up generically
+        by :meth:`mapkgsutils.parsers.base.BaseParser.create_mapping_set`.
+        ``dcterms:subject`` (rather than a taxon-specific OBO relation like
+        RO:0002162) is deliberately less informative but domain/range-correct:
+        RO's "in taxon" is defined for biological entities/processes, not for
+        an SSSOM mapping set itself. Only the per-run *value* -- which config
+        can't supply on its own -- is added here, from one of two sources:
+
+        - ``self.species``, for datasources with a species selector
+          (Ensembl/NCBI/VGNC) -- skipped for :data:`ALL_SPECIES` runs, which
+          combine many species into one file and so have no single taxon.
+        - ``mappingset.taxon_id`` in config, for mono-species datasources
+          with no species selector at all (e.g. HGNC/HMDB are human-only).
+        """
+        species = getattr(self, "species", None)
+        if species is not None and str(species) != ALL_SPECIES:
+            kwargs.setdefault("extension_metadata", {"taxon": f"NCBITaxon:{species}"})
+        elif species is None:
+            taxon_id = self.get_mappingset_metadata().get("taxon_id")
+            if taxon_id:
+                kwargs.setdefault("extension_metadata", {"taxon": f"NCBITaxon:{taxon_id}"})
+        return super().create_mapping_set(*args, **kwargs)
 
 
 __all__ = [
