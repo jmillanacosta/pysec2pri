@@ -51,6 +51,7 @@ class HGNCParser(GeneNomenclatureParser):
     id_column: ClassVar[str] = HGNC_ID
     withdrawn_label_column: ClassVar[str] = SYMBOL
     merged_patterns: ClassVar[list[str]] = MERGED_INFO_PATTERNS
+    species: ClassVar[str] = "9606"
 
     def __init__(
         self,

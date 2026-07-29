@@ -62,7 +62,6 @@ mappingset:
     - slot_name: "taxon"
       property: "dcterms:subject"
       type_hint: "linkml:Uriorcurie"
-  taxon_id: "9606"
 
 mapping:
   record_id: "sec2pri:hmdb_metabolites/" # TODO set namespace, better schema logic to assign namespace
