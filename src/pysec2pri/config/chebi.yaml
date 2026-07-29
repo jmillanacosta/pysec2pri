@@ -3,7 +3,7 @@ config_id: "chebi"
 datasource_id: "chebi"
 name: "ChEBI"
 parser_class: "ChEBIParser"
-# Splits this source into diffeent datasets
+# Splits this source into different datasets
 products: ["subset"]
 prefix: "CHEBI"
 curie_base_url: "http://purl.obolibrary.org/obo/CHEBI_"
