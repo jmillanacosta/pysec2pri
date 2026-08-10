@@ -170,4 +170,3 @@ input_file_types:
 
 source: "HGNC database"
 homepage: "https://www.genenames.org/"
-data_license: "https://creativecommons.org/publicdomain/zero/1.0/"

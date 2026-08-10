@@ -139,7 +139,11 @@ species:
     99883: { token: "99883", label: "Spotted green pufferfish" }
     109461: { token: "109461", label: "Honeybee mite" }
     746128: { token: "746128", label: "Aspergillus fumigatus" }
-    2697049: { token: "2697049", label: "Severe acute respiratory syndrome coronavirus 2" }
+    2697049:
+      {
+        token: "2697049",
+        label: "Severe acute respiratory syndrome coronavirus 2",
+      }
 
 mappingset:
   sssom_version: null
@@ -279,7 +283,6 @@ input_file_types:
 
 source: "NCBI Gene"
 homepage: "https://www.ncbi.nlm.nih.gov/gene"
-data_license: "https://www.ncbi.nlm.nih.gov/home/about/policies/"
 
 # Suggested cross-reference crosswalk source(s) for disambiguation context
 # (see mapkgsutils.context.ContextSpec, kind="xref")

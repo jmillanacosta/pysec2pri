@@ -38,11 +38,13 @@ mappingset:
   creator_id:
     - "orcid:0000-0002-4166-7093"
     - "orcid:0000-0002-4904-3269"
+    - "orcid:0000-0001-7542-0286"
   creator_label:
     - "Javier Millán Acosta"
     - "Tooba Abbassi-Daloii"
+    - "Egon Willighagen"
   comment: "Generated with pysec2pri"
-  license: "https://creativecommons.org/publicdomain/zero/1.0/"
+  license: "https://creativecommons.org/licenses/by/4.0/"
   subject_type: "CHEBI:24431"
   subject_source: "https://www.ebi.ac.uk/chebi/"
   subject_source_version: null
@@ -187,5 +189,4 @@ mapping_sets:
     formats: [pri_labels]
 source: "ChEBI database"
 homepage: "https://www.ebi.ac.uk/chebi/"
-data_license: "https://creativecommons.org/licenses/by/4.0/"
 id_pattern: "^CHEBI:\\d+$"

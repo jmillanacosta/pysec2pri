@@ -135,9 +135,7 @@ mapping_sets:
 input_file_types:
   - sparql
 
-# Entity types this datasource publishes, each with its redirect query. The
-# keys are the `--entity-type` choices; a test variant is the same stem with a
-# `_test` suffix.
+# Entity types
 queries:
   chemicals: "chemical_redirects.rq"
   genes: "gene_redirects.rq"
@@ -145,4 +143,3 @@ queries:
 
 source: "Wikidata"
 homepage: "https://www.wikidata.org/"
-data_license: "https://creativecommons.org/publicdomain/zero/1.0/"
