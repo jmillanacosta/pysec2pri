@@ -18,7 +18,7 @@ import io
 import re
 import zipfile
 from pathlib import Path
-from typing import IO, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, ClassVar
 
 import defusedxml.ElementTree as DefusedET
 
@@ -46,6 +46,7 @@ class HMDBParser(BaseParser):
     # Subclasses declare their own datasource_name so each reads
     # their YAML config file (hmdb_metabolites.yaml / hmdb_proteins.yaml).
     datasource_name: str  # must be set by subclass
+    species: ClassVar[str] = "9606"
 
     # Internal helpers
 

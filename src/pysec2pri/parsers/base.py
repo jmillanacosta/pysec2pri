@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources as _importlib_resources
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from mapkgsutils.parsers.base import (
     WITHDRAWN_ENTRY,
@@ -366,6 +366,13 @@ class BaseParser(_MapkgBaseParser):
         if not template:
             return version
         return str(template).replace("{version}", str(version))
+
+    def create_mapping_set(self, *args: Any, **kwargs: Any) -> BaseMappingSet:
+        """Create a mapping set, tagging it with the run's taxon."""
+        species = getattr(self, "species", None)
+        if species is not None and str(species) != ALL_SPECIES:
+            kwargs.setdefault("extension_metadata", {"taxon": f"NCBITaxon:{species}"})
+        return super().create_mapping_set(*args, **kwargs)
 
 
 __all__ = [
