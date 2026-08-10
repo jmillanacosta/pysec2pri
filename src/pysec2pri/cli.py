@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
-from mapkgsutils.parsers.config import get_datasource_config, product_dimensions
+from mapkgsutils.parsers.config import (
+    get_datasource_config,
+    product_dimensions,
+    product_slug_values,
+)
 
 if TYPE_CHECKING:
     from pysec2pri.parsers.base import BaseMappingSet
@@ -423,13 +427,10 @@ def _make_generate_cmd(
             **extra_kwargs,
         )
         prefix = f"{config_id}_{kind}"
-        species = extra_kwargs.get("species")
-        if species is not None:
-            prefix = f"{prefix}_{species}"
+        if slug_values := product_slug_values(cfg, **extra_kwargs):
+            prefix = f"{prefix}_{'_'.join(slug_values)}"
         _, base = _version_base(ms, data_version, prefix)
         if extra_kwargs.get("consolidate"):
-            # A consolidated walk is a distinct data product at the same
-            # release, so it must not overwrite the plain run's output.
             base = f"{base}_consolidate"
         _emit(ms, output_format, output, base)
 
