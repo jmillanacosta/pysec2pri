@@ -3,9 +3,21 @@ config_id: "uniprot"
 datasource_id: "uniprot"
 name: "UniProt"
 parser_class: "UniProtParser"
+products: ["subset"]
 prefix: "UniProtKB"
 curie_base_url: "http://identifiers.org/uniprot/"
 entity_types: ["proteins"]
+
+# Reviewed (Swiss-Prot) vs unreviewed (TrEMBL) primary accessions.
+# Note: the TrEMBL delac file is too large and probably not that relevant,
+# so for now the package does not retrieve deletions for TrEMBL.
+subset:
+  default: all
+  available:
+    all: { label: "All (Swiss-Prot + TrEMBL primary ACs; deletions: Swiss-Prot only)" }
+    swissprot: { label: "Reviewed (Swiss-Prot primary ACs only)" }
+    trembl: { label: "Unreviewed (TrEMBL primary ACs only, no deletions)" }
+
 mappingset:
   sssom_version: null
   curie_map:
@@ -112,8 +124,7 @@ download_urls:
   sec_ac: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/sec_ac.txt"
   delac_sp: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/delac_sp.txt"
   acindex: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/acindex.txt"
-  # Legacy versioned releases expose only the docs/ subdirectory:
-  # https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/release-{version}/knowledgebase/docs/acindex.txt.gz
+  # delac_tr: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/docs/delac_tr.txt.gz"
 
 primary_file_key: "sec_ac"
 archive_url: "https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/"
@@ -126,7 +137,7 @@ mapping_sets:
     consolidate: true
     method: parse
     # download_urls key -> parameter of `method`
-    inputs: { sec_ac: input_path, delac_sp: delac_path }
+    inputs: { sec_ac: input_path, delac_sp: delac_path, acindex: acindex_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
 
   primary_ids:
@@ -155,5 +166,5 @@ xref_sources:
       refseq: "RefSeq IDs"
       uniprot: "UniProt ID(supplied by UniProt)"
     note:
-      "Source of truth for cross-references varies; for pure UniProt, supply
+      "Source of truth for cross-references varies, you can supply
       your own XrefMapping."

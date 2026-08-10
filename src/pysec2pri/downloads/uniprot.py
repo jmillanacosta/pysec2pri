@@ -81,6 +81,11 @@ class UniProtDownloader(BaseDownloader):
         return sorted(set(matches))
 
 
+def _docs_only_available(version: str) -> bool:
+    """Whether version uses docs tarball."""
+    return version >= "2019_01" or version.endswith("_01")
+
+
 def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
     """Build UniProt URLs for a specific release version.
 
@@ -154,18 +159,26 @@ def urls_and_date(
         Tuple of (file-key -> URL mapping, release date or None).
     """
     if version:
+        if not _docs_only_available(version):
+            logger.warning(
+                "UniProt release %s has no per-file docs archive; sec_ac/delac_sp/",
+                version,
+            )
         urls = _get_uniprot_urls_for_version(version)
         logger.info("UniProt version %s: %s", version, urls)
         return urls, None
     return dict(config.download_urls), None
 
 
-def resolve_download_keys(version: str | None, keys: list[str] | None) -> list[str] | None:
+def resolve_download_keys(
+    version: str | None, keys: list[str] | None, **kwargs: Any
+) -> list[str] | None:
     """Resolve download keys.
 
     Args:
         version: The version being downloaded, or ``None`` for latest.
         keys: The keys needed for the parser or ``None`` for "all".
+        **kwargs: Unused; accepted for interface uniformity.
 
     Returns:
         *keys* unchanged for the latest release; ``None`` (no filtering) for
@@ -177,7 +190,7 @@ def resolve_download_keys(version: str | None, keys: list[str] | None) -> list[s
 
 
 def extract_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
-    """Extract UniProt tar.gz and return paths to sec_ac.txt and delac_sp.txt.
+    """Extract UniProt tar.gz and return paths to its docs/ files.
 
     Args:
         tar_path: Path to the downloaded tar.gz file.
@@ -186,13 +199,13 @@ def extract_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
     Returns:
         Dictionary mapping file keys to extracted paths.
     """
+    keys_by_suffix = {"sec_ac.txt": "sec_ac", "delac_sp.txt": "delac_sp", "acindex.txt": "acindex"}
     extracted = {}
     with tarfile.open(tar_path, "r:gz") as tar:
         for member in tar.getmembers():
-            if member.name.endswith("sec_ac.txt"):
-                tar.extract(member, output_dir)
-                extracted["sec_ac"] = output_dir / member.name
-            elif member.name.endswith("delac_sp.txt"):
-                tar.extract(member, output_dir)
-                extracted["delac_sp"] = output_dir / member.name
+            for suffix, key in keys_by_suffix.items():
+                if member.name.endswith(suffix):
+                    tar.extract(member, output_dir)
+                    extracted[key] = output_dir / member.name
+                    break
     return extracted

@@ -1,8 +1,10 @@
 """UniProt file parser for secondary-to-primary identifier mappings.
 
 This parser extracts ID-to-ID mappings:
-- Secondary accessions -> primary accessions (from sec_ac.txt)
-- Deleted accessions -> sssom:NoTermFound (from delac_sp.txt)
+- Secondary accessions -> primary accessions (from sec_ac.txt), optionally
+  filtered by whether the primary is reviewed (Swiss-Prot) or not (TrEMBL)
+- Deleted accessions -> sssom:NoTermFound (from delac_sp.txt; Swiss-Prot
+  only.
 
 Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
@@ -37,52 +39,79 @@ class UniProtParser(BaseParser):
 
     datasource_name = "uniprot"
 
-    @property
-    def sec_ac_url(self) -> str:
-        """Get the sec_ac.txt download URL from config."""
-        return self.get_download_url("sec_ac") or ""
+    def __init__(
+        self,
+        version: str | None = None,
+        show_progress: bool = True,
+        subset: str | None = None,
+    ) -> None:
+        """Initialize the UniProt parser.
 
-    @property
-    def delac_url(self) -> str:
-        """Get the delac_sp.txt download URL from config."""
-        return self.get_download_url("delac_sp") or ""
+        Args:
+            version: Version/release identifier for the datasource.
+            show_progress: Whether to show progress bars during parsing.
+            subset: ``"swissprot"`` (reviewed primaries only), ``"trembl"``
+                (unreviewed primaries only, no deletions), or ``"all"``
+                (default; unfiltered, but still no TrEMBL deletions).
+        """
+        super().__init__(version=version, show_progress=show_progress)
+        if subset is None and self._config is not None:
+            subset = self._config.default_subset()
+        self.subset = subset
 
     def parse(
         self,
         input_path: Path | str | None = None,
         delac_path: Path | str | None = None,
+        acindex_path: Path | str | None = None,
     ) -> BaseMappingSet:
         """Parse UniProt mapping files into an IdMappingSet.
 
         Args:
             input_path: Path to sec_ac.txt (secondary accessions file).
-            delac_path: Path to delac_sp.txt (deleted accessions file).
+            delac_path: Path to delac_sp.txt (deleted Swiss-Prot accessions).
+            acindex_path: Path to acindex.txt (current Swiss-Prot
+                accessions), used to split by reviewed/unreviewed primary.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
         """
-        # Resolve version
         self._resolve_version(
             Path(input_path)
             if input_path is not None
             else (Path(delac_path) if delac_path is not None else None)
         )
 
+        keep_reviewed = {"swissprot": True, "trembl": False}.get(self.subset or "")
+        reviewed_acs = (
+            self._extract_primary_ids_from_acindex(Path(acindex_path))
+            if acindex_path is not None and keep_reviewed is not None
+            else None
+        )
+
         mappings: list[Mapping] = []
 
         if input_path is not None:
-            mappings.extend(self._parse_sec_ac(Path(input_path)))
+            mappings.extend(self._parse_sec_ac(Path(input_path), reviewed_acs, keep_reviewed))
 
-        if delac_path is not None:
+        if self.subset != "trembl" and delac_path is not None:
             mappings.extend(self._parse_delac(Path(delac_path)))
 
         return self.create_mapping_set(mappings)
 
-    def _parse_sec_ac(self, file_path: Path) -> list[Mapping]:
+    def _parse_sec_ac(
+        self,
+        file_path: Path,
+        reviewed_acs: set[str] | None = None,
+        keep_reviewed: bool | None = None,
+    ) -> list[Mapping]:
         """Parse sec_ac.txt for secondary -> primary accession mappings.
 
         Args:
             file_path: Path to sec_ac.txt file.
+            reviewed_acs: Reviewed (Swiss-Prot) primary accessions, from
+                ``acindex.txt``.
+            keep_reviewed: Keep rows reviewed if ``True``, unreviewed if ``False``.
 
         Returns:
             List of SSSOM Mapping objects.
@@ -138,6 +167,10 @@ class UniProtParser(BaseParser):
             )
             .collect()
         )
+
+        if reviewed_acs is not None:
+            is_reviewed = pl.col("object_id").is_in(reviewed_acs)
+            df = df.filter(is_reviewed if keep_reviewed else ~is_reviewed)
 
         if df.is_empty():
             return []
@@ -261,14 +294,10 @@ class UniProtParser(BaseParser):
         """Return a mapping set containing the full list of current UniProt primary ACs.
 
         Parses ``acindex.txt`` (or a gzip-compressed variant) to extract every
-        accession number that currently appears in UniProtKB/Swiss-Prot.  The
-        file lists one AC per row (after the ``__________`` separator line);
-        only the first whitespace-delimited token of each data line is taken.
+        accession number that currently appears in UniProtKB/Swiss-Prot.
 
-        For versioned (legacy) releases the file can be found at::
-
-            https://ftp.uniprot.org/pub/databases/uniprot/previous_releases/
-            release-{version}/knowledgebase/docs/acindex.txt.gz
+        For versioned (archived) releases, the file is extracted from
+        ``knowledgebase-docs-only{version}.tar.gz`` (see :mod:`pysec2pri.downloads.uniprot`).
 
         Args:
             acindex_path: Local path to ``acindex.txt`` (plain or ``.gz``).
