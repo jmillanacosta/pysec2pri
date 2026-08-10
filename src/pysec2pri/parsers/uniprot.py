@@ -44,6 +44,7 @@ class UniProtParser(BaseParser):
         version: str | None = None,
         show_progress: bool = True,
         subset: str | None = None,
+        species: str | int | None = None,
     ) -> None:
         """Initialize the UniProt parser.
 
@@ -53,17 +54,22 @@ class UniProtParser(BaseParser):
             subset: ``"swissprot"`` (reviewed primaries only), ``"trembl"``
                 (unreviewed primaries only, no deletions), or ``"all"``
                 (default; unfiltered, but still no TrEMBL deletions).
+            species: NCBI taxon ID, or ``"all"``.
         """
         super().__init__(version=version, show_progress=show_progress)
         if subset is None and self._config is not None:
             subset = self._config.default_subset()
         self.subset = subset
+        if species is None and self._config is not None:
+            species = self._config.default_species()
+        self.species = str(species) if species is not None else None
 
     def parse(
         self,
         input_path: Path | str | None = None,
         delac_path: Path | str | None = None,
         acindex_path: Path | str | None = None,
+        speclist_path: Path | str | None = None,
     ) -> BaseMappingSet:
         """Parse UniProt mapping files into an IdMappingSet.
 
@@ -71,7 +77,10 @@ class UniProtParser(BaseParser):
             input_path: Path to sec_ac.txt (secondary accessions file).
             delac_path: Path to delac_sp.txt (deleted Swiss-Prot accessions).
             acindex_path: Path to acindex.txt (current Swiss-Prot
-                accessions), used to split by reviewed/unreviewed primary.
+                accessions), used to split by reviewed/unreviewed primary
+                and, combined with *speclist_path*, by species.
+            speclist_path: Path to speclist.txt (organism mnemonic -> NCBI
+                taxon ID), used when a specific species is requested.
 
         Returns:
             IdMappingSet with computed cardinalities based on IDs.
@@ -83,16 +92,34 @@ class UniProtParser(BaseParser):
         )
 
         keep_reviewed = {"swissprot": True, "trembl": False}.get(self.subset or "")
-        reviewed_acs = (
-            self._extract_primary_ids_from_acindex(Path(acindex_path))
-            if acindex_path is not None and keep_reviewed is not None
-            else None
-        )
+        wants_species = self.species not in (None, "all")
+
+        all_reviewed_acs: set[str] = set()
+        ac_to_mnemonic: dict[str, str] = {}
+        if acindex_path is not None and (keep_reviewed is not None or wants_species):
+            all_reviewed_acs, ac_to_mnemonic = self._parse_acindex(Path(acindex_path))
+        reviewed_acs = all_reviewed_acs if keep_reviewed is not None else None
+
+        species_acs: set[str] | None = None
+        if wants_species and speclist_path is not None:
+            mnemonic_to_taxon = self._parse_speclist(Path(speclist_path))
+            species_acs = {
+                ac
+                for ac, mnemonic in ac_to_mnemonic.items()
+                if mnemonic_to_taxon.get(mnemonic) == self.species
+            }
+            if keep_reviewed is not True and self.species is not None:
+                from pysec2pri.downloads.uniprot import UniProtDownloader
+
+                downloader = UniProtDownloader(show_progress=self.show_progress)
+                species_acs |= downloader.fetch_trembl_species_acs(self.species)
 
         mappings: list[Mapping] = []
 
         if input_path is not None:
-            mappings.extend(self._parse_sec_ac(Path(input_path), reviewed_acs, keep_reviewed))
+            mappings.extend(
+                self._parse_sec_ac(Path(input_path), reviewed_acs, keep_reviewed, species_acs)
+            )
 
         if self.subset != "trembl" and delac_path is not None:
             mappings.extend(self._parse_delac(Path(delac_path)))
@@ -104,6 +131,7 @@ class UniProtParser(BaseParser):
         file_path: Path,
         reviewed_acs: set[str] | None = None,
         keep_reviewed: bool | None = None,
+        species_acs: set[str] | None = None,
     ) -> list[Mapping]:
         """Parse sec_ac.txt for secondary -> primary accession mappings.
 
@@ -112,6 +140,7 @@ class UniProtParser(BaseParser):
             reviewed_acs: Reviewed (Swiss-Prot) primary accessions, from
                 ``acindex.txt``.
             keep_reviewed: Keep rows reviewed if ``True``, unreviewed if ``False``.
+            species_acs: When given, subset for species.
 
         Returns:
             List of SSSOM Mapping objects.
@@ -171,6 +200,9 @@ class UniProtParser(BaseParser):
         if reviewed_acs is not None:
             is_reviewed = pl.col("object_id").is_in(reviewed_acs)
             df = df.filter(is_reviewed if keep_reviewed else ~is_reviewed)
+
+        if species_acs is not None:
+            df = df.filter(pl.col("object_id").is_in(species_acs))
 
         if df.is_empty():
             return []
@@ -317,26 +349,24 @@ class UniProtParser(BaseParser):
         acindex_path = Path(str(acindex_path))
         self._resolve_version(acindex_path)
 
-        primary_ids = self._extract_primary_ids_from_acindex(acindex_path)
+        primary_ids = self._parse_acindex(acindex_path)[0]
         return self.create_mapping_set([], mapping_type="id", primary_ids=primary_ids)
 
-    def _extract_primary_ids_from_acindex(self, file_path: Path) -> set[str]:
-        """Parse ``acindex.txt`` and return the set of all AC numbers.
-
-        Skips the header block (everything up to and including the ``__________``
-        separator line) and extracts the first whitespace-delimited token of
-        each subsequent non-empty line.
+    def _parse_acindex(self, file_path: Path) -> tuple[set[str], dict[str, str]]:
+        """Parse ``acindex.txt``: reviewed primary ACs and each one's organism mnemonic.
 
         Args:
             file_path: Path to ``acindex.txt`` (plain or ``.gz``).
 
         Returns:
-            Set of ``UniProtKB:<AC>`` CURIEs.
+            ``(primary_ids, ac_to_mnemonic)`` map for CURIEs to their organism
+            mnemonic (e.g. ``"HUMAN"``).
         """
         import gzip
 
         opener = gzip.open if file_path.suffix == ".gz" else open
         primary_ids: set[str] = set()
+        ac_to_mnemonic: dict[str, str] = {}
         in_data = False
         with opener(file_path, "rt", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -347,10 +377,36 @@ class UniProtParser(BaseParser):
                     continue
                 if not stripped:
                     continue
-                token = stripped.split()[0]
-                if token:
-                    primary_ids.add(f"UniProtKB:{token}")
-        return primary_ids
+                ac, _, rest = stripped.partition(" ")
+                if not ac:
+                    continue
+                curie = f"UniProtKB:{ac}"
+                primary_ids.add(curie)
+                first_name = rest.strip().split(",", 1)[0].strip()
+                if "_" in first_name:
+                    ac_to_mnemonic[curie] = first_name.rsplit("_", 1)[-1]
+        return primary_ids, ac_to_mnemonic
+
+    def _parse_speclist(self, file_path: Path) -> dict[str, str]:
+        """Parse ``speclist.txt`` into ``{organism mnemonic: NCBI taxon ID}``.
+
+        Args:
+            file_path: Path to ``speclist.txt``.
+
+        Returns:
+            Dict mapping each organism mnemonic (e.g. ``"HUMAN"``) to its
+            NCBI taxon ID as a string (e.g. ``"9606"``).
+        """
+        import re
+
+        pattern = re.compile(r"^(\S+)\s+[A-Z]\s+(\d+):")
+        mnemonic_to_taxon: dict[str, str] = {}
+        with file_path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                match = pattern.match(line)
+                if match:
+                    mnemonic_to_taxon[match.group(1)] = match.group(2)
+        return mnemonic_to_taxon
 
 
 __all__ = ["UniProtParser"]

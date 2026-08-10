@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tarfile
+from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +81,57 @@ class UniProtDownloader(BaseDownloader):
         matches = re.findall(r'href="release-(\d{4}_\d{2})/', response.text)
         return sorted(set(matches))
 
+    def fetch_trembl_species_acs(self, taxon_id: str) -> set[str]:
+        """Fetch every unreviewed (TrEMBL) accession for *taxon_id* from UniProt REST API.
+
+        Args:
+            taxon_id: NCBI taxon ID, e.g. ``"9606"``.
+
+        Returns:
+            Set of ``UniProtKB:<AC>`` CURIEs.
+        """
+        if not self._config:
+            raise ValueError("UniProt config not loaded")
+        base_url: str = self._config.trembl_species_url  # type: ignore[attr-defined]
+        query: str = self._config.trembl_species_query.format(  # type: ignore[attr-defined]
+            taxon_id=taxon_id
+        )
+
+        page_size = 500
+        acs: set[str] = set()
+        with httpx.Client(timeout=30.0) as client:
+            first = client.get(
+                base_url,
+                params={"query": query, "fields": "accession", "format": "tsv", "size": page_size},
+            )
+            first.raise_for_status()
+            total = int(first.headers.get("x-total-results", "0"))
+            pages = max(-(-total // page_size), 1)
+
+            def _pages() -> Iterator[httpx.Response]:
+                response = first
+                while True:
+                    yield response
+                    next_url = response.links.get("next", {}).get("url")
+                    if not next_url:
+                        return
+                    response = client.get(next_url)
+                    response.raise_for_status()
+
+            desc = f"Fetching TrEMBL accessions for taxon {taxon_id}"
+            page_iter = _pages()
+            if self.show_progress:
+                from tqdm import tqdm
+
+                page_iter = tqdm(page_iter, desc=desc, total=pages)
+            for response in page_iter:
+                acs.update(
+                    f"UniProtKB:{line.strip()}"
+                    for line in response.text.splitlines()[1:]
+                    if line.strip()
+                )
+        return acs
+
 
 def _docs_only_available(version: str) -> bool:
     """Whether version uses docs tarball."""
@@ -138,7 +190,7 @@ def check_uniprot_release() -> ReleaseInfo:
     return ReleaseInfo(
         datasource="uniprot",
         version=version,  # e.g. "2026_01"
-        release_date=release_date,  # likely None unless you derive it elsewhere
+        release_date=release_date,
         is_new=True,
         files=dict(ALL_DATASOURCES["uniprot"].download_urls),
     )
@@ -178,14 +230,16 @@ def resolve_download_keys(
     Args:
         version: The version being downloaded, or ``None`` for latest.
         keys: The keys needed for the parser or ``None`` for "all".
-        **kwargs: Unused; accepted for interface uniformity.
+        **kwargs: Optional ``subset`` override.
 
     Returns:
-        *keys* unchanged for the latest release; ``None`` (no filtering) for
-        any explicit version.
+        *keys*, filtered by subset, for the latest release; ``None`` (no
+        filtering) for any explicit version.
     """
     if version is not None and keys is not None:
         return None
+    if keys is not None and kwargs.get("subset") == "trembl":
+        return [k for k in keys if k != "delac_sp"]
     return keys
 
 
