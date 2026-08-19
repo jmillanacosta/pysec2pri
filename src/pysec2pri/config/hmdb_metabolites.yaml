@@ -129,10 +129,19 @@ mapping_sets:
     inputs: { metabolites: input_path }
     formats: [sssom, sec2pri, pri_ids, secondary, rdf, json, owl, all]
 
+  labels:
+    method: parse_synonyms
+    inputs: { metabolites: input_path }
+    formats: [sssom, label_sec2pri, name2synonym, pri_labels, rdf, json, all]
+
   primary_ids:
     method: parse_primary_ids
     inputs: { metabolites: metabolites_path }
     formats: [pri_ids]
+  primary_labels:
+    method: parse_primary_labels
+    inputs: { metabolites: metabolites_path }
+    formats: [pri_labels]
 source: "HMDB"
 homepage: "https://hmdb.ca/"
 id_pattern: "^HMDB\\d+$"

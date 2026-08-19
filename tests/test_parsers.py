@@ -232,6 +232,24 @@ class TestHMDBParsers:
         # HMDBP00003 has no secondary accessions.
         assert "HMDBP:HMDBP00003" not in subjects
 
+    def test_metabolites_parse_synonyms_direction(self, hmdb_xml_path: Path) -> None:
+        """Synonym mappings are sec:pri: synonym is subject, primary name is object."""
+        result = HMDBMetaboliteParser(show_progress=False).parse_synonyms(hmdb_xml_path)
+        mappings = result.mappings or []
+        assert len(mappings) > 0
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        assert {"1-MHis", "L-1-Methylhistidine"} <= subject_labels
+        assert "1-Methylhistidine" in object_labels
+        assert "1-Methylhistidine" not in subject_labels
+        assert ("HMDB:HMDB0000003", "2-Ketobutyric acid") in result.to_pri_labels()
+
+    def test_proteins_parse_synonyms_no_synonyms_block(self, hmdb_proteins_xml_path: Path) -> None:
+        """Records without a synonyms block still contribute a primary label, no rows."""
+        result = HMDBProteinParser(show_progress=False).parse_synonyms(hmdb_proteins_xml_path)
+        assert (result.mappings or []) == []
+        assert ("HMDBP:HMDBP00001", "Alpha-1-antitrypsin") in result.to_pri_labels()
+
 
 class TestHGNCParser:
     """Tests for the HGNC parser."""
