@@ -43,7 +43,6 @@ mappingset:
     - "Javier Millán Acosta"
     - "Tooba Abbassi-Daloii"
     - "Egon Willighagen"
-  comment: "Generated with pysec2pri"
   license: "https://creativecommons.org/licenses/by/4.0/"
   subject_type: "CHEBI:24431"
   subject_source: "https://www.ebi.ac.uk/chebi/"
@@ -120,7 +119,6 @@ mapping:
   see_also: "https://github.com/sec2pri/pysec2pri"
   issue_tracker: "https://github.com/sec2pri/pysec2pri/issues"
   other: null
-  comment: "Generated with pysec2pri"
 # Archive URL for finding releases (current, TSV-era archive)
 archive_url: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/"
 version_iri: "https://ftp.ebi.ac.uk/pub/databases/chebi/archive/rel{version}/"
