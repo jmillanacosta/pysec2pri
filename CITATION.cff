@@ -10,6 +10,6 @@ authors:
     orcid: "https://orcid.org/0000-0001-8449-1318"
   - name: "Egon Willighagen"
     orcid: "https://orcid.org/0000-0001-7542-0286"
-version: 0.3.12
+version: 0.4.0-dev
 doi:
 url: "https://github.com/sec2pri/pysec2pri"
