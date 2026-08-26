@@ -1,22 +1,17 @@
 """Ensembl core flat-file parser for secondary-to-primary gene identifier mappings.
 
-Reads the MySQL flat-file dumps Ensembl publishes per release/species:
+Reads the MySQL flat-file dumps Ensembl for each release/species pair:
 
 - ``stable_id_event.txt.gz``: cumulative old (secondary) -> new (primary)
-  stable-ID history. Each release's table already holds the *entire* history
-  up to that release, so one release's mappings describe the full state of
-  Ensembl at that point in time (no cross-release chain resolution needed
-  here -- :mod:`pysec2pri.consolidate` handles cross-release temporality).
+  stable-ID history.
 - ``mapping_session.txt.gz``: maps each ``mapping_session_id`` to the
-  ``created`` timestamp used for the per-row ``mapping_date``.
+  ``created`` timestamp used for Mapping ``mapping_date``.
 - ``gene.txt.gz`` / ``xref.txt.gz`` / ``external_synonym.txt.gz``: the
-  current gene set, its display labels, and symbol synonyms.
+  current entries and label (synonyms).
 
 This parser extracts:
 1. ID-to-ID mappings: retired/old Ensembl gene IDs -> current Ensembl gene IDs
 2. Label-to-label mappings: gene symbol synonyms -> current display label
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
 
 from __future__ import annotations
@@ -46,7 +41,6 @@ _STABLE_ID_EVENT_COLUMNS = [
     "new_version",
     "mapping_session_id",
     "type",
-    "score",
 ]
 _MAPPING_SESSION_COLUMNS = [
     "mapping_session_id",
@@ -88,14 +82,12 @@ _XREF_COLUMNS = [
 ]
 _EXTERNAL_SYNONYM_COLUMNS = ["xref_id", "synonym"]
 
-# Explicit dtypes where the natural column type (e.g. stable_id_event.score,
-# mostly 0 with rare floats) would otherwise be mis-inferred from a sample.
+# Explicit dtypes.
 _DType = type[pl.DataType]
 _STABLE_ID_EVENT_DTYPES: dict[str, _DType] = {
     "old_version": pl.Int64,
     "new_version": pl.Int64,
     "mapping_session_id": pl.Int64,
-    "score": pl.Float64,
 }
 _GENE_DTYPES: dict[str, _DType] = {
     "display_xref_id": pl.Int64,
@@ -186,10 +178,6 @@ def _load_session_meta(
 class EnsemblParser(BaseParser):
     """Parser for Ensembl core flat-file dumps using Polars.
 
-    Each release's ``stable_id_event`` table is cumulative, so a single
-    parse describes the *whole state* of Ensembl gene IDs at that release
-    (no chain-walking across releases).
-
     Returns:
     - IdMappingSet for ID-to-ID mappings (retired Ensembl gene IDs)
     - LabelMappingSet for symbol mappings (external gene synonyms)
@@ -218,9 +206,6 @@ class EnsemblParser(BaseParser):
 
     def _product_slug(self, **overrides: Any) -> str | None:
         """Species slug, suffixed with ``consolidate`` for label-history runs.
-
-        Label history is a distinct data product at the same release/species,
-        so it gets an IRI segment.
 
         Args:
             **overrides: Forwarded to the base implementation.
@@ -267,10 +252,6 @@ class EnsemblParser(BaseParser):
         external_synonym_path: Path | str | None = None,
     ) -> BaseMappingSet:
         """Parse external gene synonyms into a LabelMappingSet.
-
-        A release's files state a gene's *current* symbol and its synonyms, but
-        not the symbols it previously had, so a single release yields alias
-        mappings only. Renames are recovered by consolidating across releases.
 
         Args:
             gene_path: Path to ``gene.txt``.
@@ -418,7 +399,7 @@ class EnsemblParser(BaseParser):
             old_id = row.get("old_stable_id")
             new_id = row.get("new_stable_id")
 
-            # No old (secondary) ID: a brand-new gene, not a sec->pri mapping.
+            # No old (secondary) ID: a new entry.
             # old == new: not an ID change.
             if not old_id or old_id == new_id:
                 continue
@@ -432,7 +413,6 @@ class EnsemblParser(BaseParser):
                 self._stable_id_event_row(
                     old_id=old_id,
                     new_id=new_id,
-                    score=row.get("score"),
                     mapping_date=date_by_session.get(session_id),
                     old_assembly=old_assembly,
                     new_assembly=new_assembly,
@@ -449,7 +429,6 @@ class EnsemblParser(BaseParser):
         *,
         old_id: str,
         new_id: str | None,
-        score: object,
         mapping_date: str | None,
         old_assembly: str | None,
         new_assembly: str | None,
@@ -457,16 +436,9 @@ class EnsemblParser(BaseParser):
     ) -> dict[str, Any]:
         """Build one ``stable_id_event`` mapping row (a retirement or a rename).
 
-        ``subject_source_version``/``object_source_version`` carry the
-        analyzed release (set at the mapping-set level, same as every other
-        datasource); they don't carry genome build. When a rename spans an
-        assembly change, that's noted in ``comment`` instead, so it doesn't
-        compete with the harmonized source-version semantics.
-
         Args:
             old_id: Bare old stable ID (the secondary).
             new_id: Bare new stable ID, or falsy for a retirement.
-            score: ``stable_id_event.score`` cell (used as confidence).
             mapping_date: Resolved per-row mapping date, if any.
             old_assembly: Build the old ID belonged to, if known.
             new_assembly: Build the new ID belongs to, if known.
@@ -492,8 +464,6 @@ class EnsemblParser(BaseParser):
             "predicate_label": m_meta.get("predicate_label"),
             "mapping_date": mapping_date,
         }
-        if score and float(score) > 0:  # type: ignore
-            fields["confidence"] = float(score)  # type: ignore
         if old_assembly and new_assembly and old_assembly != new_assembly:
             fields["comment"] = f"Assembly changed from {old_assembly} to {new_assembly}."
         return fields
@@ -505,10 +475,6 @@ class EnsemblParser(BaseParser):
         external_synonym_path: Path,
     ) -> list[Mapping]:
         """Parse ``external_synonym`` joined through genes' display xref.
-
-        Only synonyms attached to the *same* xref a gene displays as its
-        canonical label are picked up (there is no ``object_xref`` table in
-        the required input list to resolve arbitrary gene<->xref links).
 
         Args:
             gene_path: Path to ``gene.txt``.
@@ -613,11 +579,6 @@ class EnsemblParser(BaseParser):
         self, gene_path: Path | str, xref_path: Path | str
     ) -> dict[str, str]:
         """Return ``{bare stable_id -> current display label}`` for every current gene.
-
-        Unlike :meth:`_extract_primary_labels` (keyed by label, for ambiguity
-        detection and ``to_pri_labels()``), this is keyed by gene -- the
-        natural shape for diffing one release's label snapshot against the
-        next (see :func:`pysec2pri.consolidate.build_label_history`).
 
         Args:
             gene_path: Path to ``gene.txt``.

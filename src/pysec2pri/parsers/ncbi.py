@@ -3,8 +3,6 @@
 This parser extracts:
 1. ID-to-ID mappings: discontinued Gene IDs -> current Gene IDs
 2. Label-to-label mappings: gene symbol synonyms -> current symbols
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
 
 from __future__ import annotations

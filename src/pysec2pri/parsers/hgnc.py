@@ -3,8 +3,6 @@
 This parser extracts:
 1. ID-to-ID mappings: withdrawn/merged HGNC IDs -> current HGNC IDs
 2. Label-to-label mappings: previous/alias labels -> current labels
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
 
 from __future__ import annotations
@@ -51,6 +49,7 @@ class HGNCParser(GeneNomenclatureParser):
     id_column: ClassVar[str] = HGNC_ID
     withdrawn_label_column: ClassVar[str] = SYMBOL
     merged_patterns: ClassVar[list[str]] = MERGED_INFO_PATTERNS
+    species: ClassVar[str] = "9606"
 
     def __init__(
         self,

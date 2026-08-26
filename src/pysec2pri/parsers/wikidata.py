@@ -2,8 +2,6 @@
 
 This parser extracts ID-to-ID mappings for chemicals, genes, and proteins
 from Wikidata via SPARQL queries.
-
-Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
 
 from __future__ import annotations
@@ -335,7 +333,7 @@ class WikidataParser(BaseParser):
         m_meta = self.get_mapping_metadata()
 
         fixed = {
-            "predicate_id": m_meta.get("predicate_id", "oboInOwl:consider"),
+            "predicate_id": m_meta["predicate_id"],
             "predicate_label": m_meta.get("predicate_label"),
             "mapping_justification": m_meta.get(
                 "mapping_justification",

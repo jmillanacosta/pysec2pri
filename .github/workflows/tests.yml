@@ -10,9 +10,9 @@ permissions: {}
 
 on:
   push:
-    branches: [main]
+  #  branches: [main]
   pull_request:
-    branches: [main]
+  #  branches: [main]
 
 jobs:
   lint:
@@ -22,9 +22,10 @@ jobs:
       # this is the only permission this job requires, so keep it to the least privilege
       # i.e., not to issues, discussions, actions, etc.
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.14", "3.10"]
         tox-command: ["lint", "pyroma", "mypy"]
     steps:
@@ -78,7 +79,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.14", "3.10"]
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1

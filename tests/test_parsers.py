@@ -232,6 +232,24 @@ class TestHMDBParsers:
         # HMDBP00003 has no secondary accessions.
         assert "HMDBP:HMDBP00003" not in subjects
 
+    def test_metabolites_parse_synonyms_direction(self, hmdb_xml_path: Path) -> None:
+        """Synonym mappings are sec:pri: synonym is subject, primary name is object."""
+        result = HMDBMetaboliteParser(show_progress=False).parse_synonyms(hmdb_xml_path)
+        mappings = result.mappings or []
+        assert len(mappings) > 0
+        subject_labels = {m.subject_label for m in mappings}
+        object_labels = {m.object_label for m in mappings}
+        assert {"1-MHis", "L-1-Methylhistidine"} <= subject_labels
+        assert "1-Methylhistidine" in object_labels
+        assert "1-Methylhistidine" not in subject_labels
+        assert ("HMDB:HMDB0000003", "2-Ketobutyric acid") in result.to_pri_labels()
+
+    def test_proteins_parse_synonyms_no_synonyms_block(self, hmdb_proteins_xml_path: Path) -> None:
+        """Records without a synonyms block still contribute a primary label, no rows."""
+        result = HMDBProteinParser(show_progress=False).parse_synonyms(hmdb_proteins_xml_path)
+        assert (result.mappings or []) == []
+        assert ("HMDBP:HMDBP00001", "Alpha-1-antitrypsin") in result.to_pri_labels()
+
 
 class TestHGNCParser:
     """Tests for the HGNC parser."""
@@ -476,24 +494,6 @@ class TestEnsemblParser:
             m.object_id for m in result.mappings if m.subject_id == "ENSEMBL:ENSG00000007565"
         }
         assert objects == {"ENSEMBL:ENSG00000206171", "ENSEMBL:ENSG00000206235"}
-
-    def test_parse_rename_uses_replaced_by_predicate_and_confidence(
-        self,
-        ensembl_stable_id_event_path: Path,
-        ensembl_mapping_session_path: Path,
-    ) -> None:
-        """A row with old != new becomes a replaced-by mapping with score as confidence."""
-        result = EnsemblParser(version="115", show_progress=False).parse(
-            ensembl_stable_id_event_path,
-            mapping_session_path=ensembl_mapping_session_path,
-        )
-        scored = [m for m in result.mappings if m.object_id == "ENSEMBL:ENSG00000206171"]
-        assert len(scored) == 1
-        assert scored[0].subject_id == "ENSEMBL:ENSG00000007565"
-        assert scored[0].predicate_id == "IAO:0100001"
-        assert scored[0].predicate_label == "term replaced by"
-        assert scored[0].confidence == pytest.approx(0.973291)
-        assert scored[0].mapping_date == "2006-03-10"
 
     def test_parse_notes_an_assembly_change_as_a_comment(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tarfile
+from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +81,62 @@ class UniProtDownloader(BaseDownloader):
         matches = re.findall(r'href="release-(\d{4}_\d{2})/', response.text)
         return sorted(set(matches))
 
+    def fetch_trembl_species_acs(self, taxon_id: str) -> set[str]:
+        """Fetch every unreviewed (TrEMBL) accession for *taxon_id* from UniProt REST API.
+
+        Args:
+            taxon_id: NCBI taxon ID, e.g. ``"9606"``.
+
+        Returns:
+            Set of ``UniProtKB:<AC>`` CURIEs.
+        """
+        if not self._config:
+            raise ValueError("UniProt config not loaded")
+        base_url: str = self._config.trembl_species_url  # type: ignore[attr-defined]
+        query: str = self._config.trembl_species_query.format(  # type: ignore[attr-defined]
+            taxon_id=taxon_id
+        )
+
+        page_size = 500
+        acs: set[str] = set()
+        with httpx.Client(timeout=30.0) as client:
+            first = client.get(
+                base_url,
+                params={"query": query, "fields": "accession", "format": "tsv", "size": page_size},
+            )
+            first.raise_for_status()
+            total = int(first.headers.get("x-total-results", "0"))
+            pages = max(-(-total // page_size), 1)
+
+            def _pages() -> Iterator[httpx.Response]:
+                response = first
+                while True:
+                    yield response
+                    next_url = response.links.get("next", {}).get("url")
+                    if not next_url:
+                        return
+                    response = client.get(next_url)
+                    response.raise_for_status()
+
+            desc = f"Fetching TrEMBL accessions for taxon {taxon_id}"
+            page_iter = _pages()
+            if self.show_progress:
+                from tqdm import tqdm
+
+                page_iter = tqdm(page_iter, desc=desc, total=pages)
+            for response in page_iter:
+                acs.update(
+                    f"UniProtKB:{line.strip()}"
+                    for line in response.text.splitlines()[1:]
+                    if line.strip()
+                )
+        return acs
+
+
+def _docs_only_available(version: str) -> bool:
+    """Whether version uses docs tarball."""
+    return version >= "2019_01" or version.endswith("_01")
+
 
 def _get_uniprot_urls_for_version(version: str) -> dict[str, str]:
     """Build UniProt URLs for a specific release version.
@@ -133,7 +190,7 @@ def check_uniprot_release() -> ReleaseInfo:
     return ReleaseInfo(
         datasource="uniprot",
         version=version,  # e.g. "2026_01"
-        release_date=release_date,  # likely None unless you derive it elsewhere
+        release_date=release_date,
         is_new=True,
         files=dict(ALL_DATASOURCES["uniprot"].download_urls),
     )
@@ -154,30 +211,40 @@ def urls_and_date(
         Tuple of (file-key -> URL mapping, release date or None).
     """
     if version:
+        if not _docs_only_available(version):
+            logger.warning(
+                "UniProt release %s has no per-file docs archive; sec_ac/delac_sp/",
+                version,
+            )
         urls = _get_uniprot_urls_for_version(version)
         logger.info("UniProt version %s: %s", version, urls)
         return urls, None
     return dict(config.download_urls), None
 
 
-def resolve_download_keys(version: str | None, keys: list[str] | None) -> list[str] | None:
+def resolve_download_keys(
+    version: str | None, keys: list[str] | None, **kwargs: Any
+) -> list[str] | None:
     """Resolve download keys.
 
     Args:
         version: The version being downloaded, or ``None`` for latest.
         keys: The keys needed for the parser or ``None`` for "all".
+        **kwargs: Optional ``subset`` override.
 
     Returns:
-        *keys* unchanged for the latest release; ``None`` (no filtering) for
-        any explicit version.
+        *keys*, filtered by subset, for the latest release; ``None`` (no
+        filtering) for any explicit version.
     """
     if version is not None and keys is not None:
         return None
+    if keys is not None and kwargs.get("subset") == "trembl":
+        return [k for k in keys if k != "delac_sp"]
     return keys
 
 
 def extract_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
-    """Extract UniProt tar.gz and return paths to sec_ac.txt and delac_sp.txt.
+    """Extract UniProt tar.gz and return paths to its docs/ files.
 
     Args:
         tar_path: Path to the downloaded tar.gz file.
@@ -186,13 +253,13 @@ def extract_tar(tar_path: Path, output_dir: Path) -> dict[str, Path]:
     Returns:
         Dictionary mapping file keys to extracted paths.
     """
+    keys_by_suffix = {"sec_ac.txt": "sec_ac", "delac_sp.txt": "delac_sp", "acindex.txt": "acindex"}
     extracted = {}
     with tarfile.open(tar_path, "r:gz") as tar:
         for member in tar.getmembers():
-            if member.name.endswith("sec_ac.txt"):
-                tar.extract(member, output_dir)
-                extracted["sec_ac"] = output_dir / member.name
-            elif member.name.endswith("delac_sp.txt"):
-                tar.extract(member, output_dir)
-                extracted["delac_sp"] = output_dir / member.name
+            for suffix, key in keys_by_suffix.items():
+                if member.name.endswith(suffix):
+                    tar.extract(member, output_dir)
+                    extracted[key] = output_dir / member.name
+                    break
     return extracted

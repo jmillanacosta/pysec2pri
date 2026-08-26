@@ -99,25 +99,12 @@ def check_release(
 def list_versions(datasource: str) -> Any:
     """List all available archive versions for a datasource.
 
-    Delegates to the datasource's downloader class ``list_versions()``
-    method, which contains all source-specific retrieval logic.
-
-    For datasources that publish versioned archives (ChEBI, HGNC, UniProt),
-    returns all available version strings sorted in ascending order.
-
-    NCBI and HMDB do not maintain versioned archives; calling this function
-    for those datasources raises :class:`ValueError`.
-
     Args:
         datasource: Datasource name (``"chebi"``, ``"hgnc"``, or
             ``"uniprot"``).
 
     Returns:
-        Sorted list of version strings. Format depends on the datasource:
-
-        - **chebi**: integer release numbers, e.g. ``["200", "201", ..., "245"]``
-        - **hgnc**: ISO dates, e.g. ``["2023-01-01", ..., "2026-04-07"]``
-        - **uniprot**: release identifiers, e.g. ``["2024_01", "2024_02", ...]``
+        Sorted list of version strings. Format depends on the datasource.
 
     Raises:
         ValueError: If the datasource is unknown or has no versioned archive.
@@ -154,12 +141,6 @@ def resolve_release_date(
     **kwargs: Any,
 ) -> datetime | None:
     """Resolve the upstream release date for a datasource/version.
-
-    This is the date used for the SSSOM ``mapping_date`` of generated mapping
-    sets. It does not download the data files (it may issue a lightweight
-    ``HEAD`` request to read a ``Last-Modified`` header). Prefer
-    :func:`download_datasource_with_release` when you are downloading anyway,
-    to avoid an extra round-trip.
 
     Args:
         datasource: Name of the datasource.
@@ -247,7 +228,7 @@ def download_datasource_with_release(
             resolved_version, release_date = release_info.version, release_info.release_date
 
     remap_keys = DOWNLOAD_KEYS.get(datasource)
-    effective_keys = remap_keys(version, keys) if remap_keys is not None else keys
+    effective_keys = remap_keys(version, keys, **kwargs) if remap_keys is not None else keys
 
     files, dl_release_date = _download_datasource_with_release(
         datasource,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources as _importlib_resources
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from mapkgsutils.parsers.base import (
     WITHDRAWN_ENTRY,
@@ -204,9 +204,7 @@ class LabelMappingSet(BaseMappingSet):
         Columns: ``primary_id``, ``primary_label``, ``previous_label``,
         ``mapping_cardinality``.
 
-        Only ``IAO:0100001`` (``"term replaced by"``) rows are included;
-        synonym rows (``oboInOwl:hasExactSynonym``) belong in
-        :meth:`to_name2synonym`, not here.
+        Only ``IAO:0100001`` (``"term replaced by"``) rows are included.
 
         Args:
             output_path: If given, the DataFrame is also written as a TSV file.
@@ -270,13 +268,7 @@ class LabelMappingSet(BaseMappingSet):
         Columns: ``primary_id``, ``name`` (primary / canonical name),
         ``synonym`` (secondary / alternative name).
 
-        Only ``oboInOwl:hasExactSynonym`` rows are included.  Rows with
-        ``IAO:0100001`` (``"term replaced by"``) are deprecation mappings and
-        belong in the ``label_sec2pri`` output, not here.
-
-        The direction follows the sec:pri structure, where the secondary
-        (synonym/alternative) term is the subject and the primary (canonical)
-        term is the object.
+        Only ``oboInOwl:hasExactSynonym`` rows are included.
 
         Args:
             output_path: If given, the DataFrame is also written as a TSV file.
@@ -366,6 +358,13 @@ class BaseParser(_MapkgBaseParser):
         if not template:
             return version
         return str(template).replace("{version}", str(version))
+
+    def create_mapping_set(self, *args: Any, **kwargs: Any) -> BaseMappingSet:
+        """Create a mapping set, tagging it with the run's taxon."""
+        species = getattr(self, "species", None)
+        if species is not None and str(species) != ALL_SPECIES:
+            kwargs.setdefault("extension_metadata", {"taxon": f"NCBITaxon:{species}"})
+        return super().create_mapping_set(*args, **kwargs)
 
 
 __all__ = [

@@ -1,7 +1,7 @@
 # An example datasource config. Copy this file to
 # src/pysec2pri/config/<source>.yaml and edit it.
 #
-# Example publishes two files per release:
+# This example assumes two files for each source release:
 #   withdrawn.tsv   example_id, replacement_id, status
 #   complete.tsv    example_id, symbol, prev_symbols, alias_symbols
 
@@ -10,13 +10,7 @@ datasource_id: "example"
 name: "Example"
 parser_class: "ExampleParser" # the class in parsers/example.py
 # The arguments that split one release into separate datasets. Each one adds a
-# slug: a segment of the IRIs that says which dataset a mapping set is, where
-# the version alone is not enough. Example publishes one dataset per release,
-# so it declares none, and its IRIs stop at the version. If it also published a
-# "3star" and a "complete" subset, `products: ["subset"]` would give:
-#   mapping_set_id  https://sec2pri.bigcat-bioinformatics.org/example/2024-01-01/3star
-#   record_id       sec2pri:example/2024-01-01/3star/<hash>
-# products: ["subset"]
+# slug: a segment of the IRIs to specify the subset of this mapping set.
 prefix: "EX"
 curie_base_url: "https://example.org/entry/"
 entity_types: ["genes"]
@@ -84,4 +78,3 @@ id_pattern: "^EX:\\d+$"
 default_output_filename: "example_sec2pri.sssom.tsv"
 source: "Example database"
 homepage: "https://example.org/"
-data_license: "https://creativecommons.org/publicdomain/zero/1.0/"

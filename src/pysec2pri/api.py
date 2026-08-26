@@ -115,12 +115,7 @@ def _auto_download(
 
 
 def _accepted(fn: Any, **candidates: Any) -> dict[str, Any]:
-    """Return the subset of *candidates* that *fn* declares and that are set.
-
-    A callable's signature is the source of truth for which options apply to
-    it, so callers can offer every option without knowing which datasource
-    takes ``subset``, ``species`` or ``entity_type``.
-    """
+    """Return the subset of *candidates* set and declared for *fn*."""
     import inspect
 
     params = inspect.signature(fn).parameters
@@ -157,7 +152,7 @@ def _resolve_parser_class(config_id: str) -> type[BaseParser]:
 
 
 def sources(kind: str | None = None) -> list[str]:
-    """Return the datasources the config files declare.
+    """Return the datasources declared in the config files.
 
     Args:
         kind: Restrict to sources declaring this mapping-set kind, e.g.

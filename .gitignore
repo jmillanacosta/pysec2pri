@@ -369,6 +369,16 @@ docs/source/api
 .pybuilder/
 target/
 
+# User output
+*.owl
+*.ttl
+*.tsv
+*.json
+
+#Exclude data files from tests
+!tests/**/*.tsv
+!docs/**/*.tsv
+
 # Jupyter Notebook
 
 # IPython
