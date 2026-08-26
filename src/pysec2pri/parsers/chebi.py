@@ -7,8 +7,6 @@ Supports two formats:
 Extracts:
 1. ID-to-ID mappings: secondary ChEBI IDs -> primary ChEBI IDs
 2. Label-to-label mappings: synonyms -> primary names
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
 
 from __future__ import annotations

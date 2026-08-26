@@ -9,9 +9,6 @@ This parser extracts:
 Each subclass reads a YAML config:
 - hmdb_metabolites.yaml
 - hmdb_proteins.yaml
-
-Uses SSSOM-compliant IdMappingSet and LabelMappingSet with cardinality
-computation.
 """
 
 from __future__ import annotations

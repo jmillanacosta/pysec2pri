@@ -3,8 +3,6 @@
 This parser extracts:
 1. ID-to-ID mappings: withdrawn/merged HGNC IDs -> current HGNC IDs
 2. Label-to-label mappings: previous/alias labels -> current labels
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
 """
 
 from __future__ import annotations

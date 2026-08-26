@@ -1,34 +1,8 @@
 """VGNC TSV file parser for secondary-to-primary identifier mappings.
 
-VGNC (Vertebrate Gene Nomenclature Committee) names genes for vertebrate
-species that lack their own nomenclature committee. Structurally it
-publishes the same two-file shape as HGNC (a withdrawn file and a complete
-gene-set file), but as a *single global* TSV per file covering every VGNC
-species at once, with a ``taxon_id`` column -- closer to how NCBI's
-``gene_info``/``gene_history`` are filtered by ``#tax_id`` than to Ensembl's
-one-URL-per-species layout.
-
-This parser extracts:
-1. ID-to-ID mappings: withdrawn/merged VGNC IDs -> current VGNC IDs. The
-   withdrawn file ``taxon_id`` column is not populated upstream, so
-   :meth:`VGNCParser.parse` always parses the *full*, unfiltered withdrawn
-   file first; an optional ``species`` then *subsets the output* by
-   resolving each mapping's primary (replacement) VGNC ID against the
-   gene-set file's ``taxon_id`` column. Withdrawn entries with no
-   resolvable replacement can't be attributed to a species and are
-   dropped when subsetting (they could belong to any one).
-2. Label-to-label mappings: previous/alias gene symbols -> current symbols,
-   from the gene-set file. Symbols are *not* unique across species (the same
-   approved symbol can legitimately name orthologous genes in different
-   species), so every label-mapping method requires an explicit ``species``
-   (NCBI taxon ID) filter -- this is what lets cardinality/ambiguity
-   detection and ``to_pri_labels()`` stay scoped to one species' namespace
-   instead of flagging cross-species homonyms as ambiguous. Passing
-   :data:`ALL_SPECIES` processes every species together instead, in which
-   case a shared symbol is really ambiguous (there's no other context
-   to tell the species apart) and gets flagged accordingly.
-
-Uses SSSOM-compliant MappingSet classes with cardinality computation.
+- ID-to-ID mappings: withdrawn/merged VGNC IDs -> current VGNC IDs.
+- Label-to-label mappings: previous/alias gene symbols -> current symbols,
+   from the gene-set file.
 """
 
 from __future__ import annotations

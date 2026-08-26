@@ -5,8 +5,6 @@ This parser extracts ID-to-ID mappings:
   filtered by whether the primary is reviewed (Swiss-Prot) or not (TrEMBL)
 - Deleted accessions -> sssom:NoTermFound (from delac_sp.txt; Swiss-Prot
   only.
-
-Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
 
 from __future__ import annotations

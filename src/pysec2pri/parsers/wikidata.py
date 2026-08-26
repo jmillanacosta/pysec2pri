@@ -2,8 +2,6 @@
 
 This parser extracts ID-to-ID mappings for chemicals, genes, and proteins
 from Wikidata via SPARQL queries.
-
-Uses SSSOM-compliant IdMappingSet with cardinality computation.
 """
 
 from __future__ import annotations

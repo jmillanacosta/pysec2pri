@@ -1,11 +1,12 @@
 """Command-line interface for pysec2pri.
 
-Nothing here names a datasource. Every command is registered from the config
-files: each source's ``mapping_sets`` gives its subcommands, and each command's
-options come from the same config -- one ``--<input>`` per declared input, one
-``--<product>`` per name in ``products``, ``--format`` from that kind's
-``formats``, and ``--consolidate`` where the kind declares it. Adding a source
-is a config plus parser change; the CLI needs no edit.
+Every command is registered from the config files:
+- subcommands: ``mapping_sets``
+- command options:
+ - ``--<input>``
+ - ``--<product>``
+ - ``--format``
+ - ``--consolidate``
 """
 
 from __future__ import annotations
@@ -135,9 +136,7 @@ _opt_test_subset = _opt(
     default=False,
     help="Use test SPARQL queries (LIMIT 10).",
 )
-# Hints for update-ids/update-labels. A value is ambiguous when it is both
-# retired and current; these say which one a row means. All optional: without
-# them an ambiguous row gets an empty cell.
+# Hints for update-ids/update-labels.
 _opt_xref = _opt(
     "--xref",
     "xref_cols",
@@ -494,9 +493,6 @@ def _opt_product_generic(name: str) -> Callable[..., Any]:
     )
 
 
-#: Dimension name -> the option factory that reads its choices and default out
-#: of the config block naming them. A dimension with no entry here still gets
-#: an option, just without choices; see :func:`_opt_product_generic`.
 _PRODUCT_OPTS: dict[str, Callable[[str], Callable[..., Any]]] = {
     "subset": _opt_subset_for,
     "species": _opt_species_for,
