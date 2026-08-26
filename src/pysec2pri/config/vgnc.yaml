@@ -129,7 +129,6 @@ mappingset:
   mapping_set_version: null
   mapping_set_title: "VGNC Secondary to Primary Mapping"
   mapping_set_description: "Mappings from withdrawn to current VGNC IDs."
-  mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
     - "orcid:0000-0002-4904-3269"
@@ -200,7 +199,6 @@ mapping:
   mapping_tool_version: null
   mapping_date: null
   publication_date: null
-  confidence: 1.0
   curation_rule: null
   curation_rule_text: null
   subject_match_field: null

@@ -166,7 +166,6 @@ mappingset:
   mapping_set_title: "NCBI Gene Secondary to Primary Mapping"
   mapping_set_description:
     "Mappings from discontinued to current NCBI Gene IDs."
-  mapping_set_confidence: 1.0
   creator_id:
     - "orcid:0000-0002-4166-7093"
     - "orcid:0000-0002-4904-3269"
@@ -237,7 +236,6 @@ mapping:
   mapping_tool_version: null
   mapping_date: null
   publication_date: null
-  confidence: 1.0
   curation_rule: null
   curation_rule_text: null
   subject_match_field: null

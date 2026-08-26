@@ -466,7 +466,7 @@ class EnsemblParser(BaseParser):
         Args:
             old_id: Bare old stable ID (the secondary).
             new_id: Bare new stable ID, or falsy for a retirement.
-            score: ``stable_id_event.score`` cell (used as confidence).
+            score: ``stable_id_event.score`` cell.
             mapping_date: Resolved per-row mapping date, if any.
             old_assembly: Build the old ID belonged to, if known.
             new_assembly: Build the new ID belongs to, if known.
@@ -492,8 +492,6 @@ class EnsemblParser(BaseParser):
             "predicate_label": m_meta.get("predicate_label"),
             "mapping_date": mapping_date,
         }
-        if score and float(score) > 0:  # type: ignore
-            fields["confidence"] = float(score)  # type: ignore
         if old_assembly and new_assembly and old_assembly != new_assembly:
             fields["comment"] = f"Assembly changed from {old_assembly} to {new_assembly}."
         return fields
